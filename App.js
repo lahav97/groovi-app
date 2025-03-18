@@ -15,7 +15,7 @@ const { width, height } = Dimensions.get('window');
 
 // Mock video data
 const VIDEOS = [
-  { id: '1', user: 'user1', description: 'Second cool video #awesome', likes: '10K', comments: '234' },
+  { id: '1', user: 'user1', description: 'First cool video #awesome', likes: '10K', comments: '234' },
   { id: '2', user: 'user2', description: 'Check out this view! #travel', likes: '5.2K', comments: '105' },
   { id: '3', user: 'user3', description: 'My new dance #dancechallenge', likes: '143K', comments: '1.2K' },
   { id: '4', user: 'user4', description: 'Recipe tutorial #cooking', likes: '8.7K', comments: '432' },
