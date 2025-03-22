@@ -1,0 +1,3 @@
+/Users/lahavrabinovitz/GrooviApp/android/app/.cxx/Debug/3z4g2p29/x86/CMakeFiles/appmodules.dir
+/Users/lahavrabinovitz/GrooviApp/android/app/.cxx/Debug/3z4g2p29/x86/CMakeFiles/edit_cache.dir
+/Users/lahavrabinovitz/GrooviApp/android/app/.cxx/Debug/3z4g2p29/x86/CMakeFiles/rebuild_cache.dir

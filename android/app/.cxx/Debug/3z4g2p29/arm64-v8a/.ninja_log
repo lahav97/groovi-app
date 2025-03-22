@@ -1,0 +1,11 @@
+# ninja log v5
+0	6	0	clean	ba5b196701bed80e
+0	1606	1742485219695454162	CMakeFiles/appmodules.dir/Users/lahavrabinovitz/GrooviApp/android/app/build/generated/autolinking/src/main/jni/autolinking.cpp.o	cdf2f1155bc14ffb
+1796	1857	1742485219951576677	/Users/lahavrabinovitz/GrooviApp/android/app/build/intermediates/cxx/Debug/3z4g2p29/obj/arm64-v8a/libappmodules.so	6c34f0e430d5b57b
+0	1796	1742485219884122794	CMakeFiles/appmodules.dir/OnLoad.cpp.o	2358db4b24ea2437
+1	30	0	/Users/lahavrabinovitz/GrooviApp/android/app/.cxx/Debug/3z4g2p29/arm64-v8a/CMakeFiles/cmake.verify_globs	5add68106e45b9f
+30	73	1742497973662431307	build.ninja	5d05acf134fc17d7
+0	8	0	/Users/lahavrabinovitz/GrooviApp/android/app/.cxx/Debug/3z4g2p29/arm64-v8a/CMakeFiles/cmake.verify_globs	5add68106e45b9f
+25	1665	1742497975330795695	CMakeFiles/appmodules.dir/Users/lahavrabinovitz/GrooviApp/android/app/build/generated/autolinking/src/main/jni/autolinking.cpp.o	cdf2f1155bc14ffb
+25	1818	1742497975486804467	CMakeFiles/appmodules.dir/OnLoad.cpp.o	2358db4b24ea2437
+1818	2006	1742497975680008279	/Users/lahavrabinovitz/GrooviApp/android/app/build/intermediates/cxx/Debug/3z4g2p29/obj/arm64-v8a/libappmodules.so	6c34f0e430d5b57b
