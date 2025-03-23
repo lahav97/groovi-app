@@ -1,0 +1,25 @@
+# ninja log v5
+6	1766	1742741462407654229	RNVectorIconsSpec_autolinked_build/CMakeFiles/react_codegen_RNVectorIconsSpec.dir/react/renderer/components/RNVectorIconsSpec/ShadowNodes.cpp.o	d85fbb354c561a22
+6	2020	1742741462661317894	RNVectorIconsSpec_autolinked_build/CMakeFiles/react_codegen_RNVectorIconsSpec.dir/react/renderer/components/RNVectorIconsSpec/RNVectorIconsSpecJSI-generated.cpp.o	a0d8ad69ff7176b3
+0	8	0	/Users/lahavrabinovitz/groovi-app/android/app/.cxx/Debug/4z264p4g/arm64-v8a/CMakeFiles/cmake.verify_globs	9becf00461e3d833
+0	6	0	clean	ba5b196701bed80e
+8	47	1742741817764985034	build.ninja	2e65660508b0b753
+6	1391	1742741462021821080	RNVectorIconsSpec_autolinked_build/CMakeFiles/react_codegen_RNVectorIconsSpec.dir/react/renderer/components/RNVectorIconsSpec/States.cpp.o	5f323d05f6420b5e
+5	2151	1742741462793516877	CMakeFiles/appmodules.dir/Users/lahavrabinovitz/groovi-app/android/app/build/generated/autolinking/src/main/jni/autolinking.cpp.o	8bbb3dda458f5efa
+2303	2434	1742741463077761969	/Users/lahavrabinovitz/groovi-app/android/app/build/intermediates/cxx/Debug/4z264p4g/obj/arm64-v8a/libappmodules.so	33c75a7b8d58640
+5	2303	1742741462945382155	CMakeFiles/appmodules.dir/OnLoad.cpp.o	e96ef3e5d8bf3191
+5	1833	1742741462477162879	RNVectorIconsSpec_autolinked_build/CMakeFiles/react_codegen_RNVectorIconsSpec.dir/react/renderer/components/RNVectorIconsSpec/EventEmitters.cpp.o	791b4928111c2d5f
+6	1981	1742741462625365711	RNVectorIconsSpec_autolinked_build/CMakeFiles/react_codegen_RNVectorIconsSpec.dir/react/renderer/components/RNVectorIconsSpec/Props.cpp.o	8d5b848035ff9431
+5	2119	1742741462759542248	RNVectorIconsSpec_autolinked_build/CMakeFiles/react_codegen_RNVectorIconsSpec.dir/RNVectorIconsSpec-generated.cpp.o	4d72c0ea9ac557bf
+5	2127	1742741462770404381	RNVectorIconsSpec_autolinked_build/CMakeFiles/react_codegen_RNVectorIconsSpec.dir/react/renderer/components/RNVectorIconsSpec/ComponentDescriptors.cpp.o	2a65e716660d6f92
+0	13	0	/Users/lahavrabinovitz/groovi-app/android/app/.cxx/Debug/4z264p4g/arm64-v8a/CMakeFiles/cmake.verify_globs	9becf00461e3d833
+6	1649	1742741819502181751	RNVectorIconsSpec_autolinked_build/CMakeFiles/react_codegen_RNVectorIconsSpec.dir/react/renderer/components/RNVectorIconsSpec/States.cpp.o	5f323d05f6420b5e
+5	1783	1742741819629272058	RNVectorIconsSpec_autolinked_build/CMakeFiles/react_codegen_RNVectorIconsSpec.dir/react/renderer/components/RNVectorIconsSpec/EventEmitters.cpp.o	791b4928111c2d5f
+5	2006	1742741819859657939	RNVectorIconsSpec_autolinked_build/CMakeFiles/react_codegen_RNVectorIconsSpec.dir/react/renderer/components/RNVectorIconsSpec/Props.cpp.o	8d5b848035ff9431
+6	2029	1742741819884191371	RNVectorIconsSpec_autolinked_build/CMakeFiles/react_codegen_RNVectorIconsSpec.dir/react/renderer/components/RNVectorIconsSpec/ShadowNodes.cpp.o	d85fbb354c561a22
+6	2078	1742741819930423987	RNVectorIconsSpec_autolinked_build/CMakeFiles/react_codegen_RNVectorIconsSpec.dir/react/renderer/components/RNVectorIconsSpec/RNVectorIconsSpecJSI-generated.cpp.o	a0d8ad69ff7176b3
+5	2099	1742741819951319723	RNVectorIconsSpec_autolinked_build/CMakeFiles/react_codegen_RNVectorIconsSpec.dir/RNVectorIconsSpec-generated.cpp.o	4d72c0ea9ac557bf
+5	2117	1742741819970798855	RNVectorIconsSpec_autolinked_build/CMakeFiles/react_codegen_RNVectorIconsSpec.dir/react/renderer/components/RNVectorIconsSpec/ComponentDescriptors.cpp.o	2a65e716660d6f92
+4	2137	1742741819991463552	CMakeFiles/appmodules.dir/Users/lahavrabinovitz/groovi-app/android/app/build/generated/autolinking/src/main/jni/autolinking.cpp.o	8bbb3dda458f5efa
+4	2307	1742741820157500457	CMakeFiles/appmodules.dir/OnLoad.cpp.o	e96ef3e5d8bf3191
+2307	2454	1742741820308973908	/Users/lahavrabinovitz/groovi-app/android/app/build/intermediates/cxx/Debug/4z264p4g/obj/arm64-v8a/libappmodules.so	33c75a7b8d58640
