@@ -1,6 +1,0 @@
-/Users/lahavrabinovitz/groovi-app/android/app/.cxx/Debug/4z264p4g/armeabi-v7a/CMakeFiles/appmodules.dir
-/Users/lahavrabinovitz/groovi-app/android/app/.cxx/Debug/4z264p4g/armeabi-v7a/CMakeFiles/edit_cache.dir
-/Users/lahavrabinovitz/groovi-app/android/app/.cxx/Debug/4z264p4g/armeabi-v7a/CMakeFiles/rebuild_cache.dir
-/Users/lahavrabinovitz/groovi-app/android/app/.cxx/Debug/4z264p4g/armeabi-v7a/RNVectorIconsSpec_autolinked_build/CMakeFiles/react_codegen_RNVectorIconsSpec.dir
-/Users/lahavrabinovitz/groovi-app/android/app/.cxx/Debug/4z264p4g/armeabi-v7a/RNVectorIconsSpec_autolinked_build/CMakeFiles/edit_cache.dir
-/Users/lahavrabinovitz/groovi-app/android/app/.cxx/Debug/4z264p4g/armeabi-v7a/RNVectorIconsSpec_autolinked_build/CMakeFiles/rebuild_cache.dir
