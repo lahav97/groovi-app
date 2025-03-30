@@ -42,6 +42,7 @@ logs/
 # macOS & Windows system files
 .DS_Store
 Thumbs.db
+*.DS_Store
 
 # Environment variables
 .env
@@ -54,3 +55,45 @@ babel.config.js
 metro.config.js
 jest.config.js
 coverage/
+*.cache
+*.tmp
+
+# React Native specific
+*.hmap
+*.xcworkspace
+*.xcuserstate
+*.xcodeproj/project.xcworkspace/
+*.xcodeproj/xcuserdata/
+*.xcodeproj/xcshareddata/
+*.xcodeproj/project.xcworkspace/
+*.xcodeproj/xcuserdata/
+*.xcodeproj/xcshareddata/
+*.xcodeproj/project.xcworkspace/
+
+# Fastlane
+fastlane/report.xml
+fastlane/Preview.html
+fastlane/screenshots/**/*.png
+
+# Watchman
+.watchmanconfig
+
+# Temporary files
+*.tmp
+*.temp
+*.swp
+*.lock
+
+# Debugger working directory
+debug/
+
+# NPM package lock
+package-lock.json
+yarn.lock
+
+# Android local properties
+android/local.properties
+
+# Firebase
+google-services.json
+firebase-debug.log

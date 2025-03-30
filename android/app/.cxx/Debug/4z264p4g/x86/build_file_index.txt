@@ -1,2 +1,0 @@
-/Users/lahavrabinovitz/groovi-app/node_modules/react-native-vector-icons/android/build/generated/source/codegen/jni/CMakeLists.txt
-/Users/lahavrabinovitz/groovi-app/node_modules/react-native/ReactAndroid/cmake-utils/default-app-setup/CMakeLists.txt

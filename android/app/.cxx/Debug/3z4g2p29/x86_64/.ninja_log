@@ -1,5 +1,0 @@
-# ninja log v5
-0	9	0	/Users/lahavrabinovitz/GrooviApp/android/app/.cxx/Debug/3z4g2p29/x86_64/CMakeFiles/cmake.verify_globs	97df2d70260ed493
-0	1342	1742497981743399764	CMakeFiles/appmodules.dir/Users/lahavrabinovitz/GrooviApp/android/app/build/generated/autolinking/src/main/jni/autolinking.cpp.o	7b44144327542397
-1	1470	1742497981869830530	CMakeFiles/appmodules.dir/OnLoad.cpp.o	83ada2aac0488fc1
-1470	1532	1742497981937573074	/Users/lahavrabinovitz/GrooviApp/android/app/build/intermediates/cxx/Debug/3z4g2p29/obj/x86_64/libappmodules.so	1917fd1c8baa244f
