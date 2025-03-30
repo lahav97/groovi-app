@@ -6,13 +6,11 @@ import {
   TouchableWithoutFeedback,
   StyleSheet,
   Dimensions,
-  Animated,
 } from 'react-native';
-import Video from 'react-native-video';
+import { Video } from 'expo-av';
 import Icon from 'react-native-vector-icons/Ionicons';
 import useLikeVideo from '../../hooks/useLikeVideo';
 import MCIcon from 'react-native-vector-icons/MaterialCommunityIcons';
-
 
 const { width, height } = Dimensions.get('window');
 
@@ -41,9 +39,9 @@ const VideoItem = ({ item, isVisible }) => {
           source={{ uri: item.videoUrl }}
           style={styles.videoPlayer}
           resizeMode="cover"
-          repeat
-          muted={false}
-          paused={!isVisible || paused}
+          shouldPlay={isVisible && !paused} // Use shouldPlay instead of paused
+          isLooping // Ensures the video loops
+          isMuted={false} // Controls whether the video is muted
         />
 
         {/* Play/Pause Icon Overlay */}
