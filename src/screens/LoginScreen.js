@@ -1,33 +1,48 @@
-import React, { useEffect } from 'react';
-import { Text, StyleSheet, TouchableOpacity, Alert } from 'react-native';
+import React from 'react';
+import { Text, StyleSheet, TouchableOpacity } from 'react-native';
 import { useNavigation } from '@react-navigation/native';
 import { LinearGradient } from 'expo-linear-gradient';
 import * as Facebook from 'expo-auth-session/providers/facebook';
+import * as Google from 'expo-auth-session/providers/google';
 import * as WebBrowser from 'expo-web-browser';
 
 WebBrowser.maybeCompleteAuthSession();
 
 const FACEBOOK_APP_ID = '1319975072564683';
+const GOOGLE_CLIENT_ID = '868883770406-s3lcc2ngca5c8dn8kn9tonpvmsgmoddf.apps.googleusercontent.com';
+const GOOGLE_ANDROID_ID = '868883770406-utf33v2dlk7enk9kmh3g9p41uused6pj.apps.googleusercontent.com';
 
 const LoginScreen = () => {
   const navigation = useNavigation();
 
-  const [request, response, promptAsync] = Facebook.useAuthRequest({
+  const [fbRequest, fbResponse, promptFbLogin] = Facebook.useAuthRequest({
     clientId: FACEBOOK_APP_ID,
     scopes: ['public_profile', 'email'],
   });
 
-  useEffect(() => {
-    if (response?.type === 'success') {
-      const { access_token } = response.params;
-      fetch(`https://graph.facebook.com/me?fields=id,name,email,picture&access_token=${access_token}`)
-        .then(res => res.json())
-        .then(user => {
-          console.log('FB user:', user);
-          Alert.alert('Welcome', `Hello ${user.name}!`);
-        });
-    }
-  }, [response]);
+  const [googleRequest, googleResponse, promptGoogleLogin] = Google.useAuthRequest({
+    expoClientId: GOOGLE_CLIENT_ID,
+    androidClientId: GOOGLE_ANDROID_ID,
+  });
+  
+  
+
+  // You can leave these hooks if you want to debug token access
+  // useEffect(() => {
+  //   if (fbResponse?.type === 'success') {
+  //     const { access_token } = fbResponse.params;
+  //     console.log('📘 Facebook access token:', access_token);
+  //     // Later: Trigger Cognito sign-in here
+  //   }
+  // }, [fbResponse]);
+
+  // useEffect(() => {
+  //   if (googleResponse?.type === 'success') {
+  //     const { authentication } = googleResponse;
+  //     console.log('🔵 Google access token:', authentication.accessToken);
+  //     // Later: Trigger Cognito sign-in here
+  //   }
+  // }, [googleResponse]);
 
   return (
     <LinearGradient
@@ -45,13 +60,23 @@ const LoginScreen = () => {
         <Text style={styles.blackText}>Sign Up</Text>
       </TouchableOpacity>
 
-      <TouchableOpacity style={[styles.buttonBase, styles.whiteButton]}>
+      <TouchableOpacity
+        style={[styles.buttonBase, styles.whiteButton]}
+        onPress={() => navigation.navigate('Phone Or Email')}
+      >
         <Text style={styles.blackText}>Use phone or email</Text>
       </TouchableOpacity>
 
       <TouchableOpacity
+        style={[styles.buttonBase, styles.googleButton]}
+        onPress={() => promptGoogleLogin()}
+      >
+        <Text style={styles.googleText}>Continue with Google</Text>
+      </TouchableOpacity>
+
+      <TouchableOpacity
         style={[styles.buttonBase, styles.fbButton]}
-        onPress={() => promptAsync()}
+        onPress={() => promptFbLogin()}
       >
         <Text style={styles.fbText}>Continue with Facebook</Text>
       </TouchableOpacity>
@@ -91,6 +116,11 @@ const styles = StyleSheet.create({
   fbButton: {
     backgroundColor: '#4267B2',
   },
+  googleButton: {
+    backgroundColor: 'white',
+    borderWidth: 1,
+    borderColor: 'white',
+  },
   blackText: {
     color: '#000',
     fontSize: 16,
@@ -99,6 +129,12 @@ const styles = StyleSheet.create({
   },
   fbText: {
     color: 'white',
+    fontSize: 16,
+    fontWeight: 'bold',
+    textAlign: 'center',
+  },
+  googleText: {
+    color: '#4285F4',
     fontSize: 16,
     fontWeight: 'bold',
     textAlign: 'center',

@@ -22,7 +22,7 @@ const FeedScreen = () => {
 
   return (
     <View style={{ flex: 1 }}>
-      <TopBar /> {/* Add your search/filter icons here */}
+      <TopBar />
       
       <FlatList
         data={VIDEOS}
@@ -39,7 +39,7 @@ const FeedScreen = () => {
         viewabilityConfig={viewConfigRef.current}
       />
 
-      <BottomNavigation /> {/* Display bottom bar */}
+      <BottomNavigation />
     </View>
   );
 };

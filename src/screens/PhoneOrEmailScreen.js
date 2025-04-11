@@ -5,10 +5,12 @@ import {
   TextInput,
   TouchableOpacity,
   StyleSheet,
+  KeyboardAvoidingView,
+  Platform,
 } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
-import { useNavigation } from '@react-navigation/native';
 import { Ionicons } from '@expo/vector-icons';
+import { useNavigation } from '@react-navigation/native';
 import PhoneInput from 'react-native-phone-number-input';
 import * as Localization from 'expo-localization';
 
@@ -18,59 +20,43 @@ const getDefaultCountryCode = () => {
   return region || locale || 'IL';
 };
 
-const defaultCountryCode = getDefaultCountryCode();
-
-const SignUpScreen = () => {
-  const navigation = useNavigation();
-
-  const [userType, setUserType] = useState('musician');
-  const [fullName, setFullName] = useState('');
-  const [username, setUsername] = useState('');
-  const [password, setPassword] = useState('');
-  const [showPassword, setShowPassword] = useState(false);
+const PhoneOrEmailScreen = () => {
   const [authMethod, setAuthMethod] = useState('phone');
-  const [email, setEmail] = useState('');
   const [phone, setPhone] = useState('');
   const [formattedPhone, setFormattedPhone] = useState('');
-  const phoneInputRef = useRef(null);
-
+  const [email, setEmail] = useState('');
   const [authError, setAuthError] = useState('');
-  const [passwordError, setPasswordError] = useState('');
-
-  const isValidEmail = (email) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
-  const isValidPassword = (value) => /[A-Z]/.test(value) && /[0-9]/.test(value);
+  const navigation = useNavigation();
+  const phoneInputRef = useRef(null);
 
   const handleContinue = () => {
     let valid = true;
 
     if (authMethod === 'phone') {
       const isValid = phoneInputRef.current?.isValidNumber(formattedPhone);
-      if (!isValid) {
-        setAuthError('Enter a valid phone number');
-        valid = false;
-      } else {
-        setPhone(formattedPhone);
-        setAuthError('');
-      }
-    } else {
-      if (!isValidEmail(email)) {
-        setAuthError('Enter a valid email address');
-        valid = false;
-      } else {
-        setAuthError('');
-      }
-    }
 
-    if (!isValidPassword(password)) {
-      setPasswordError('Password must contain at least 1 capital letter and 1 number');
-      valid = false;
+      if (!isValid) {
+        setAuthError('Please enter a valid phone number');
+        valid = false;
+      } else {
+        setAuthError('');
+        console.log('📞 Phone is valid:', formattedPhone);
+      }
     } else {
-      setPasswordError('');
+      const isValidEmail = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
+      if (!isValidEmail) {
+        setAuthError('Please enter a valid email address');
+        valid = false;
+      } else {
+        setAuthError('');
+        console.log('📧 Email is valid:', email);
+      }
     }
 
     if (!valid) return;
 
-    navigation.navigate('Instruments');
+    // Proceed with verification logic later (e.g., Cognito)
+    navigation.navigate('Feed');
   };
 
   return (
@@ -84,31 +70,8 @@ const SignUpScreen = () => {
         <Ionicons name="arrow-back" size={28} color="white" />
       </TouchableOpacity>
 
-      <View style={styles.inner}>
-        <Text style={styles.title}>Sign Up</Text>
-
-        <View style={styles.toggleContainer}>
-          <TouchableOpacity
-            style={[styles.toggleButton, userType === 'musician' && styles.toggleSelected]}
-            onPress={() => setUserType('musician')}
-          >
-            <Text style={userType === 'musician' ? styles.toggleTextSelected : styles.toggleText}>Musician</Text>
-          </TouchableOpacity>
-          <TouchableOpacity
-            style={[styles.toggleButton, userType === 'business' && styles.toggleSelected]}
-            onPress={() => setUserType('business')}
-          >
-            <Text style={userType === 'business' ? styles.toggleTextSelected : styles.toggleText}>Business</Text>
-          </TouchableOpacity>
-        </View>
-
-        <TextInput
-          placeholder="Full Name"
-          value={fullName}
-          onChangeText={setFullName}
-          style={styles.input}
-          placeholderTextColor="#666"
-        />
+      <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={styles.inner}>
+        <Text style={styles.title}>Log In</Text>
 
         <View style={styles.methodToggleContainer}>
           <TouchableOpacity
@@ -130,7 +93,7 @@ const SignUpScreen = () => {
             ref={phoneInputRef}
             defaultValue={phone}
             value={phone}
-            defaultCode={defaultCountryCode}
+            defaultCode={getDefaultCountryCode()}
             layout="first"
             onChangeText={(text) => setPhone(text)}
             onChangeFormattedText={(text) => setFormattedPhone(text)}
@@ -154,69 +117,41 @@ const SignUpScreen = () => {
 
         {authError !== '' && <Text style={styles.errorText}>{authError}</Text>}
 
-        <TextInput
-          placeholder="Username"
-          value={username}
-          onChangeText={setUsername}
-          style={styles.input}
-          placeholderTextColor="#666"
-          autoCapitalize="none"
-        />
-
-        <View style={styles.passwordContainer}>
-          <TextInput
-            placeholder="Password"
-            value={password}
-            onChangeText={setPassword}
-            style={styles.passwordInput}
-            placeholderTextColor="#666"
-            secureTextEntry={!showPassword}
-          />
-          <TouchableOpacity onPress={() => setShowPassword(!showPassword)}>
-            <Ionicons
-              name={showPassword ? 'eye-off' : 'eye'}
-              size={22}
-              color="#666"
-            />
-          </TouchableOpacity>
-        </View>
-        {passwordError !== '' && <Text style={styles.errorText}>{passwordError}</Text>}
-
         <TouchableOpacity style={styles.continueButton} onPress={handleContinue}>
           <Text style={styles.continueText}>Continue</Text>
         </TouchableOpacity>
-      </View>
+      </KeyboardAvoidingView>
     </LinearGradient>
   );
 };
 
 const styles = StyleSheet.create({
   container: { flex: 1 },
-  inner: { paddingTop: 140, paddingHorizontal: 30 },
+  inner: { paddingTop: 160, paddingHorizontal: 30 },
   backButton: { position: 'absolute', top: 60, left: 20, zIndex: 10 },
   title: {
     fontSize: 48,
     color: 'white',
     fontWeight: '900',
-    marginBottom: 30,
+    marginBottom: 40,
     alignSelf: 'center',
   },
-  toggleContainer: {
+  methodToggleContainer: {
     flexDirection: 'row',
     justifyContent: 'center',
-    marginBottom: 30,
+    marginBottom: 20,
   },
-  toggleButton: {
-    paddingVertical: 10,
-    paddingHorizontal: 20,
+  methodButton: {
+    paddingVertical: 8,
+    paddingHorizontal: 16,
+    marginHorizontal: 10,
     borderRadius: 20,
     borderWidth: 1,
     borderColor: 'white',
-    marginHorizontal: 10,
   },
-  toggleSelected: { backgroundColor: 'white' },
-  toggleText: { color: 'white', fontWeight: 'bold' },
-  toggleTextSelected: { color: '#000', fontWeight: 'bold' },
+  methodSelected: { backgroundColor: 'white' },
+  methodText: { color: 'white', fontWeight: 'bold' },
+  methodTextSelected: { color: '#000', fontWeight: 'bold' },
   input: {
     backgroundColor: 'rgba(255, 255, 255, 0.9)',
     color: '#000',
@@ -245,22 +180,6 @@ const styles = StyleSheet.create({
   },
   phoneInputText: { fontSize: 15, color: '#000' },
   codeTextStyle: { fontSize: 15, color: '#000' },
-  methodToggleContainer: {
-    flexDirection: 'row',
-    justifyContent: 'center',
-    marginBottom: 16,
-  },
-  methodButton: {
-    paddingVertical: 8,
-    paddingHorizontal: 16,
-    marginHorizontal: 10,
-    borderRadius: 20,
-    borderWidth: 1,
-    borderColor: 'white',
-  },
-  methodSelected: { backgroundColor: 'white' },
-  methodText: { color: 'white', fontWeight: 'bold' },
-  methodTextSelected: { color: '#000', fontWeight: 'bold' },
   errorText: {
     color: 'red',
     marginBottom: 12,
@@ -277,20 +196,6 @@ const styles = StyleSheet.create({
     alignSelf: 'center',
   },
   continueText: { color: '#000', fontSize: 18, fontWeight: 'bold' },
-  passwordContainer: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: 'rgba(255, 255, 255, 0.9)',
-    borderRadius: 12,
-    paddingHorizontal: 16,
-    marginBottom: 20,
-  },
-  passwordInput: {
-    flex: 1,
-    paddingVertical: 14,
-    fontSize: 16,
-    color: '#000',
-  },
 });
 
-export default SignUpScreen;
+export default PhoneOrEmailScreen;
