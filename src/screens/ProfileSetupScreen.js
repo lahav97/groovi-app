@@ -7,7 +7,7 @@ import {
   StyleSheet,
   ScrollView,
   Alert,
-  Image
+  useColorScheme,
 } from 'react-native';
 import * as Location from 'expo-location';
 import * as DocumentPicker from 'expo-document-picker';
@@ -19,6 +19,7 @@ const predefinedGenres = ['Pop', 'Rock', 'Jazz', 'Hip Hop', 'Classical', 'Electr
 
 const ProfileSetupScreen = () => {
   const navigation = useNavigation();
+  const isDark = useColorScheme() === 'dark';
 
   const [location, setLocation] = useState('');
   const [manualLocation, setManualLocation] = useState('');
@@ -66,63 +67,121 @@ const ProfileSetupScreen = () => {
   };
 
   return (
-    <View style={styles.container}>
+    <View style={[styles.container, { backgroundColor: isDark ? '#000' : '#fff' }]}>
       <View style={styles.headerRow}>
         <TouchableOpacity style={styles.backButton} onPress={() => navigation.goBack()}>
-          <Ionicons name="arrow-back" size={28} color="black" />
+          <Ionicons name="arrow-back" size={28} color={isDark ? '#fff' : '#000'} />
         </TouchableOpacity>
-        <Text style={styles.title}>Set up your profile</Text>
+        <Text style={[styles.title, { color: isDark ? '#fff' : '#000' }]}>
+          Set up your profile
+        </Text>
         <View style={{ width: 28 }} />
       </View>
 
       <ScrollView contentContainerStyle={styles.scroll}>
-        <Text style={styles.sectionTitle}>Location</Text>
+        <Text style={[styles.sectionTitle, { color: isDark ? '#fff' : '#000' }]}>Location</Text>
         {useManualLocation ? (
           <TextInput
-            style={styles.input}
+            style={[
+              styles.input,
+              {
+                backgroundColor: isDark ? '#222' : '#eee',
+                color: isDark ? '#fff' : '#000',
+              },
+            ]}
             placeholder="Enter your city"
+            placeholderTextColor={isDark ? '#aaa' : '#666'}
             value={manualLocation}
             onChangeText={setManualLocation}
           />
         ) : (
-          <Text style={styles.infoText}>{location || 'Detecting location...'}</Text>
+          <Text style={[styles.infoText, { color: isDark ? '#aaa' : '#555' }]}>
+            {location || 'Detecting location...'}
+          </Text>
         )}
 
-        <Text style={styles.sectionTitle}>Personal Info</Text>
+        <Text style={[styles.sectionTitle, { color: isDark ? '#fff' : '#000' }]}>
+          Personal Info
+        </Text>
         <TextInput
-          style={[styles.input, { height: 100 }]}
+          style={[
+            styles.input,
+            {
+              height: 100,
+              backgroundColor: isDark ? '#222' : '#eee',
+              color: isDark ? '#fff' : '#000',
+            },
+          ]}
           placeholder="Tell us about yourself..."
+          placeholderTextColor={isDark ? '#aaa' : '#666'}
           value={bio}
           onChangeText={setBio}
           multiline
         />
 
-        <Text style={styles.sectionTitle}>Upload a Video</Text>
-        <TouchableOpacity style={styles.uploadBtn} onPress={pickVideo}>
-          <Ionicons name="cloud-upload-outline" size={24} color="#555" />
-          <Text style={styles.uploadText}>Choose a video from your phone</Text>
+        <Text style={[styles.sectionTitle, { color: isDark ? '#fff' : '#000' }]}>
+          Upload a Video
+        </Text>
+        <TouchableOpacity
+          style={[
+            styles.uploadBtn,
+            { backgroundColor: isDark ? '#222' : '#eee' },
+          ]}
+          onPress={pickVideo}
+        >
+          <Ionicons name="cloud-upload-outline" size={24} color={isDark ? '#ccc' : '#555'} />
+          <Text style={{ fontSize: 15, color: isDark ? '#ccc' : '#333' }}>
+            Choose a video from your phone
+          </Text>
         </TouchableOpacity>
-        {video && <Text style={styles.infoText}>Selected: {video.name}</Text>}
+        {video && (
+          <Text style={[styles.infoText, { color: isDark ? '#aaa' : '#555' }]}>
+            Selected: {video.name}
+          </Text>
+        )}
 
-        <Text style={styles.sectionTitle}>Favorite Genres</Text>
+        <Text style={[styles.sectionTitle, { color: isDark ? '#fff' : '#000' }]}>
+          Favorite Genres
+        </Text>
         <View style={styles.genreContainer}>
           {predefinedGenres.map((genre) => (
             <TouchableOpacity
               key={genre}
-              style={[styles.genreChip, genres.includes(genre) && styles.chipSelected]}
+              style={[
+                styles.genreChip,
+                {
+                  backgroundColor: genres.includes(genre)
+                    ? '#ff6ec4'
+                    : isDark
+                    ? '#444'
+                    : '#ddd',
+                },
+              ]}
               onPress={() => toggleGenre(genre)}
             >
               <Text
-                style={[styles.genreText, genres.includes(genre) && styles.genreTextSelected]}
+                style={{
+                  fontSize: 14,
+                  color: genres.includes(genre) ? '#fff' : isDark ? '#eee' : '#333',
+                  fontWeight: genres.includes(genre) ? 'bold' : 'normal',
+                }}
               >
                 {genre}
               </Text>
             </TouchableOpacity>
           ))}
         </View>
+
         <TextInput
-          style={styles.input}
+          style={[
+            styles.input,
+            {
+              backgroundColor: isDark ? '#222' : '#eee',
+              color: isDark ? '#fff' : '#000',
+            },
+          ]}
           placeholder="Other genre (optional)"
+          placeholderTextColor={isDark ? '#aaa' : '#666'}
           value={customGenre}
           onChangeText={(text) => {
             setCustomGenre(text);
@@ -150,7 +209,7 @@ const ProfileSetupScreen = () => {
 };
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: '#fff' },
+  container: { flex: 1 },
   scroll: { padding: 20, paddingBottom: 100 },
   headerRow: {
     flexDirection: 'row',
@@ -169,26 +228,28 @@ const styles = StyleSheet.create({
     textAlign: 'center',
     flex: 1,
   },
-  sectionTitle: { fontSize: 16, fontWeight: '600', marginTop: 16, marginBottom: 8 },
+  sectionTitle: {
+    fontSize: 16,
+    fontWeight: '600',
+    marginTop: 16,
+    marginBottom: 8,
+  },
   input: {
-    backgroundColor: '#eee',
     borderRadius: 10,
     paddingHorizontal: 14,
     paddingVertical: 10,
     fontSize: 15,
     marginBottom: 12,
   },
-  infoText: { fontSize: 14, color: '#555', marginBottom: 8 },
+  infoText: { fontSize: 14, marginBottom: 8 },
   uploadBtn: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 8,
-    backgroundColor: '#eee',
     padding: 12,
     borderRadius: 10,
     marginBottom: 10,
   },
-  uploadText: { fontSize: 15, color: '#333' },
   genreContainer: {
     flexDirection: 'row',
     flexWrap: 'wrap',
@@ -199,13 +260,7 @@ const styles = StyleSheet.create({
     borderRadius: 20,
     paddingVertical: 6,
     paddingHorizontal: 14,
-    backgroundColor: '#ddd',
   },
-  chipSelected: {
-    backgroundColor: '#ff6ec4',
-  },
-  genreText: { fontSize: 14, color: '#333' },
-  genreTextSelected: { color: '#fff', fontWeight: 'bold' },
   continueButton: {
     position: 'absolute',
     bottom: 30,

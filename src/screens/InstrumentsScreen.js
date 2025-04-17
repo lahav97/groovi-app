@@ -10,6 +10,7 @@ import {
   LayoutAnimation,
   Platform,
   Animated,
+  useColorScheme,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useNavigation } from '@react-navigation/native';
@@ -33,6 +34,10 @@ const skillLevels = ['Beginner', 'Intermediate', 'Pro'];
 
 const InstrumentsScreen = () => {
   const navigation = useNavigation();
+  const isDark = useColorScheme() === 'dark';
+  const backgroundColor = isDark ? '#1c1c1e' : '#fff';
+  const textColor = isDark ? '#fff' : '#000';
+
   const [selectedInstruments, setSelectedInstruments] = useState([]);
   const [instrumentLevels, setInstrumentLevels] = useState({});
   const [searchQuery, setSearchQuery] = useState('');
@@ -80,25 +85,27 @@ const InstrumentsScreen = () => {
 
   const getCategoryStyle = (category, instruments) => {
     const isSelected = instruments.some(i => selectedInstruments.includes(i));
-    return isSelected ? [styles.categoryTitle, { color: '#e91e63' }] : styles.categoryTitle;
+    return isSelected ? [styles.categoryTitle, { color: '#e91e63' }] : [styles.categoryTitle, { color: textColor }];
   };
 
   return (
-    <View style={styles.container}>
+    <View style={[styles.container, { backgroundColor }]}>
       <View style={styles.headerRow}>
         <TouchableOpacity onPress={() => navigation.goBack()} style={styles.backIcon}>
-          <Ionicons name="arrow-back" size={28} color="black" />
+          <Ionicons name="arrow-back" size={28} color={textColor} />
         </TouchableOpacity>
-        <Text style={styles.title}>Instruments</Text>
-        <View style={{ width: 28 }} /> {/* spacer to balance layout */}
+        <Text style={[styles.title, { color: textColor }]}>Instruments</Text>
+        <View style={{ width: 28 }} />
       </View>
+
       <TextInput
         placeholder="Search"
         placeholderTextColor="#aaa"
         value={searchQuery}
         onChangeText={setSearchQuery}
-        style={styles.searchInput}
-      />
+        style={[styles.searchInput, { color: isDark ? '#000' : textColor }]}
+        />
+
       <ScrollView contentContainerStyle={styles.scrollContainer}>
         {searchQuery.length > 0 ? (
           filteredFlatList.length > 0 ? (
@@ -111,14 +118,14 @@ const InstrumentsScreen = () => {
                   <Ionicons
                     name={selectedInstruments.includes(instrument) ? 'checkbox' : 'square-outline'}
                     size={24}
-                    color={selectedInstruments.includes(instrument) ? '#e91e63' : '#333'}
+                    color={selectedInstruments.includes(instrument) ? '#e91e63' : '#999'}
                   />
-                  <Text style={styles.instrumentLabel}>{instrument}</Text>
+                  <Text style={[styles.instrumentLabel, { color: textColor }]}>{instrument}</Text>
                 </TouchableOpacity>
               </View>
             ))
           ) : (
-            <Text style={styles.notFoundText}>No instruments found.</Text>
+            <Text style={[styles.notFoundText, { color: textColor }]}>No instruments found.</Text>
           )
         ) : (
           Object.entries(instrumentCategories).map(([category, instruments]) => (
@@ -131,9 +138,10 @@ const InstrumentsScreen = () => {
                 <Ionicons
                   name={expandedCategories[category] ? 'chevron-up' : 'chevron-down'}
                   size={20}
-                  color="#333"
+                  color={textColor}
                 />
               </TouchableOpacity>
+
               {expandedCategories[category] && instruments.map((instrument) => (
                 <View key={instrument}>
                   <TouchableOpacity
@@ -143,10 +151,11 @@ const InstrumentsScreen = () => {
                     <Ionicons
                       name={selectedInstruments.includes(instrument) ? 'checkbox' : 'square-outline'}
                       size={24}
-                      color={selectedInstruments.includes(instrument) ? '#e91e63' : '#333'}
+                      color={selectedInstruments.includes(instrument) ? '#e91e63' : '#999'}
                     />
-                    <Text style={styles.instrumentLabel}>{instrument}</Text>
+                    <Text style={[styles.instrumentLabel, { color: textColor }]}>{instrument}</Text>
                   </TouchableOpacity>
+
                   {selectedInstruments.includes(instrument) && (
                     <View style={styles.levelRow}>
                       {skillLevels.map((level) => {
@@ -173,7 +182,7 @@ const InstrumentsScreen = () => {
                               </LinearGradient>
                             ) : (
                               <View style={styles.levelUnselected}>
-                                <Text style={styles.levelText}>{level}</Text>
+                                <Text style={[styles.levelText, { color: isDark ? '#1a1a1a' : '#333', fontWeight: 'bold' }]}>{level}</Text>
                               </View>
                             )}
                           </TouchableOpacity>
@@ -189,8 +198,8 @@ const InstrumentsScreen = () => {
 
         {selectedInstruments.length > 0 && (
           <View style={styles.selectedPreview}>
-            <Text style={styles.selectedTitle}>Selected Instruments:</Text>
-            <Text style={styles.selectedItem}>
+            <Text style={[styles.selectedTitle, { color: textColor }]}>Selected Instruments:</Text>
+            <Text style={[styles.selectedItem, { color: textColor }]}>
               {selectedInstruments.join(', ')}
             </Text>
           </View>
@@ -216,8 +225,8 @@ const InstrumentsScreen = () => {
 };
 
 const styles = StyleSheet.create({
-  container: { flex: 1, paddingTop: 60, paddingHorizontal: 20, backgroundColor: '#fff' },
-  title: { fontSize: 30, fontWeight: 'bold', marginBottom: 16, textAlign: 'center', alignSelf: 'center'},
+  container: { flex: 1, paddingTop: 60, paddingHorizontal: 20 },
+  title: { fontSize: 30, fontWeight: 'bold', marginBottom: 16, textAlign: 'center', alignSelf: 'center' },
   searchInput: {
     backgroundColor: '#eee',
     borderRadius: 20,
@@ -242,14 +251,7 @@ const styles = StyleSheet.create({
   backIcon: {
     width: 28,
   },
-  title: {
-    fontSize: 28,
-    fontWeight: 'bold',
-    textAlign: 'center',
-    flex: 1,
-  },
-
-  instrumentLabel: { marginLeft: 12, fontSize: 16, color: '#333' },
+  instrumentLabel: { marginLeft: 12, fontSize: 16 },
   continueButton: {
     marginTop: 2,
     marginBottom: 40,
@@ -273,6 +275,9 @@ const styles = StyleSheet.create({
     fontWeight: 'bold',
     fontSize: 16,
     letterSpacing: 1,
+    textShadowColor: 'rgba(0, 0, 0, 0.4)',
+    textShadowOffset: { width: 1, height: 1 },
+    textShadowRadius: 1,
   },
   levelRow: {
     flexDirection: 'row',
@@ -300,11 +305,15 @@ const styles = StyleSheet.create({
   },
   levelText: {
     fontSize: 13,
-    color: '#333',
   },
   levelTextSelected: {
     color: 'white',
     fontWeight: 'bold',
+    fontSize: 16,
+    letterSpacing: 1,
+    textShadowColor: 'rgba(0, 0, 0, 0.4)',
+    textShadowOffset: { width: 0, height: 1 },
+    textShadowRadius: 1,
   },
   categoryBlock: { marginBottom: 12 },
   categoryHeader: {
@@ -315,10 +324,9 @@ const styles = StyleSheet.create({
     borderBottomWidth: 1,
     borderColor: '#ddd',
   },
-  "in": { fontSize: 18, fontWeight: 'bold', color: '#444' },
+  categoryTitle: { fontSize: 18, fontWeight: 'bold' },
   notFoundText: {
     fontSize: 16,
-    color: '#999',
     fontStyle: 'italic',
     paddingTop: 10,
     paddingLeft: 8,
@@ -336,7 +344,6 @@ const styles = StyleSheet.create({
   },
   selectedItem: {
     fontSize: 15,
-    color: '#444',
   },
 });
 

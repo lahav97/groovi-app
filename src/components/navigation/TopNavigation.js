@@ -3,14 +3,17 @@ import { View, TouchableOpacity, StyleSheet } from 'react-native';
 import Icon from 'react-native-vector-icons/Ionicons';
 
 const TopNavigation = () => {
+  const ICON_SIZE = 30;
+  const ICON_COLOR = '#fff';
+
   return (
     <View style={styles.topNav}>
       <TouchableOpacity style={styles.navItem}>
-        <Icon name="options-outline" size={30} color="#fff" />
+        <Icon name="options-outline" size={ICON_SIZE} color={ICON_COLOR} />
       </TouchableOpacity>
 
       <TouchableOpacity style={styles.navItem}>
-        <Icon name="search-outline" size={30} color="#fff" />
+        <Icon name="search-outline" size={ICON_SIZE} color={ICON_COLOR} />
       </TouchableOpacity>
     </View>
   );
@@ -19,7 +22,7 @@ const TopNavigation = () => {
 const styles = StyleSheet.create({
   topNav: {
     position: 'absolute',
-    top: 40, // adjust as needed for notch safety
+    top: 10,
     left: 0,
     right: 0,
     zIndex: 10,

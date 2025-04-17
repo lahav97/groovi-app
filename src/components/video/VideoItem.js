@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import {
   View,
   Text,
@@ -6,18 +6,26 @@ import {
   TouchableWithoutFeedback,
   StyleSheet,
   Dimensions,
+  useColorScheme,
 } from 'react-native';
 import { Video } from 'expo-av';
 import Icon from 'react-native-vector-icons/Ionicons';
-import useLikeVideo from '../../hooks/useLikeVideo';
 import MCIcon from 'react-native-vector-icons/MaterialCommunityIcons';
+import useLikeVideo from '../../hooks/useLikeVideo';
+import { COLORS, LAYOUT } from '../../styles/theme';
+import { useIsFocused } from '@react-navigation/native';
 
-const { width, height } = Dimensions.get('window');
+const { width, height: SCREEN_HEIGHT } = Dimensions.get('window');
+const VIDEO_ITEM_HEIGHT = SCREEN_HEIGHT - LAYOUT.navHeight;
 
 const VideoItem = ({ item, isVisible }) => {
+  const videoRef = useRef(null);
+  const isFocused = useIsFocused();
   const { isLiked, toggleLike } = useLikeVideo(item.id);
   const [paused, setPaused] = useState(false);
   const [showPlayIcon, setShowPlayIcon] = useState(false);
+  const colorScheme = useColorScheme();
+  const theme = colorScheme === 'dark' ? COLORS.dark : COLORS.light;
 
   useEffect(() => {
     let timeout;
@@ -27,6 +35,12 @@ const VideoItem = ({ item, isVisible }) => {
     return () => clearTimeout(timeout);
   }, [showPlayIcon]);
 
+  useEffect(() => {
+    if ((!isVisible || !isFocused) && videoRef.current) {
+      videoRef.current.pauseAsync();
+    }
+  }, [isVisible, isFocused]);
+
   const handleTogglePlayback = () => {
     setPaused(!paused);
     setShowPlayIcon(true);
@@ -34,60 +48,60 @@ const VideoItem = ({ item, isVisible }) => {
 
   return (
     <TouchableWithoutFeedback onPress={handleTogglePlayback}>
-      <View style={styles.videoContainer}>
+      <View style={[styles.videoContainer, { backgroundColor: theme.background }]}>
         <Video
+          ref={videoRef}
           source={{ uri: item.videoUrl }}
           style={styles.videoPlayer}
           resizeMode="cover"
-          shouldPlay={isVisible && !paused} // Use shouldPlay instead of paused
-          isLooping // Ensures the video loops
-          isMuted={false} // Controls whether the video is muted
+          shouldPlay={isVisible && isFocused && !paused}
+          isLooping
+          isMuted={false}
         />
 
-        {/* Play/Pause Icon Overlay */}
         {showPlayIcon && (
           <View style={styles.centerOverlay}>
             <Icon
               name={paused ? 'play' : 'pause'}
               size={70}
-              color="white"
+              color={theme.text}
               style={styles.playIcon}
             />
           </View>
         )}
 
-        {/* Username & Description */}
         <View style={styles.videoInfo}>
           <View style={styles.userRow}>
-            <Icon name="person-outline" size={16} color="white" style={styles.userIcon} />
-            <Text style={styles.username}>{item.user}</Text>
+            <Icon name="person-outline" size={16} color={theme.text} style={styles.userIcon} />
+            <Text style={[styles.username, { color: theme.text }]}>{item.user}</Text>
           </View>
 
           <View style={styles.descriptionRow}>
-            <MCIcon name="music" size={16} color="white" style={styles.userIcon} />
-            <Text style={styles.description}>{item.description}</Text>
+            <MCIcon name="music" size={16} color={theme.text} style={styles.userIcon} />
+            <Text style={[styles.description, { color: theme.text }]}>{item.description}</Text>
           </View>
         </View>
 
-        {/* Interaction Buttons */}
         <View style={styles.interactionButtons}>
           <TouchableOpacity style={styles.iconWrapper} onPress={() => toggleLike(item.id)}>
             <Icon
               name={isLiked ? 'heart' : 'heart-outline'}
               size={30}
-              color={isLiked ? 'red' : 'white'}
+              color={isLiked ? 'red' : theme.text}
             />
-            <Text style={styles.iconText}>{isLiked ? item.likes + 1 : item.likes}</Text>
+            <Text style={[styles.iconText, { color: theme.text }]}>
+              {isLiked ? item.likes + 1 : item.likes}
+            </Text>
           </TouchableOpacity>
 
           <TouchableOpacity style={styles.iconWrapper}>
-            <Icon name="chatbubble-outline" size={30} color="white" />
-            <Text style={styles.iconText}>{item.comments}</Text>
+            <Icon name="chatbubble-outline" size={30} color={theme.text} />
+            <Text style={[styles.iconText, { color: theme.text }]}>{item.comments}</Text>
           </TouchableOpacity>
 
           <TouchableOpacity style={styles.iconWrapper}>
-            <Icon name="arrow-redo-outline" size={30} color="white" />
-            <Text style={styles.iconText}>Share</Text>
+            <Icon name="arrow-redo-outline" size={30} color={theme.text} />
+            <Text style={[styles.iconText, { color: theme.text }]}>Share</Text>
           </TouchableOpacity>
         </View>
       </View>
@@ -97,7 +111,7 @@ const VideoItem = ({ item, isVisible }) => {
 
 const styles = StyleSheet.create({
   videoContainer: {
-    height: height - 60,
+    height: VIDEO_ITEM_HEIGHT,
     width: width,
     justifyContent: 'center',
     alignItems: 'center',
@@ -115,8 +129,8 @@ const styles = StyleSheet.create({
   },
   videoInfo: {
     position: 'absolute',
-    bottom: 30,
-    left: 15,
+    bottom: 55,
+    left: 18,
   },
   userRow: {
     flexDirection: 'row',
@@ -126,16 +140,13 @@ const styles = StyleSheet.create({
     marginRight: 5,
   },
   username: {
-    color: 'white',
     fontWeight: 'bold',
     fontSize: 16,
   },
   description: {
-    color: 'white',
     fontSize: 14,
   },
   descriptionRow: {
-    color: 'white',
     flexDirection: 'row',
     alignItems: 'center',
     marginRight: 5,
@@ -151,7 +162,6 @@ const styles = StyleSheet.create({
     marginBottom: 15,
   },
   iconText: {
-    color: 'white',
     fontSize: 12,
     marginTop: 5,
   },

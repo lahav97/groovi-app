@@ -5,12 +5,9 @@ import { LinearGradient } from 'expo-linear-gradient';
 import * as Facebook from 'expo-auth-session/providers/facebook';
 import * as Google from 'expo-auth-session/providers/google';
 import * as WebBrowser from 'expo-web-browser';
+import { GOOGLE_CLIENT_ID, GOOGLE_ANDROID_ID, FACEBOOK_APP_ID } from '@env';
 
 WebBrowser.maybeCompleteAuthSession();
-
-const FACEBOOK_APP_ID = '1319975072564683';
-const GOOGLE_CLIENT_ID = '868883770406-s3lcc2ngca5c8dn8kn9tonpvmsgmoddf.apps.googleusercontent.com';
-const GOOGLE_ANDROID_ID = '868883770406-utf33v2dlk7enk9kmh3g9p41uused6pj.apps.googleusercontent.com';
 
 const LoginScreen = () => {
   const navigation = useNavigation();
