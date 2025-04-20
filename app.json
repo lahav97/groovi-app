@@ -5,11 +5,14 @@
     "version": "1.0.0",
     "sdkVersion": "52.0.0",
     "platforms": ["ios", "android", "web"],
+    "userInterfaceStyle": "automatic",
     "android": {
-      "newArchEnabled": true
+    "newArchEnabled": true
     },
     "ios": {
       "newArchEnabled": true
-    }
+    },
+    "plugins": ["expo-localization"],
+    "scheme": "groovi"
   }
 }

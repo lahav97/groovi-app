@@ -1,25 +1,18 @@
 import React from 'react';
-import { SafeAreaView, StatusBar, StyleSheet } from 'react-native';
-import FeedScreen from './src/screens/FeedScreen';
-import BottomNavigation from './src/components/navigation/BottomNavigation';
-import TopNavigation from './src/components/navigation/TopNavigation';
+import { SafeAreaProvider } from 'react-native-safe-area-context';
+import AppNavigator from './src/components/navigation/AppNavigator';
+//import Amplify from 'aws-amplify';
+//import awsConfig from './src/utils/awsConfig';
+import 'react-native-get-random-values';
+import 'react-native-url-polyfill/auto';
 
-const App = () => {
+
+//Amplify.configure(awsConfig);
+
+export default function App() {
   return (
-    <SafeAreaView style={styles.container}>
-      <StatusBar translucent backgroundColor="transparent" />
-      <TopNavigation />
-      <FeedScreen />
-      <BottomNavigation />
-    </SafeAreaView>
+    <SafeAreaProvider>
+      <AppNavigator />
+    </SafeAreaProvider>
   );
-};
-
-const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    backgroundColor: '#000',
-  },
-});
-
-export default App;
+}
