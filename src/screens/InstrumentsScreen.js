@@ -9,13 +9,14 @@ import {
   UIManager,
   LayoutAnimation,
   Platform,
-  Animated,
   useColorScheme,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useNavigation } from '@react-navigation/native';
 import { LinearGradient } from 'expo-linear-gradient';
 import * as Haptics from 'expo-haptics';
+import { useSignupBuilder } from '../context/SignupFlowContext';
+
 
 if (Platform.OS === 'android' && UIManager.setLayoutAnimationEnabledExperimental) {
   UIManager.setLayoutAnimationEnabledExperimental(true);
@@ -38,6 +39,7 @@ const InstrumentsScreen = () => {
   const backgroundColor = isDark ? '#1c1c1e' : '#fff';
   const textColor = isDark ? '#fff' : '#000';
 
+  const builder = useSignupBuilder();
   const [selectedInstruments, setSelectedInstruments] = useState([]);
   const [instrumentLevels, setInstrumentLevels] = useState({});
   const [searchQuery, setSearchQuery] = useState('');
@@ -73,9 +75,13 @@ const InstrumentsScreen = () => {
   };
 
   const handleContinue = () => {
-    if (selectedInstruments.length > 0) {
-      navigation.navigate('Feed');
+    if (Object.keys(instrumentLevels).length == 0) {
+      Alert.alert('Please select at least one instrument and its level.');
+      return;
     }
+
+    builder.setInstruments(instrumentLevels);
+    navigation.navigate('Profile Setup');
   };
 
   const allInstruments = Object.values(instrumentCategories).flat().filter(i => i !== 'Other');

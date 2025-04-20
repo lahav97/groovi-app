@@ -14,6 +14,8 @@ import * as DocumentPicker from 'expo-document-picker';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
 import { useNavigation } from '@react-navigation/native';
+import { useSignupBuilder } from '../context/SignupFlowContext';
+
 
 const predefinedGenres = ['Pop', 'Rock', 'Jazz', 'Hip Hop', 'Classical', 'Electronic', 'R&B'];
 
@@ -21,6 +23,7 @@ const ProfileSetupScreen = () => {
   const navigation = useNavigation();
   const isDark = useColorScheme() === 'dark';
 
+  const builder = useSignupBuilder();
   const [location, setLocation] = useState('');
   const [manualLocation, setManualLocation] = useState('');
   const [useManualLocation, setUseManualLocation] = useState(false);
@@ -63,7 +66,22 @@ const ProfileSetupScreen = () => {
 
   const handleContinue = () => {
     if (!isFormComplete()) return;
-    navigation.navigate('Feed'); // or next step
+    
+    const finalLocation = useManualLocation ? manualLocation : location;
+
+    const user = builder
+      .setLocation(finalLocation)
+      .setBio(bio)
+      .setVideos([video])
+      .setGenres(genres)
+      .build();
+
+    console.log('🚀 Final user:', user);
+
+    navigation.reset({
+      index: 0,
+      routes: [{ name: 'Feed' }],
+    });
   };
 
   return (

@@ -19,8 +19,8 @@ import { useIsFocused } from '@react-navigation/native';
 const { width } = Dimensions.get('window');
 
 const mockVideos = [
-  { id: '1', uri: 'https://www.w3schools.com/html/mov_bbb.mp4' },
-  { id: '2', uri: 'https://path.to/video2.mp4' },
+  { id: '1', uri: 'https://groovitest.s3.us-east-1.amazonaws.com/WhatsApp+Video+2025-04-05+at+20.42.42.mp4' },
+  { id: '2', uri: 'https://groovitest.s3.us-east-1.amazonaws.com/WhatsApp+Video+2025-04-05+at+20.44.38.mp4' },
   { id: '3', uri: 'https://path.to/video3.mp4' },
 ];
 

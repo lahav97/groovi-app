@@ -11,6 +11,7 @@ import { useNavigation } from '@react-navigation/native';
 import { Ionicons } from '@expo/vector-icons';
 import PhoneInput from 'react-native-phone-number-input';
 import * as Localization from 'expo-localization';
+import { useSignupBuilder } from '../context/SignupFlowContext';
 
 const getDefaultCountryCode = () => {
   const region = Localization.region;
@@ -22,7 +23,7 @@ const defaultCountryCode = getDefaultCountryCode();
 
 const SignUpScreen = () => {
   const navigation = useNavigation();
-
+  const builder = useSignupBuilder();
   const [userType, setUserType] = useState('musician');
   const [fullName, setFullName] = useState('');
   const [username, setUsername] = useState('');
@@ -33,7 +34,6 @@ const SignUpScreen = () => {
   const [phone, setPhone] = useState('');
   const [formattedPhone, setFormattedPhone] = useState('');
   const phoneInputRef = useRef(null);
-
   const [authError, setAuthError] = useState('');
   const [passwordError, setPasswordError] = useState('');
 
@@ -43,6 +43,7 @@ const SignUpScreen = () => {
   const handleContinue = () => {
     let valid = true;
 
+    // Validate phone number or email
     if (authMethod === 'phone') {
       const isValid = phoneInputRef.current?.isValidNumber(formattedPhone);
       if (!isValid) {
@@ -60,7 +61,8 @@ const SignUpScreen = () => {
         setAuthError('');
       }
     }
-
+ 
+    // Validate password
     if (!isValidPassword(password)) {
       setPasswordError('Password must contain at least 1 capital letter and 1 number');
       valid = false;
@@ -69,6 +71,18 @@ const SignUpScreen = () => {
     }
 
     if (!valid) return;
+
+    builder
+    .setFullName(fullName)
+    .setUsername(username)
+    .setUserType(userType)
+    .setPassword(password);
+
+    if (authMethod === 'phone') {
+      builder.setPhoneNumber(formattedPhone);
+    } else {
+      builder.setEmail(email);
+    }
 
     navigation.navigate('Instruments');
   };

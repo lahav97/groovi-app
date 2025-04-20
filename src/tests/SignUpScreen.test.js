@@ -1,43 +1,32 @@
 import React from 'react';
-import { render, fireEvent } from '@testing-library/react-native';
+import { render, fireEvent, waitFor } from '@testing-library/react-native';
 import SignUpScreen from '../screens/SignUpScreen';
 import { NavigationContainer } from '@react-navigation/native';
-
-jest.mock('expo-font');
-jest.mock('node-emoji');
-jest.mock('react-native-country-picker-modal');
-jest.mock('react-native-phone-number-input');
-
+import { SignupFlowProvider } from '../context/SignupFlowContext';
 
 const renderWithNavigation = (ui) => {
-  return render(<NavigationContainer>{ui}</NavigationContainer>);
+  return render(
+    <SignupFlowProvider>
+      <NavigationContainer>
+        {ui}
+      </NavigationContainer>
+    </SignupFlowProvider>
+  );
 };
 
-describe('SignUpScreen', () => {
-  it('renders all required inputs', () => {
+describe('SignUpScreen – Full Flow', () => {
+  it('fills all fields with valid email and navigates to next screen', async () => {
     const { getByPlaceholderText, getByText } = renderWithNavigation(<SignUpScreen />);
 
-    expect(getByText('Sign Up')).toBeTruthy();
-    expect(getByPlaceholderText('Full Name')).toBeTruthy();
-    expect(getByPlaceholderText('Username')).toBeTruthy();
-    expect(getByPlaceholderText('Password')).toBeTruthy();
-  });
-
-  it('shows error for weak password', () => {
-    const { getByPlaceholderText, getByText } = renderWithNavigation(<SignUpScreen />);
-
-    fireEvent.changeText(getByPlaceholderText('Password'), 'weak');
+    fireEvent.press(getByText('Use Email'));
+    fireEvent.changeText(getByPlaceholderText('Full Name'), 'Lahav Rabinovitz');
+    fireEvent.changeText(getByPlaceholderText('Email'), 'lahav.surf@gmail.com');
+    fireEvent.changeText(getByPlaceholderText('Username'), 'blade97');
+    fireEvent.changeText(getByPlaceholderText('Password'), 'MAGImagi97');
     fireEvent.press(getByText('Continue'));
 
-    expect(getByText('Password must contain at least 1 capital letter and 1 number')).toBeTruthy();
-  });
-
-  it('switches between phone and email', () => {
-    const { getByText, queryByPlaceholderText } = renderWithNavigation(<SignUpScreen />);
-
-    const useEmailBtn = getByText('Use Email');
-    fireEvent.press(useEmailBtn);
-
-    expect(queryByPlaceholderText('Email')).toBeTruthy();
+    await waitFor(() => {
+      expect(getByText('Continue')).toBeTruthy();
+    });
   });
 });

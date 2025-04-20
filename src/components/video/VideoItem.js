@@ -25,7 +25,7 @@ const VideoItem = ({ item, isVisible }) => {
   const [paused, setPaused] = useState(false);
   const [showPlayIcon, setShowPlayIcon] = useState(false);
   const colorScheme = useColorScheme();
-  const theme = colorScheme === 'dark' ? COLORS.dark : COLORS.light;
+  const COLOR = colorScheme === 'dark' ? COLORS.dark : COLORS.light;
 
   useEffect(() => {
     let timeout;
@@ -48,7 +48,7 @@ const VideoItem = ({ item, isVisible }) => {
 
   return (
     <TouchableWithoutFeedback onPress={handleTogglePlayback}>
-      <View style={[styles.videoContainer, { backgroundColor: theme.background }]}>
+      <View style={[styles.videoContainer, { backgroundColor: COLOR.background }]}>
         <Video
           ref={videoRef}
           source={{ uri: item.videoUrl }}
@@ -64,7 +64,7 @@ const VideoItem = ({ item, isVisible }) => {
             <Icon
               name={paused ? 'play' : 'pause'}
               size={70}
-              color={theme.text}
+              color={COLOR.icon}
               style={styles.playIcon}
             />
           </View>
@@ -72,13 +72,13 @@ const VideoItem = ({ item, isVisible }) => {
 
         <View style={styles.videoInfo}>
           <View style={styles.userRow}>
-            <Icon name="person-outline" size={16} color={theme.text} style={styles.userIcon} />
-            <Text style={[styles.username, { color: theme.text }]}>{item.user}</Text>
+            <Icon name="person-outline" size={16} color={COLOR.icon} style={styles.userIcon} />
+            <Text style={[styles.username, { color: COLOR.icon }]}>{item.user}</Text>
           </View>
 
           <View style={styles.descriptionRow}>
-            <MCIcon name="music" size={16} color={theme.text} style={styles.userIcon} />
-            <Text style={[styles.description, { color: theme.text }]}>{item.description}</Text>
+            <MCIcon name="music" size={16} color={COLOR.icon} style={styles.userIcon} />
+            <Text style={[styles.description, { color: COLOR.icon }]}>{item.description}</Text>
           </View>
         </View>
 
@@ -87,21 +87,21 @@ const VideoItem = ({ item, isVisible }) => {
             <Icon
               name={isLiked ? 'heart' : 'heart-outline'}
               size={30}
-              color={isLiked ? 'red' : theme.text}
+              color={isLiked ? 'red' : COLOR.icon}
             />
-            <Text style={[styles.iconText, { color: theme.text }]}>
+            <Text style={[styles.iconText, { color: COLOR.icon }]}>
               {isLiked ? item.likes + 1 : item.likes}
             </Text>
           </TouchableOpacity>
 
           <TouchableOpacity style={styles.iconWrapper}>
-            <Icon name="chatbubble-outline" size={30} color={theme.text} />
-            <Text style={[styles.iconText, { color: theme.text }]}>{item.comments}</Text>
+            <Icon name="chatbubble-outline" size={30} color={COLOR.icon} />
+            <Text style={[styles.iconText, { color: COLOR.icon }]}>{item.comments}</Text>
           </TouchableOpacity>
 
           <TouchableOpacity style={styles.iconWrapper}>
-            <Icon name="arrow-redo-outline" size={30} color={theme.text} />
-            <Text style={[styles.iconText, { color: theme.text }]}>Share</Text>
+            <Icon name="arrow-redo-outline" size={30} color={COLOR.icon} />
+            <Text style={[styles.iconText, { color: COLOR.icon }]}>Share</Text>
           </TouchableOpacity>
         </View>
       </View>

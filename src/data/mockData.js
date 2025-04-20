@@ -6,7 +6,7 @@ export const VIDEOS = [
     description: 'Guitar, Drums 🔥',
     likes: 100,
     comments: 234,
-    videoUrl: 'https://www.w3schools.com/html/mov_bbb.mp4', // Example video URL
+    videoUrl: 'https://groovitest.s3.us-east-1.amazonaws.com/WhatsApp+Video+2025-04-05+at+20.42.42.mp4', // Example video URL
   },
   {
     id: '2',
@@ -14,7 +14,7 @@ export const VIDEOS = [
     description: 'Sing 🌄',
     likes: 50,
     comments: 105,
-    videoUrl: 'https://www.w3schools.com/html/movie.mp4', // Example video URL
+    videoUrl: 'https://groovitest.s3.us-east-1.amazonaws.com/WhatsApp+Video+2025-04-05+at+20.44.38.mp4', // Example video URL
   },
   {
     id: '3',

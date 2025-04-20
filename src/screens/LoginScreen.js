@@ -21,8 +21,6 @@ const LoginScreen = () => {
     expoClientId: GOOGLE_CLIENT_ID,
     androidClientId: GOOGLE_ANDROID_ID,
   });
-  
-  
 
   // You can leave these hooks if you want to debug token access
   // useEffect(() => {
@@ -52,7 +50,7 @@ const LoginScreen = () => {
 
       <TouchableOpacity
         style={[styles.buttonBase, styles.whiteButton]}
-        onPress={() => navigation.navigate('Sign Up')}
+        onPress={() => navigation.navigate('SignupFlow')}
       >
         <Text style={styles.blackText}>Sign Up</Text>
       </TouchableOpacity>

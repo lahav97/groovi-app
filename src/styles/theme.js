@@ -2,6 +2,7 @@ export const COLORS = {
   light: {
     background: '#fff',
     text: '#000',
+    icon: '#fff',
     textSecondary: '#666',
     border: '#ddd',
   },
