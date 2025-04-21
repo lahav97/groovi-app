@@ -12,13 +12,12 @@ import { Video } from 'expo-av';
 import Icon from 'react-native-vector-icons/Ionicons';
 import MCIcon from 'react-native-vector-icons/MaterialCommunityIcons';
 import useLikeVideo from '../../hooks/useLikeVideo';
-import { COLORS, LAYOUT } from '../../styles/theme';
+import { COLORS } from '../../styles/theme';
 import { useIsFocused } from '@react-navigation/native';
 
-const { width, height: SCREEN_HEIGHT } = Dimensions.get('window');
-const VIDEO_ITEM_HEIGHT = SCREEN_HEIGHT - LAYOUT.navHeight;
+const { width } = Dimensions.get('window');
 
-const VideoItem = ({ item, isVisible }) => {
+const VideoItem = ({ item, isVisible, height }) => {
   const videoRef = useRef(null);
   const isFocused = useIsFocused();
   const { isLiked, toggleLike } = useLikeVideo(item.id);
@@ -48,7 +47,7 @@ const VideoItem = ({ item, isVisible }) => {
 
   return (
     <TouchableWithoutFeedback onPress={handleTogglePlayback}>
-      <View style={[styles.videoContainer, { backgroundColor: COLOR.background }]}>
+      <View style={[styles.videoContainer, { backgroundColor: COLOR.background, height }]}>
         <Video
           ref={videoRef}
           source={{ uri: item.videoUrl }}
@@ -111,7 +110,6 @@ const VideoItem = ({ item, isVisible }) => {
 
 const styles = StyleSheet.create({
   videoContainer: {
-    height: VIDEO_ITEM_HEIGHT,
     width: width,
     justifyContent: 'center',
     alignItems: 'center',

@@ -32,7 +32,7 @@ export const SIZES = {
 };
 
 export const LAYOUT = {
-  navHeight: 40,
+  navHeight: 60,
   headerHeight: 60,
   contentSpacing: 20,
   cornerRadius: 12,
