@@ -1,4 +1,9 @@
-import React, { useRef, useState, useEffect } from 'react';
+/**
+ * @module InstrumentsScreen
+ * Screen where users select their musical instruments and skill levels for their profile.
+ */
+
+import React, { useState } from 'react';
 import {
   View,
   Text,
@@ -33,6 +38,11 @@ const instrumentCategories = {
 
 const skillLevels = ['Beginner', 'Intermediate', 'Pro'];
 
+/**
+ * @function InstrumentsScreen
+ * @description Screen that lets users select instruments and their skill levels as part of their profile setup.
+ * @returns {JSX.Element}
+ */
 const InstrumentsScreen = () => {
   const navigation = useNavigation();
   const isDark = useColorScheme() === 'dark';
@@ -45,6 +55,11 @@ const InstrumentsScreen = () => {
   const [searchQuery, setSearchQuery] = useState('');
   const [expandedCategories, setExpandedCategories] = useState({});
 
+  /**
+   * @function toggleInstrument
+   * @description Selects or deselects an instrument from the user's profile.
+   * @param {string} instrument
+   */
   const toggleInstrument = (instrument) => {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
     LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
@@ -62,10 +77,21 @@ const InstrumentsScreen = () => {
     }
   };
 
+  /**
+   * @function handleLevelChange
+   * @description Changes the skill level of a selected instrument.
+   * @param {string} instrument
+   * @param {string} level
+   */
   const handleLevelChange = (instrument, level) => {
     setInstrumentLevels((prev) => ({ ...prev, [instrument]: level }));
   };
 
+  /**
+   * @function toggleCategory
+   * @description Expands or collapses an instrument category.
+   * @param {string} category
+   */
   const toggleCategory = (category) => {
     LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
     setExpandedCategories((prev) => ({
@@ -74,6 +100,10 @@ const InstrumentsScreen = () => {
     }));
   };
 
+  /**
+   * @function handleContinue
+   * @description Proceeds to the next screen after selecting instruments.
+   */
   const handleContinue = () => {
     if (Object.keys(instrumentLevels).length == 0) {
       Alert.alert('Please select at least one instrument and its level.');
@@ -88,7 +118,14 @@ const InstrumentsScreen = () => {
   const filteredFlatList = allInstruments.filter((instr) =>
     instr.toLowerCase().includes(searchQuery.toLowerCase())
   );
-
+  
+  /**
+   * @function getCategoryStyle
+   * @description Returns the style for a category based on whether any of its instruments are selected.
+   * @param {string} category
+   * @param {string[]} instruments
+   * @returns {Array} Styles for the category title
+   */
   const getCategoryStyle = (category, instruments) => {
     const isSelected = instruments.some(i => selectedInstruments.includes(i));
     return isSelected ? [styles.categoryTitle, { color: '#e91e63' }] : [styles.categoryTitle, { color: textColor }];

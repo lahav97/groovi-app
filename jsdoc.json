@@ -1,0 +1,19 @@
+{
+    "source": {
+      "include": ["src/screens"], 
+      "includePattern": ".js$",
+      "excludePattern": "(node_modules/|build/)"
+    },
+    "opts": {
+      "destination": "./docs",
+      "recurse": true,
+      "template": "default",
+      "encoding": "utf8"
+    },
+    "plugins": [],
+    "templates": {
+      "cleverLinks": true,
+      "monospaceLinks": true
+    }
+  }
+  

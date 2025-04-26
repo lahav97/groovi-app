@@ -1,3 +1,8 @@
+/**
+ * @module LoginScreen
+ * Displays login options including email/phone signup, Google and Facebook login.
+ */
+
 import React from 'react';
 import { Text, StyleSheet, TouchableOpacity } from 'react-native';
 import { useNavigation } from '@react-navigation/native';
@@ -6,9 +11,15 @@ import * as Facebook from 'expo-auth-session/providers/facebook';
 import * as Google from 'expo-auth-session/providers/google';
 import * as WebBrowser from 'expo-web-browser';
 import { GOOGLE_CLIENT_ID, GOOGLE_ANDROID_ID, FACEBOOK_APP_ID } from '@env';
+import { COLORS } from '../styles/theme'; 
 
 WebBrowser.maybeCompleteAuthSession();
 
+/**
+ * @function LoginScreen
+ * @description Entry screen allowing users to log in or sign up using multiple authentication methods.
+ * @returns {JSX.Element} The login screen component.
+ */
 const LoginScreen = () => {
   const navigation = useNavigation();
 
@@ -41,12 +52,12 @@ const LoginScreen = () => {
 
   return (
     <LinearGradient
-      colors={['#ff6ec4', '#ffc93c', '#1c92d2']}
+      colors={COLORS.static.primaryGradient}
       start={{ x: 0, y: 1 }}
       end={{ x: 0, y: 0 }}
       style={styles.container}
     >
-      <Text style={styles.logo}>GROOVI</Text>
+      <Text style={[styles.logo, { color: COLORS.static.text }]}>GROOVI</Text>
 
       <TouchableOpacity
         style={[styles.buttonBase, styles.whiteButton]}

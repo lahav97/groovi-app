@@ -1,3 +1,8 @@
+ /**
+ * @module ProfileSetupScreen
+ * Screen for users to complete their profile by adding location, bio, video, and favorite genres.
+ */
+
 import React, { useState, useEffect } from 'react';
 import {
   View,
@@ -10,19 +15,25 @@ import {
   useColorScheme,
 } from 'react-native';
 import * as Location from 'expo-location';
-import * as DocumentPicker from 'expo-document-picker';
+import * as ImagePicker from 'expo-image-picker';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
 import { useNavigation } from '@react-navigation/native';
 import { useSignupBuilder } from '../context/SignupFlowContext';
+import { Auth } from 'aws-amplify';
+
 
 
 const predefinedGenres = ['Pop', 'Rock', 'Jazz', 'Hip Hop', 'Classical', 'Electronic', 'R&B'];
 
+ /**
+ * @function ProfileSetupScreen
+ * @description Final step of user registration, collecting personal details and video upload.
+ * @returns {JSX.Element}
+ */
 const ProfileSetupScreen = () => {
   const navigation = useNavigation();
   const isDark = useColorScheme() === 'dark';
-
   const builder = useSignupBuilder();
   const [location, setLocation] = useState('');
   const [manualLocation, setManualLocation] = useState('');
@@ -31,6 +42,7 @@ const ProfileSetupScreen = () => {
   const [video, setVideo] = useState(null);
   const [genres, setGenres] = useState([]);
   const [customGenre, setCustomGenre] = useState('');
+  const [videoError, setVideoError] = useState('false');
 
   useEffect(() => {
     (async () => {
@@ -46,44 +58,102 @@ const ProfileSetupScreen = () => {
     })();
   }, []);
 
+   /**
+   * @function pickVideo
+   * @description Opens the device library to pick a video under 40 seconds.
+   */
   const pickVideo = async () => {
-    const result = await DocumentPicker.getDocumentAsync({ type: 'video/*' });
-    if (!result.canceled) {
+    const permission = await ImagePicker.requestMediaLibraryPermissionsAsync();
+    if (permission.status !== 'granted') {
+      Alert.alert("Permission required", "Please allow access to media library.");
+      return;
+    }
+
+    const result = await ImagePicker.launchImageLibraryAsync({
+      mediaTypes: ImagePicker.MediaTypeOptions.Videos,
+      allowsEditing: true,
+      quality: 1,
+      videoMaxDuration: 40,
+    });
+
+    if (!result.canceled && result.assets.length > 0) {
+      const SelectedVideo = result.assets[0];
+      if (SelectedVideo.duration && SelectedVideo.duration > 40000) {
+        setVideoError('Video is too long. Please choose one under 40 seconds.');
+        return;
+      }
+
       setVideo(result.assets[0]);
+      setVideoError('');
     }
   };
 
+   /**
+   * @function toggleGenre
+   * @description Toggles a music genre in the selected genres list.
+   * @param {string} genre - The genre to toggle.
+   */
   const toggleGenre = (genre) => {
     setGenres((prev) =>
       prev.includes(genre) ? prev.filter((g) => g !== genre) : [...prev, genre]
     );
   };
 
+   /**
+   * @function isFormComplete
+   * @description Checks if all required profile fields are filled.
+   * @returns {boolean}
+   */
   const isFormComplete = () => {
     const hasLocation = useManualLocation ? manualLocation : location;
     return hasLocation && bio.trim() && video && genres.length > 0;
   };
 
-  const handleContinue = () => {
+   /**
+   * @function handleContinue
+   * @description Builds the final user profile object and navigates to Feed screen.
+   */
+  const handleContinue = async () => {
     if (!isFormComplete()) return;
-    
+  
     const finalLocation = useManualLocation ? manualLocation : location;
-
+  
     const user = builder
       .setLocation(finalLocation)
       .setBio(bio)
       .setVideos([video])
       .setGenres(genres)
       .build();
-
+  
     console.log('🚀 Final user:', user);
-
-    navigation.reset({
-      index: 0,
-      routes: [{ name: 'Feed' }],
-    });
+  
+    try {
+      // TODO: Here you will later send the data to your backend API
+      /*
+      await axios.post('https://your-backend-url.com/api/profile', {
+        username: user.username,
+        location: user.location,
+        bio: user.bio,
+        genres: user.genres,
+        videoUri: user.videos[0]?.uri,
+      });
+      */
+  
+      console.log('✅ Successfully sent profile data to backend (TODO)');
+  
+      navigation.reset({
+        index: 0,
+        routes: [{ name: 'Feed' }],
+      });
+  
+    } catch (error) {
+      console.error('Error sending profile data:', error);
+      Alert.alert('Error', error.message || 'Failed to complete profile.');
+      return;
+    }
   };
-
+  
+  
   return (
     <View style={[styles.container, { backgroundColor: isDark ? '#000' : '#fff' }]}>
       <View style={styles.headerRow}>
@@ -157,6 +227,9 @@ const ProfileSetupScreen = () => {
             Selected: {video.name}
           </Text>
         )}
+        {videoError !== '' && (
+          <Text style={{ color: 'red', fontSize: 13, marginTop: 4}}>{videoError}</Text>
+        )}
 
         <Text style={[styles.sectionTitle, { color: isDark ? '#fff' : '#000' }]}>
           Favorite Genres
@@ -216,7 +289,7 @@ const ProfileSetupScreen = () => {
         <LinearGradient
           colors={['#ff6ec4', '#ffc93c', '#1c92d2']}
           start={{ x: 0, y: 1 }}
-          end={{ x: 1, y: 0 }}
+          end={{ x: 0, y: 0 }}
           style={styles.gradient}
         >
           <Text style={styles.continueText}>CONTINUE</Text>

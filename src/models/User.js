@@ -2,6 +2,7 @@ class User {
     constructor({
       fullName,
       username,
+      gender,
       email,
       phoneNumber,
       password,
@@ -20,6 +21,7 @@ class User {
       this.userType = userType;
       this.instruments = instruments;
       this.genres = genres;
+      this.gender = gender;
       this.location = location;
       this.videos = videos;
       this.bio = bio;
