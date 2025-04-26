@@ -1,3 +1,8 @@
+/**
+ * @module SignUpScreen
+ * Handles user sign up with full name, username, phone or email, password, and gender.
+ */
+
 import React, { useState, useRef } from 'react';
 import {
   View,
@@ -14,6 +19,11 @@ import * as Localization from 'expo-localization';
 import { useSignupBuilder } from '../context/SignupFlowContext';
 import { Auth } from 'aws-amplify';
 
+/**
+ * @function getDefaultCountryCode
+ * @description Retrieves the default country code from the device locale settings.
+ * @returns {string} Country code (e.g., 'IL', 'US')
+ */
 const getDefaultCountryCode = () => {
   const region = Localization.region;
   const locale = Localization.locale.split('-')[1];
@@ -22,6 +32,11 @@ const getDefaultCountryCode = () => {
 
 const defaultCountryCode = getDefaultCountryCode();
 
+/**
+ * @function SignUpScreen
+ * @description Allows users to input their signup information and create an account.
+ * @returns {JSX.Element}
+ */
 const SignUpScreen = () => {
   const navigation = useNavigation();
   const builder = useSignupBuilder();
@@ -39,9 +54,25 @@ const SignUpScreen = () => {
   const [authError, setAuthError] = useState('');
   const [passwordError, setPasswordError] = useState('');
 
+    /**
+   * @function isValidEmail
+   * @description Validates an email string.
+   * @param {string} email - Email to validate.
+   * @returns {boolean}
+   */
   const isValidEmail = (email) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
+  /**
+   * @function isValidPassword
+   * @description Validates if a password has at least one capital letter and one number.
+   * @param {string} value - Password to validate.
+   * @returns {boolean}
+   */
   const isValidPassword = (value) => /[A-Z]/.test(value) && /[0-9]/.test(value);
 
+   /**
+   * @function handleContinue
+   * @description Validates signup form and attempts to create a user account.
+   */
   const handleContinue = async () => {
     let valid = true;
 

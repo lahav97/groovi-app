@@ -1,3 +1,8 @@
+/**
+ * @module ProfileScreen
+ * Displays the user's profile with videos, user information, and interactive elements.
+ */
+
 import React, { useState, useRef, useEffect } from 'react';
 import {
   View,
@@ -27,6 +32,11 @@ const mockVideos = [
   { id: '6', uri: 'https://groovitest.s3.amazonaws.com/Yaniv_Zamir_6.mp4' },
 ];
 
+/**
+ * @function ProfileScreen
+ * @description Displays the user's profile page including video swiper, info, and bottom navigation.
+ * @returns {JSX.Element}
+ */
 const ProfileScreen = () => {
   const [pausedStatus, setPausedStatus] = useState({});
   const [currentIndex, setCurrentIndex] = useState(0);
@@ -36,6 +46,11 @@ const ProfileScreen = () => {
   const videoRefs = useRef({});
   const swiperRef = useRef(null);
 
+  /**
+   * @function togglePause
+   * @description Pauses or resumes a video when the user taps on it.
+   * @param {string} id - Video ID
+   */
   const togglePause = (id) => {
     setPausedStatus(prev => ({ ...prev, [id]: !prev[id] }));
   };
@@ -51,6 +66,11 @@ const ProfileScreen = () => {
     }
   }, [isFocused]);
 
+  /**
+   * @function onIndexChanged
+   * @description Handles changes in the video swiper index.
+   * @param {number} index - The index of the newly active video.
+   */
   const onIndexChanged = (index) => {
     setCurrentIndex(index);
     
@@ -92,24 +112,29 @@ const ProfileScreen = () => {
             dotStyle={styles.dot}
             activeDotStyle={styles.activeDot}
             paginationStyle={styles.pagination}
+            removeClippedSubviews={false}
+            scrollEnabled={true}
+            showsButtons={false}
+            width={width}
           >
             {mockVideos.map((video) => (
-              <TouchableOpacity 
-                key={video.id} 
-                style={styles.videoWrapper} 
-                onPress={() => togglePause(video.id)}
-                activeOpacity={0.9}
-              >
-                <Video
-                  ref={(ref) => { videoRefs.current[video.id] = ref; }}
-                  source={{ uri: video.uri }}
-                  style={styles.video}
-                  resizeMode="cover"
-                  isLooping
-                  shouldPlay={!pausedStatus[video.id] && isFocused && currentIndex === mockVideos.findIndex(v => v.id === video.id)}
-                  isMuted={false}
-                />
-              </TouchableOpacity>
+              <View key={video.id} style={styles.slide}>
+                <TouchableOpacity 
+                  style={styles.videoWrapper} 
+                  onPress={() => togglePause(video.id)}
+                  activeOpacity={0.9}
+                >
+                  <Video
+                    ref={(ref) => { videoRefs.current[video.id] = ref; }}
+                    source={{ uri: video.uri }}
+                    style={styles.video}
+                    resizeMode="cover"
+                    isLooping
+                    shouldPlay={!pausedStatus[video.id] && isFocused && currentIndex === mockVideos.findIndex(v => v.id === video.id)}
+                    isMuted={false}
+                  />
+                </TouchableOpacity>
+              </View>
             ))}
           </Swiper>
         </View>
@@ -177,16 +202,26 @@ const styles = StyleSheet.create({
   videoContainer: {
     height: 400,
     marginBottom: 20,
+    width: width - 40,
+    overflow: 'hidden',
   },
   swiper: {
     height: 400,
   },
-  videoWrapper: {
-    width: '100%',
+  slide: {
+    width: width - 40,
     height: 400,
+    justifyContent: 'center',
+    alignItems: 'center',
+    overflow: 'hidden',
+  },
+  videoWrapper: {
+    width: width - 40,
+    height: 400,
+    overflow: 'hidden',
   },
   video: {
-    width: width - 40, // Account for horizontal padding
+    width: width - 40,
     height: 400,
     borderRadius: SIZES.radius,
     backgroundColor: '#111',

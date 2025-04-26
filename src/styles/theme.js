@@ -12,6 +12,13 @@ export const COLORS = {
     textSecondary: '#aaa',
     border: '#333',
   },
+  static: {
+    background: '#ff6ec4',
+    text: '#ffffff',
+    buttonBackground: '#ffffff',
+    buttonText: '#000000',
+    primaryGradient: ['#ff6ec4', '#ffc93c', '#1c92d2'],
+  },
   accent: 'red',
   icon: '#888',
   primaryGradient: ['#ff6ec4', '#ffc93c', '#1c92d2'],

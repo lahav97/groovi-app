@@ -1,3 +1,8 @@
+ /**
+ * @module ProfileSetupScreen
+ * Screen for users to complete their profile by adding location, bio, video, and favorite genres.
+ */
+
 import React, { useState, useEffect } from 'react';
 import {
   View,
@@ -21,10 +26,14 @@ import { Auth } from 'aws-amplify';
 
 const predefinedGenres = ['Pop', 'Rock', 'Jazz', 'Hip Hop', 'Classical', 'Electronic', 'R&B'];
 
+ /**
+ * @function ProfileSetupScreen
+ * @description Final step of user registration, collecting personal details and video upload.
+ * @returns {JSX.Element}
+ */
 const ProfileSetupScreen = () => {
   const navigation = useNavigation();
   const isDark = useColorScheme() === 'dark';
-
   const builder = useSignupBuilder();
   const [location, setLocation] = useState('');
   const [manualLocation, setManualLocation] = useState('');
@@ -49,6 +58,10 @@ const ProfileSetupScreen = () => {
     })();
   }, []);
 
+   /**
+   * @function pickVideo
+   * @description Opens the device library to pick a video under 40 seconds.
+   */
   const pickVideo = async () => {
     const permission = await ImagePicker.requestMediaLibraryPermissionsAsync();
     if (permission.status !== 'granted') {
@@ -75,17 +88,31 @@ const ProfileSetupScreen = () => {
     }
   };
 
+   /**
+   * @function toggleGenre
+   * @description Toggles a music genre in the selected genres list.
+   * @param {string} genre - The genre to toggle.
+   */
   const toggleGenre = (genre) => {
     setGenres((prev) =>
       prev.includes(genre) ? prev.filter((g) => g !== genre) : [...prev, genre]
     );
   };
 
+   /**
+   * @function isFormComplete
+   * @description Checks if all required profile fields are filled.
+   * @returns {boolean}
+   */
   const isFormComplete = () => {
     const hasLocation = useManualLocation ? manualLocation : location;
     return hasLocation && bio.trim() && video && genres.length > 0;
   };
 
+   /**
+   * @function handleContinue
+   * @description Builds the final user profile object and navigates to Feed screen.
+   */
   const handleContinue = async () => {
     if (!isFormComplete()) return;
   

@@ -1,3 +1,8 @@
+/**
+ * @module PhoneOrEmailScreen
+ * Screen where users choose to log in using phone number or email address.
+ */
+
 import React, { useState, useRef } from 'react';
 import {
   View,
@@ -14,12 +19,22 @@ import { useNavigation } from '@react-navigation/native';
 import PhoneInput from 'react-native-phone-number-input';
 import * as Localization from 'expo-localization';
 
+/**
+ * @function getDefaultCountryCode
+ * @description Retrieves the device's default country code for phone input.
+ * @returns {string} Country code (e.g., 'IL', 'US')
+ */
 const getDefaultCountryCode = () => {
   const region = Localization.region;
   const locale = Localization.locale.split('-')[1];
   return region || locale || 'IL';
 };
 
+/**
+ * @function PhoneOrEmailScreen
+ * @description Allows users to log in either via phone number or email address.
+ * @returns {JSX.Element} The PhoneOrEmailScreen component.
+ */
 const PhoneOrEmailScreen = () => {
   const [authMethod, setAuthMethod] = useState('phone');
   const [phone, setPhone] = useState('');
@@ -29,6 +44,10 @@ const PhoneOrEmailScreen = () => {
   const navigation = useNavigation();
   const phoneInputRef = useRef(null);
 
+    /**
+   * @function handleContinue
+   * @description Validates user input and navigates to the next screen if valid.
+   */
   const handleContinue = () => {
     let valid = true;
 

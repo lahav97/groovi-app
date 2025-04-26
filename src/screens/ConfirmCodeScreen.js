@@ -1,9 +1,18 @@
+/**
+ * @module ConfirmCodeScreen
+ * Screen for confirming a user's signup by entering a verification code.
+ */
 import React, { useState } from 'react';
 import { View, Text, TextInput, TouchableOpacity, StyleSheet, Alert } from 'react-native';
 import { Auth } from 'aws-amplify';
 import { useNavigation, useRoute } from '@react-navigation/native';
 import { LinearGradient } from 'expo-linear-gradient';
 
+/**
+ * @function ConfirmCodeScreen
+ * @description Handles the verification code input and confirmation process for signing up a user.
+ * @returns {JSX.Element} The confirmation screen component.
+ */
 const ConfirmCodeScreen = () => {
   const navigation = useNavigation();
   const route = useRoute();
@@ -11,6 +20,10 @@ const ConfirmCodeScreen = () => {
 
   const [code, setCode] = useState('');
 
+    /**
+   * @function handleConfirm
+   * @description Confirms the sign-up using the verification code and signs the user in.
+   */
   const handleConfirm = async () => {
     try {
       await Auth.confirmSignUp(username, code);
@@ -24,6 +37,10 @@ const ConfirmCodeScreen = () => {
     }
   };
 
+  /**
+   * @function handleResendCode
+   * @description Resends the confirmation code to the user.
+   */
   const handleResendCode = async () => {
     try {
       await Auth.resendSignUp(username);

@@ -15,7 +15,7 @@ import useLikeVideo from '../../hooks/useLikeVideo';
 import { COLORS } from '../../styles/theme';
 import { useIsFocused } from '@react-navigation/native';
 
-const { width } = Dimensions.get('window');
+const { width, height: SCREEN_HEIGHT } = Dimensions.get('window');
 
 const VideoItem = ({ item, isVisible, height }) => {
   const videoRef = useRef(null);
@@ -116,8 +116,8 @@ const styles = StyleSheet.create({
     position: 'relative',
   },
   videoPlayer: {
-    width: '100%',
-    height: '100%',
+    width: width,
+    height: SCREEN_HEIGHT,
   },
   centerOverlay: {
     position: 'absolute',
