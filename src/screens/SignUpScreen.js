@@ -12,6 +12,7 @@ import { Ionicons } from '@expo/vector-icons';
 import PhoneInput from 'react-native-phone-number-input';
 import * as Localization from 'expo-localization';
 import { useSignupBuilder } from '../context/SignupFlowContext';
+import { Auth } from 'aws-amplify';
 
 const getDefaultCountryCode = () => {
   const region = Localization.region;
@@ -33,6 +34,7 @@ const SignUpScreen = () => {
   const [email, setEmail] = useState('');
   const [phone, setPhone] = useState('');
   const [formattedPhone, setFormattedPhone] = useState('');
+  const [gender, setGender] = useState('male');
   const phoneInputRef = useRef(null);
   const [authError, setAuthError] = useState('');
   const [passwordError, setPasswordError] = useState('');
@@ -40,10 +42,9 @@ const SignUpScreen = () => {
   const isValidEmail = (email) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
   const isValidPassword = (value) => /[A-Z]/.test(value) && /[0-9]/.test(value);
 
-  const handleContinue = () => {
+  const handleContinue = async () => {
     let valid = true;
 
-    // Validate phone number or email
     if (authMethod === 'phone') {
       const isValid = phoneInputRef.current?.isValidNumber(formattedPhone);
       if (!isValid) {
@@ -61,8 +62,7 @@ const SignUpScreen = () => {
         setAuthError('');
       }
     }
- 
-    // Validate password
+
     if (!isValidPassword(password)) {
       setPasswordError('Password must contain at least 1 capital letter and 1 number');
       valid = false;
@@ -73,10 +73,11 @@ const SignUpScreen = () => {
     if (!valid) return;
 
     builder
-    .setFullName(fullName)
-    .setUsername(username)
-    .setUserType(userType)
-    .setPassword(password);
+      .setFullName(fullName)
+      .setUsername(username)
+      .setUserType(userType)
+      .setPassword(password)
+      .setGender(gender);
 
     if (authMethod === 'phone') {
       builder.setPhoneNumber(formattedPhone);
@@ -84,7 +85,30 @@ const SignUpScreen = () => {
       builder.setEmail(email);
     }
 
-    navigation.navigate('Instruments');
+    const user = builder.build();
+
+    try {
+      await Auth.signUp({
+        username: user.username,
+        password: user.password,
+        attributes: {
+          email: user.email || undefined,
+          phone_number: user.phoneNumber || undefined,
+          name: user.fullName,
+          gender: user.gender,
+          locale: Localization.locale || 'en-US',
+          picture: 'https://your-default-profile-url.com/default.png',
+        },
+      });
+  
+      console.log('✅ SignUp successful');
+      navigation.navigate('Confirm Code', { username: user.username, password: user.password });
+    }
+
+    catch (error) {
+      console.error('❌ Error signing up:', error);
+      Alert.alert('Error', error.message || 'Failed to sign up.');
+    }
   };
 
   return (
@@ -146,8 +170,8 @@ const SignUpScreen = () => {
             value={phone}
             defaultCode={defaultCountryCode}
             layout="first"
-            onChangeText={(text) => setPhone(text)}
-            onChangeFormattedText={(text) => setFormattedPhone(text)}
+            onChangeText={setPhone}
+            onChangeFormattedText={setFormattedPhone}
             containerStyle={styles.phoneInput}
             textContainerStyle={styles.phoneTextContainer}
             textInputStyle={styles.phoneInputText}
@@ -187,14 +211,28 @@ const SignUpScreen = () => {
             secureTextEntry={!showPassword}
           />
           <TouchableOpacity onPress={() => setShowPassword(!showPassword)}>
-            <Ionicons
-              name={showPassword ? 'eye-off' : 'eye'}
-              size={22}
-              color="#666"
-            />
+            <Ionicons name={showPassword ? 'eye-off' : 'eye'} size={22} color="#666" />
           </TouchableOpacity>
         </View>
         {passwordError !== '' && <Text style={styles.errorText}>{passwordError}</Text>}
+
+        <View style={styles.genderContainer}>
+          <Text style={styles.genderLabel}>Gender</Text>
+          <View style={styles.genderOptions}>
+            <TouchableOpacity
+              style={[styles.genderOption, gender === 'male' && styles.genderSelected]}
+              onPress={() => setGender('male')}
+            >
+              <Text style={gender === 'male' ? styles.genderTextSelected : styles.genderText}>Male</Text>
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={[styles.genderOption, gender === 'female' && styles.genderSelected]}
+              onPress={() => setGender('female')}
+            >
+              <Text style={gender === 'female' ? styles.genderTextSelected : styles.genderText}>Female</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
 
         <TouchableOpacity style={styles.continueButton} onPress={handleContinue}>
           <Text style={styles.continueText}>Continue</Text>
@@ -305,6 +343,33 @@ const styles = StyleSheet.create({
     fontSize: 16,
     color: '#000',
   },
+  genderContainer: {
+    marginTop: 7,
+    marginBottom: 20,
+  },
+  genderLabel: {
+    fontSize: 16,
+    fontWeight: 'bold',
+    marginBottom: 8,
+    color: 'white',
+    alignSelf: 'center',
+  },
+  genderOptions: {
+    flexDirection: 'row',
+    justifyContent: 'center',
+    gap: 10,
+  },
+  genderOption: {
+    paddingVertical: 10,
+    paddingHorizontal: 20,
+    borderRadius: 20,
+    borderWidth: 1,
+    borderColor: 'white',
+    marginHorizontal: 5,
+  },
+  genderSelected: { backgroundColor: 'white' },
+  genderText: { color: 'white', fontWeight: 'bold' },
+  genderTextSelected: { color: '#000', fontWeight: 'bold' },
 });
 
 export default SignUpScreen;

@@ -7,10 +7,10 @@
     "platforms": ["ios", "android", "web"],
     "userInterfaceStyle": "automatic",
     "android": {
-    "newArchEnabled": true
+      "newArchEnabled": false
     },
     "ios": {
-      "newArchEnabled": true
+      "newArchEnabled": false
     },
     "plugins": ["expo-localization"],
     "scheme": "groovi"
