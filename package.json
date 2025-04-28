@@ -11,6 +11,7 @@
     "doc": "jsdoc -c jsdoc.json"
   },
   "dependencies": {
+    "@aws-amplify/api-graphql": "^4.7.14",
     "@aws-amplify/auth": "^6.12.3",
     "@aws-amplify/core": "^6.11.3",
     "@aws-amplify/datastore": "^5.0.81",
@@ -27,10 +28,12 @@
     "expo-av": "^15.0.2",
     "expo-document-picker": "~13.0.3",
     "expo-haptics": "~14.0.1",
+    "expo-image-manipulator": "~13.0.6",
     "expo-image-picker": "~16.0.6",
     "expo-linear-gradient": "~14.0.2",
     "expo-localization": "~16.0.1",
     "expo-location": "~18.0.10",
+    "expo-video-thumbnails": "~9.0.3",
     "expo-web-browser": "~14.0.2",
     "libphonenumber-js": "^1.12.6",
     "react": "^18.3.1",
@@ -46,6 +49,7 @@
     "react-native-swiper": "^1.6.0",
     "react-native-url-polyfill": "^2.0.0",
     "react-native-vector-icons": "^10.2.0",
+    "react-native-video-trimmer": "^0.4.0",
     "uuid": "^11.1.0"
   },
   "devDependencies": {

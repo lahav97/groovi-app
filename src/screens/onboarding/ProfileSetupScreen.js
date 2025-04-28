@@ -1,4 +1,4 @@
- /**
+/**
  * @module ProfileSetupScreen
  * Screen for users to complete their profile by adding location, bio, video, and favorite genres.
  */
@@ -13,20 +13,22 @@ import {
   ScrollView,
   Alert,
   useColorScheme,
+  Image,
 } from 'react-native';
 import * as Location from 'expo-location';
 import * as ImagePicker from 'expo-image-picker';
+import * as VideoThumbnails from 'expo-video-thumbnails';
+import * as FileSystem from 'expo-file-system';
+import { manipulateAsync } from 'expo-image-manipulator';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
 import { useNavigation } from '@react-navigation/native';
 import { useSignupBuilder } from '../context/SignupFlowContext';
-import { Auth } from 'aws-amplify';
-
-
+import axios from 'axios';
 
 const predefinedGenres = ['Pop', 'Rock', 'Jazz', 'Hip Hop', 'Classical', 'Electronic', 'R&B'];
 
- /**
+/**
  * @function ProfileSetupScreen
  * @description Final step of user registration, collecting personal details and video upload.
  * @returns {JSX.Element}
@@ -42,8 +44,10 @@ const ProfileSetupScreen = () => {
   const [video, setVideo] = useState(null);
   const [genres, setGenres] = useState([]);
   const [customGenre, setCustomGenre] = useState('');
-  const [videoError, setVideoError] = useState('false');
-
+  const [videoError, setVideoError] = useState('');
+  const [profilePictureUri, setProfilePictureUri] = useState(null);
+  const [videoThumbnail, setVideoThumbnail] = useState(null);
+  
   useEffect(() => {
     (async () => {
       const { status } = await Location.requestForegroundPermissionsAsync();
@@ -58,37 +62,107 @@ const ProfileSetupScreen = () => {
     })();
   }, []);
 
-   /**
-   * @function pickVideo
-   * @description Opens the device library to pick a video under 40 seconds.
+  /**
+   * @function pickProfilePicture
+   * @description Opens the device library to pick and crop a profile picture
    */
-  const pickVideo = async () => {
-    const permission = await ImagePicker.requestMediaLibraryPermissionsAsync();
-    if (permission.status !== 'granted') {
-      Alert.alert("Permission required", "Please allow access to media library.");
-      return;
-    }
-
-    const result = await ImagePicker.launchImageLibraryAsync({
-      mediaTypes: ImagePicker.MediaTypeOptions.Videos,
-      allowsEditing: true,
-      quality: 1,
-      videoMaxDuration: 40,
-    });
-
-    if (!result.canceled && result.assets.length > 0) {
-      const SelectedVideo = result.assets[0];
-      if (SelectedVideo.duration && SelectedVideo.duration > 40000) {
-        setVideoError('Video is too long. Please choose one under 40 seconds.');
+  const pickProfilePicture = async () => {
+    try {
+      const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
+      if (status !== 'granted') {
+        Alert.alert("Permission required", "Please allow access to media library.");
         return;
       }
-
-      setVideo(result.assets[0]);
-      setVideoError('');
+      
+      const result = await ImagePicker.launchImageLibraryAsync({
+        mediaTypes: ImagePicker.MediaTypeOptions.Images,
+        allowsEditing: true,
+        aspect: [1, 1],
+        quality: 0.8,
+      });
+      
+      if (!result.canceled && result.assets[0]) {
+        const pickUri = result.assets[0].uri;
+        
+        // Compress image if needed
+        const fileInfo = await FileSystem.getInfoAsync(pickUri);
+        if (fileInfo.size > 1024 * 1024) { // If larger than 1MB, compress
+          const manipResult = await manipulateAsync(
+            pickUri,
+            [{ resize: { width: 500, height: 500 } }],
+            { compress: 0.7, format: 'jpeg' }
+          );
+          setProfilePictureUri(manipResult.uri);
+        } else {
+          setProfilePictureUri(pickUri);
+        }
+      }
+    } catch (error) {
+      console.error('Error picking profile picture:', error);
+      Alert.alert('Error', 'Failed to pick profile picture.');
     }
   };
 
-   /**
+  /**
+   * @function pickVideo
+   * @description Opens the device library to pick and crop a video, then validates the result
+   */
+  const pickVideo = async () => {
+    try {
+      const permission = await ImagePicker.requestMediaLibraryPermissionsAsync();
+      if (permission.status !== 'granted') {
+        Alert.alert("Permission required", "Please allow access to media library.");
+        return;
+      }
+
+      // First allow any video selection
+      const result = await ImagePicker.launchImageLibraryAsync({
+        mediaTypes: ImagePicker.MediaTypeOptions.Videos,
+        allowsEditing: true, // Enable cropping
+        quality: 1,
+        // No duration limit here - we'll validate after cropping
+      });
+
+      if (!result.canceled && result.assets.length > 0) {
+        const selectedVideo = result.assets[0];
+        
+        // Validate the cropped video
+        // Check duration (30 seconds = 30000 milliseconds)
+        if (selectedVideo.duration && selectedVideo.duration > 30000) {
+          setVideoError('Video is too long. Please edit to under 30 seconds.');
+          return;
+        }
+        
+        // Check file size
+        const fileInfo = await FileSystem.getInfoAsync(selectedVideo.uri);
+        const fileSizeInMB = fileInfo.size / (1024 * 1024);
+        
+        if (fileSizeInMB > 4) {
+          setVideoError('Video exceeds 4MB size limit. Please use smaller video or crop further.');
+          return;
+        }
+        
+        // Generate thumbnail for preview
+        try {
+          const { uri } = await VideoThumbnails.getThumbnailAsync(
+            selectedVideo.uri,
+            { time: 0 }
+          );
+          setVideoThumbnail(uri);
+        } catch (e) {
+          console.log("Thumbnail generation error:", e);
+        }
+        
+        setVideo(selectedVideo);
+        setVideoError('');
+      }
+    } catch (error) {
+      console.error('Error picking video:', error);
+      setVideoError('Failed to process video. Please try again.');
+    }
+  };
+
+  /**
    * @function toggleGenre
    * @description Toggles a music genre in the selected genres list.
    * @param {string} genre - The genre to toggle.
@@ -99,17 +173,17 @@ const ProfileSetupScreen = () => {
     );
   };
 
-   /**
+  /**
    * @function isFormComplete
    * @description Checks if all required profile fields are filled.
    * @returns {boolean}
    */
   const isFormComplete = () => {
     const hasLocation = useManualLocation ? manualLocation : location;
-    return hasLocation && bio.trim() && video && genres.length > 0;
+    return hasLocation && bio.trim() && video && genres.length > 0 && profilePictureUri;
   };
 
-   /**
+  /**
    * @function handleContinue
    * @description Builds the final user profile object and navigates to Feed screen.
    */
@@ -123,24 +197,27 @@ const ProfileSetupScreen = () => {
       .setBio(bio)
       .setVideos([video])
       .setGenres(genres)
+      .setProfilePicture(profilePictureUri)
       .build();
   
     console.log('🚀 Final user:', user);
   
     try {
-      // TODO: Here you will later send the data to your backend API
-      /*
-      await axios.post('https://your-backend-url.com/api/profile', {
+     const res = await axios.post('https://3y15fvynx4.execute-api.us-east-1.amazonaws.com/default/build_profile', {
         username: user.username,
-        location: user.location,
+        fullName: user.fullName,
+        email: user.email,
+        phoneNumber: user.phoneNumber,
+        userType: user.userType,
         bio: user.bio,
+        location: user.location,
         genres: user.genres,
-        videoUri: user.videos[0]?.uri,
+        instruments: user.instruments,
+        link: user.link,
+        profilePicture: user.profilePicture,
       });
-      */
-  
-      console.log('✅ Successfully sent profile data to backend (TODO)');
-  
+
+      console.log('Lambda response:', res.data);  
       navigation.reset({
         index: 0,
         routes: [{ name: 'Feed' }],
@@ -152,7 +229,6 @@ const ProfileSetupScreen = () => {
       return;
     }
   };
-  
   
   return (
     <View style={[styles.container, { backgroundColor: isDark ? '#000' : '#fff' }]}>
@@ -189,6 +265,37 @@ const ProfileSetupScreen = () => {
         )}
 
         <Text style={[styles.sectionTitle, { color: isDark ? '#fff' : '#000' }]}>
+          Profile Picture
+        </Text>
+        
+        <TouchableOpacity 
+          onPress={pickProfilePicture} 
+          style={[styles.profilePictureContainer, {
+            backgroundColor: isDark ? '#222' : '#eee',
+          }]}
+        >
+          {profilePictureUri ? (
+            <Image 
+              source={{ uri: profilePictureUri }} 
+              style={styles.profilePicture} 
+              resizeMode="cover"
+            />
+          ) : (
+            <View style={styles.profilePicturePlaceholder}>
+              <Ionicons name="person-circle-outline" size={60} color={isDark ? '#ccc' : '#555'} />
+              <Text style={{ 
+                fontSize: 15, 
+                color: isDark ? '#ccc' : '#333', 
+                marginTop: 10,
+                textAlign: 'center'
+              }}>
+                Upload Profile Picture
+              </Text>
+            </View>
+          )}
+        </TouchableOpacity>
+
+        <Text style={[styles.sectionTitle, { color: isDark ? '#fff' : '#000' }]}>
           Personal Info
         </Text>
         <TextInput
@@ -219,14 +326,22 @@ const ProfileSetupScreen = () => {
         >
           <Ionicons name="cloud-upload-outline" size={24} color={isDark ? '#ccc' : '#555'} />
           <Text style={{ fontSize: 15, color: isDark ? '#ccc' : '#333' }}>
-            Choose a video from your phone
+            Choose a video (max 30s, 4MB after editing)
           </Text>
         </TouchableOpacity>
-        {video && (
-          <Text style={[styles.infoText, { color: isDark ? '#aaa' : '#555' }]}>
-            Selected: {video.name}
-          </Text>
+        
+        {videoThumbnail && (
+          <View style={styles.videoPreviewContainer}>
+            <Image 
+              source={{ uri: videoThumbnail }} 
+              style={styles.videoThumbnail} 
+            />
+            <Text style={[styles.infoText, { color: isDark ? '#aaa' : '#555' }]}>
+              Video selected
+            </Text>
+          </View>
         )}
+        
         {videoError !== '' && (
           <Text style={{ color: 'red', fontSize: 13, marginTop: 4}}>{videoError}</Text>
         )}
@@ -276,13 +391,16 @@ const ProfileSetupScreen = () => {
           value={customGenre}
           onChangeText={(text) => {
             setCustomGenre(text);
-            if (text.trim() && !genres.includes(text)) setGenres([...genres, text]);
+            if (text.trim() && !genres.includes(text) && text.trim() !== '') {
+              setGenres([...genres, text.trim()]);
+              setCustomGenre('');
+            }
           }}
         />
       </ScrollView>
 
       <TouchableOpacity
-        disabled={!isFormComplete()}
+          disabled={!isFormComplete()}
         onPress={handleContinue}
         style={[styles.continueButton, !isFormComplete() && styles.disabledButton]}
       >
@@ -373,6 +491,37 @@ const styles = StyleSheet.create({
     fontWeight: 'bold',
     fontSize: 16,
     letterSpacing: 1,
+  },
+  profilePictureContainer: {
+    width: 120,
+    height: 120,
+    borderRadius: 60,
+    alignSelf: 'center',
+    marginVertical: 15,
+    overflow: 'hidden',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  profilePicture: {
+    width: '100%',
+    height: '100%',
+  },
+  profilePicturePlaceholder: {
+    alignItems: 'center',
+    justifyContent: 'center',
+    width: '100%',
+    padding: 5,
+  },
+  videoPreviewContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginVertical: 8,
+  },
+  videoThumbnail: {
+    width: 60,
+    height: 60,
+    borderRadius: 5,
+    marginRight: 10,
   },
 });
 

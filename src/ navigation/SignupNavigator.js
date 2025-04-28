@@ -1,10 +1,10 @@
 import React from 'react';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
-import { SignupFlowProvider } from '../../context/SignupFlowContext';
+import { SignupFlowProvider } from '../context/SignupFlowContext';
 import SignUpScreen from '../../screens/SignUpScreen';
-import InstrumentsScreen from '../../screens/InstrumentsScreen';
+import InstrumentsScreen from '../screens/onboarding/InstrumentsScreen';
 import ProfileSetupScreen from '../../screens/ProfileSetupScreen';
-import ConfirmScreen from '../../screens/ConfirmCodeScreen';
+import ConfirmScreen from '../screens/authentication/ConfirmCodeScreen';
 
 const Stack = createNativeStackNavigator();
 

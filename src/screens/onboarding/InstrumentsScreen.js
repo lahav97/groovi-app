@@ -20,7 +20,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { useNavigation } from '@react-navigation/native';
 import { LinearGradient } from 'expo-linear-gradient';
 import * as Haptics from 'expo-haptics';
-import { useSignupBuilder } from '../context/SignupFlowContext';
+import { useSignupBuilder } from '../../context/SignupFlowContext';
 
 
 if (Platform.OS === 'android' && UIManager.setLayoutAnimationEnabledExperimental) {
@@ -43,7 +43,7 @@ const skillLevels = ['Beginner', 'Intermediate', 'Pro'];
  * @description Screen that lets users select instruments and their skill levels as part of their profile setup.
  * @returns {JSX.Element}
  */
-const InstrumentsScreen = () => {
+  const InstrumentsScreen = () => {
   const navigation = useNavigation();
   const isDark = useColorScheme() === 'dark';
   const backgroundColor = isDark ? '#1c1c1e' : '#fff';
@@ -110,7 +110,7 @@ const InstrumentsScreen = () => {
       return;
     }
 
-    builder.setInstruments(instrumentLevels);
+    builder.setInstruments(JSON.stringify(instrumentLevels));
     navigation.navigate('Profile Setup');
   };
 

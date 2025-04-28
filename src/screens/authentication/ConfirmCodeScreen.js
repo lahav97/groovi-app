@@ -20,7 +20,7 @@ const ConfirmCodeScreen = () => {
 
   const [code, setCode] = useState('');
 
-    /**
+  /**
    * @function handleConfirm
    * @description Confirms the sign-up using the verification code and signs the user in.
    */
