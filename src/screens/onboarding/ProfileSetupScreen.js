@@ -19,12 +19,14 @@ import * as Location from 'expo-location';
 import * as ImagePicker from 'expo-image-picker';
 import * as VideoThumbnails from 'expo-video-thumbnails';
 import * as FileSystem from 'expo-file-system';
+import * as MediaLibrary from 'expo-media-library';
 import { manipulateAsync } from 'expo-image-manipulator';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
 import { useNavigation } from '@react-navigation/native';
-import { useSignupBuilder } from '../context/SignupFlowContext';
+import { useSignupBuilder } from '../../context/SignupFlowContext';
 import axios from 'axios';
+import Button from '../../components/common/Button';
 
 const predefinedGenres = ['Pop', 'Rock', 'Jazz', 'Hip Hop', 'Classical', 'Electronic', 'R&B'];
 
@@ -41,12 +43,12 @@ const ProfileSetupScreen = () => {
   const [manualLocation, setManualLocation] = useState('');
   const [useManualLocation, setUseManualLocation] = useState(false);
   const [bio, setBio] = useState('');
-  const [video, setVideo] = useState(null);
+  const [videos, setVideos] = useState([]);
   const [genres, setGenres] = useState([]);
   const [customGenre, setCustomGenre] = useState('');
   const [videoError, setVideoError] = useState('');
   const [profilePictureUri, setProfilePictureUri] = useState(null);
-  const [videoThumbnail, setVideoThumbnail] = useState(null);
+  const [videoThumbnails, setVideoThumbnails] = useState([]);
   
   useEffect(() => {
     (async () => {
@@ -104,63 +106,97 @@ const ProfileSetupScreen = () => {
   };
 
   /**
+   * @function uploadVideoToLambda
+   * @description Uploads a video to AWS Lambda function.
+   * @param {Object} video - The video object containing uri and other metadata.
+   * @param {number} index - The index of the video in the videos array.
+   * @param {string} username - The username of the user.
+   */
+  const uploadVideoToLambda = async (video, index, username) => {
+    try {
+      const fileExtension = video.fileName?.split('.').pop() || 'mp4';
+      const customFileName = `${username}_${index + 1}.${fileExtension}`;
+  
+      const xhr = new XMLHttpRequest();
+      xhr.open('PUT', 'https://y2evj55918.execute-api.us-east-1.amazonaws.com/default/upload_file');
+      xhr.setRequestHeader('file-name', customFileName);
+      xhr.setRequestHeader('Content-Type', video.mimeType || 'video/mp4');
+  
+      const blob = await fetch(video.uri).then(res => res.blob());
+      xhr.send(blob);
+    } catch (err) {
+      console.error('Video upload failed:', err);
+    }
+  };
+
+  /**
    * @function pickVideo
    * @description Opens the device library to pick and crop a video, then validates the result
    */
   const pickVideo = async () => {
+    const { status } = await MediaLibrary.requestPermissionsAsync();
+    if (status !== 'granted') {
+      Alert.alert('Permission required', 'Please allow access to media library.');
+      return;
+    }
+  
     try {
-      const permission = await ImagePicker.requestMediaLibraryPermissionsAsync();
-      if (permission.status !== 'granted') {
-        Alert.alert("Permission required", "Please allow access to media library.");
+      const album = await MediaLibrary.getAlbumAsync('Videos');
+      const media = await MediaLibrary.getAssetsAsync({
+        album: album || undefined,
+        mediaType: 'video',
+        first: 50,
+        sortBy: [['creationTime', false]],
+      });
+  
+      const allVideos = media.assets;
+  
+      const selectable = allVideos.filter((video) => {
+        return !videos.find((v) => v.id === video.id);
+      });
+  
+      if (selectable.length === 0) {
+        Alert.alert('No new videos', 'You’ve already selected all available videos.');
         return;
       }
-
-      // First allow any video selection
-      const result = await ImagePicker.launchImageLibraryAsync({
-        mediaTypes: ImagePicker.MediaTypeOptions.Videos,
-        allowsEditing: true, // Enable cropping
-        quality: 1,
-        // No duration limit here - we'll validate after cropping
-      });
-
-      if (!result.canceled && result.assets.length > 0) {
-        const selectedVideo = result.assets[0];
-        
-        // Validate the cropped video
-        // Check duration (30 seconds = 30000 milliseconds)
-        if (selectedVideo.duration && selectedVideo.duration > 30000) {
-          setVideoError('Video is too long. Please edit to under 30 seconds.');
-          return;
-        }
-        
-        // Check file size
-        const fileInfo = await FileSystem.getInfoAsync(selectedVideo.uri);
-        const fileSizeInMB = fileInfo.size / (1024 * 1024);
-        
-        if (fileSizeInMB > 4) {
-          setVideoError('Video exceeds 4MB size limit. Please use smaller video or crop further.');
-          return;
-        }
-        
-        // Generate thumbnail for preview
-        try {
-          const { uri } = await VideoThumbnails.getThumbnailAsync(
-            selectedVideo.uri,
-            { time: 0 }
-          );
-          setVideoThumbnail(uri);
-        } catch (e) {
-          console.log("Thumbnail generation error:", e);
-        }
-        
-        setVideo(selectedVideo);
-        setVideoError('');
+  
+      const selected = [];
+  
+      for (const video of selectable) {
+        if (selected.length >= 7 - videos.length) break;
+  
+        const assetInfo = await MediaLibrary.getAssetInfoAsync(video.id);
+        const sizeMB = assetInfo.size / (1024 * 1024);
+        const durationMs = assetInfo.duration * 1000;
+  
+        if (sizeMB > 4 || durationMs > 30000) continue;
+  
+        const { uri: thumbUri } = await VideoThumbnails.getThumbnailAsync(
+          assetInfo.uri,
+          { time: 0 }
+        );
+  
+        selected.push({
+          ...assetInfo,
+          thumbnail: thumbUri,
+        });
       }
-    } catch (error) {
-      console.error('Error picking video:', error);
-      setVideoError('Failed to process video. Please try again.');
+  
+      if (selected.length === 0) {
+        Alert.alert('No valid videos', 'None of the videos met the 30s / 4MB requirement.');
+        return;
+      }
+  
+      setVideos((prev) => [...prev, ...selected]);
+      setVideoThumbnails((prev) => [...prev, ...selected.map((v) => v.thumbnail)]);
+      setVideoError('');
+    } catch (err) {
+      console.error('Failed to pick from media library:', err);
+      setVideoError('Could not access videos.');
     }
   };
+  
+  
 
   /**
    * @function toggleGenre
@@ -175,12 +211,12 @@ const ProfileSetupScreen = () => {
 
   /**
    * @function isFormComplete
-   * @description Checks if all required profile fields are filled.
+   * @description Checks if all ad profile fields are filled.
    * @returns {boolean}
    */
   const isFormComplete = () => {
     const hasLocation = useManualLocation ? manualLocation : location;
-    return hasLocation && bio.trim() && video && genres.length > 0 && profilePictureUri;
+    return hasLocation && bio.trim() && videos && genres.length > 0 && profilePictureUri;
   };
 
   /**
@@ -195,39 +231,60 @@ const ProfileSetupScreen = () => {
     const user = builder
       .setLocation(finalLocation)
       .setBio(bio)
-      .setVideos([video])
+      .setVideos(videos)
       .setGenres(genres)
       .setProfilePicture(profilePictureUri)
       .build();
+    
+    console.log('Final user object:', user);
+    // ✅ Step 0: Check if user already exists
+    const requestBody = {
+      username: user.username,
+      fullName: user.fullName,
+      email: user.email,
+      password: user.password,
+      phoneNumber: user.phoneNumber || '',
+      userType: user.userType,
+      bio: user.bio,
+      location: user.location,
+      genres: user.genres,
+      gender: user.gender,
+      instruments: user.instruments,
+    };
   
-    console.log('🚀 Final user:', user);
+    if (user.link) {
+      requestBody.link = user.link;
+    }
   
+    // ✅ Step 1: Send user info (no video) to creation Lambda
     try {
-     const res = await axios.post('https://3y15fvynx4.execute-api.us-east-1.amazonaws.com/default/build_profile', {
-        username: user.username,
-        fullName: user.fullName,
-        email: user.email,
-        phoneNumber: user.phoneNumber,
-        userType: user.userType,
-        bio: user.bio,
-        location: user.location,
-        genres: user.genres,
-        instruments: user.instruments,
-        link: user.link,
-        profilePicture: user.profilePicture,
-      });
-
-      console.log('Lambda response:', res.data);  
-      navigation.reset({
-        index: 0,
-        routes: [{ name: 'Feed' }],
-      });
-  
+      const res = await axios.post(
+        'https://3y15fvynx4.execute-api.us-east-1.amazonaws.com/default/layertest',
+        requestBody
+      );
+      console.log('Lambda response:', res.data);
     } catch (error) {
-      console.error('Error sending profile data:', error);
-      Alert.alert('Error', error.message || 'Failed to complete profile.');
+      console.error('Error creating user:', error);
+      Alert.alert('Error', 'Failed to create user profile.');
       return;
     }
+  
+    // ✅ Step 2: Upload each video individually to upload Lambda
+    for (let i = 0; i < videos.length; i++) {
+      try {
+        await uploadVideoToLambda(videos[i], i, user.username);
+      } catch (error) {
+        console.error('Video upload failed:', error);
+        Alert.alert('Upload failed', `Could not upload video ${i + 1}`);
+        return;
+      }
+    }
+  
+    // ✅ Step 3: Navigate to feed
+    navigation.reset({
+      index: 0,
+      routes: [{ name: 'Feed' }],
+    });
   };
   
   return (
@@ -315,36 +372,54 @@ const ProfileSetupScreen = () => {
         />
 
         <Text style={[styles.sectionTitle, { color: isDark ? '#fff' : '#000' }]}>
-          Upload a Video
+          Upload Videos
         </Text>
+
         <TouchableOpacity
-          style={[
-            styles.uploadBtn,
-            { backgroundColor: isDark ? '#222' : '#eee' },
-          ]}
+          style={[styles.uploadBtn, { backgroundColor: isDark ? '#222' : '#eee' }]}
           onPress={pickVideo}
         >
           <Ionicons name="cloud-upload-outline" size={24} color={isDark ? '#ccc' : '#555'} />
           <Text style={{ fontSize: 15, color: isDark ? '#ccc' : '#333' }}>
-            Choose a video (max 30s, 4MB after editing)
+            Choose videos (max 30s / 4MB)
           </Text>
         </TouchableOpacity>
-        
-        {videoThumbnail && (
-          <View style={styles.videoPreviewContainer}>
-            <Image 
-              source={{ uri: videoThumbnail }} 
-              style={styles.videoThumbnail} 
-            />
-            <Text style={[styles.infoText, { color: isDark ? '#aaa' : '#555' }]}>
-              Video selected
-            </Text>
+
+        {videoThumbnails.length > 0 && (
+          <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 12, marginVertical: 10 }}>
+            {videoThumbnails.map((thumb, i) => (
+              <View key={i} style={{ position: 'relative' }}>
+                <Image
+                  source={{ uri: thumb }}
+                  style={{
+                    width: 70,
+                    height: 100,
+                    borderRadius: 10,
+                    backgroundColor: '#000',
+                  }}
+                />
+                <View
+                  style={{
+                    position: 'absolute',
+                    top: 6,
+                    left: 6,
+                    backgroundColor: 'rgba(0,0,0,0.7)',
+                    borderRadius: 12,
+                    paddingHorizontal: 6,
+                    paddingVertical: 2,
+                  }}
+                >
+                  <Text style={{ color: '#fff', fontSize: 12 }}>{i + 1}</Text>
+                </View>
+              </View>
+            ))}
           </View>
         )}
-        
+
         {videoError !== '' && (
-          <Text style={{ color: 'red', fontSize: 13, marginTop: 4}}>{videoError}</Text>
+          <Text style={{ color: 'red', fontSize: 13, marginTop: 4 }}>{videoError}</Text>
         )}
+
 
         <Text style={[styles.sectionTitle, { color: isDark ? '#fff' : '#000' }]}>
           Favorite Genres
@@ -399,8 +474,8 @@ const ProfileSetupScreen = () => {
         />
       </ScrollView>
 
-      <TouchableOpacity
-          disabled={!isFormComplete()}
+      <Button
+        disabled={!isFormComplete()}
         onPress={handleContinue}
         style={[styles.continueButton, !isFormComplete() && styles.disabledButton]}
       >
@@ -410,9 +485,9 @@ const ProfileSetupScreen = () => {
           end={{ x: 0, y: 0 }}
           style={styles.gradient}
         >
-          <Text style={styles.continueText}>CONTINUE</Text>
+          <Text style={styles.continueText}>Finish</Text>
         </LinearGradient>
-      </TouchableOpacity>
+      </Button>
     </View>
   );
 };

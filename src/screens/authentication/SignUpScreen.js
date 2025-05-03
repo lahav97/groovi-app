@@ -16,8 +16,9 @@ import { useNavigation } from '@react-navigation/native';
 import { Ionicons } from '@expo/vector-icons';
 import PhoneInput from 'react-native-phone-number-input';
 import * as Localization from 'expo-localization';
-import { useSignupBuilder } from '../context/SignupFlowContext';
+import { useSignupBuilder } from '../../context/SignupFlowContext';
 import { Auth } from 'aws-amplify';
+import Button from '../../components/common/Button';
 
 /**
  * @function getDefaultCountryCode
@@ -123,8 +124,8 @@ const SignUpScreen = () => {
         username: user.username,
         password: user.password,
         attributes: {
-          email: user.email || undefined,
-          phone_number: user.phoneNumber || undefined,
+          email: user.email || null,
+          phone_number: null,
           name: user.fullName,
           gender: user.gender,
           locale: Localization.locale || 'en-US',
@@ -265,9 +266,12 @@ const SignUpScreen = () => {
           </View>
         </View>
 
-        <TouchableOpacity style={styles.continueButton} onPress={handleContinue}>
-          <Text style={styles.continueText}>Continue</Text>
-        </TouchableOpacity>
+        <Button
+          title="Continue"
+          onPress={handleContinue}
+          style={styles.continueButton}
+          textStyle={styles.continueText}
+        />
       </View>
     </LinearGradient>
   );

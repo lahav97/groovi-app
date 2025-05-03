@@ -2,6 +2,8 @@ import React from 'react';
 import { View, TouchableOpacity, StyleSheet } from 'react-native';
 import Icon from 'react-native-vector-icons/Ionicons';
 import { useNavigation } from '@react-navigation/native';
+import Button from '../common/Button';
+
 
 const BottomNavigation = () => {
   const navigation = useNavigation();

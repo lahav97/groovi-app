@@ -21,6 +21,7 @@ import { useNavigation } from '@react-navigation/native';
 import { LinearGradient } from 'expo-linear-gradient';
 import * as Haptics from 'expo-haptics';
 import { useSignupBuilder } from '../../context/SignupFlowContext';
+import Button from '../../components/common/Button';
 
 
 if (Platform.OS === 'android' && UIManager.setLayoutAnimationEnabledExperimental) {
@@ -110,7 +111,7 @@ const skillLevels = ['Beginner', 'Intermediate', 'Pro'];
       return;
     }
 
-    builder.setInstruments(JSON.stringify(instrumentLevels));
+    builder.setInstruments(instrumentLevels);
     navigation.navigate('Profile Setup');
   };
 
@@ -248,7 +249,7 @@ const skillLevels = ['Beginner', 'Intermediate', 'Pro'];
           </View>
         )}
 
-        <TouchableOpacity
+        <Button
           disabled={selectedInstruments.length === 0}
           onPress={handleContinue}
           style={[styles.continueButton, selectedInstruments.length === 0 && styles.disabledButton]}
@@ -261,7 +262,7 @@ const skillLevels = ['Beginner', 'Intermediate', 'Pro'];
           >
             <Text style={styles.continueText}>CONTINUE</Text>
           </LinearGradient>
-        </TouchableOpacity>
+        </Button>
       </ScrollView>
     </View>
   );

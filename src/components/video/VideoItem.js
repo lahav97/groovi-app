@@ -2,18 +2,19 @@ import React, { useState, useEffect, useRef } from 'react';
 import {
   View,
   Text,
-  TouchableOpacity,
   TouchableWithoutFeedback,
+  TouchableOpacity,
   StyleSheet,
   Dimensions,
   useColorScheme,
 } from 'react-native';
 import { Video } from 'expo-av';
 import Icon from 'react-native-vector-icons/Ionicons';
-import MCIcon from 'react-native-vector-icons/MaterialCommunityIcons';
 import useLikeVideo from '../../hooks/useLikeVideo';
 import { COLORS } from '../../styles/theme';
 import { useIsFocused } from '@react-navigation/native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import VideoInfo from './VideoInfo';
 
 const { width, height: SCREEN_HEIGHT } = Dimensions.get('window');
 
@@ -25,6 +26,7 @@ const VideoItem = ({ item, isVisible, height }) => {
   const [showPlayIcon, setShowPlayIcon] = useState(false);
   const colorScheme = useColorScheme();
   const COLOR = colorScheme === 'dark' ? COLORS.dark : COLORS.light;
+  const insets = useSafeAreaInsets();
 
   useEffect(() => {
     let timeout;
@@ -69,17 +71,7 @@ const VideoItem = ({ item, isVisible, height }) => {
           </View>
         )}
 
-        <View style={styles.videoInfo}>
-          <View style={styles.userRow}>
-            <Icon name="person-outline" size={16} color={COLOR.icon} style={styles.userIcon} />
-            <Text style={[styles.username, { color: COLOR.icon }]}>{item.user}</Text>
-          </View>
-
-          <View style={styles.descriptionRow}>
-            <MCIcon name="music" size={16} color={COLOR.icon} style={styles.userIcon} />
-            <Text style={[styles.description, { color: COLOR.icon }]}>{item.description}</Text>
-          </View>
-        </View>
+        <VideoInfo video={{ username: item.user, description: item.description }} />
 
         <View style={styles.interactionButtons}>
           <TouchableOpacity style={styles.iconWrapper} onPress={() => toggleLike(item.id)}>
@@ -127,32 +119,13 @@ const styles = StyleSheet.create({
   },
   videoInfo: {
     position: 'absolute',
-    bottom: 55,
+    bottom: 40,
     left: 18,
-  },
-  userRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-  },
-  userIcon: {
-    marginRight: 5,
-  },
-  username: {
-    fontWeight: 'bold',
-    fontSize: 16,
-  },
-  description: {
-    fontSize: 14,
-  },
-  descriptionRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    marginRight: 5,
   },
   interactionButtons: {
     position: 'absolute',
     right: 20,
-    bottom: 120,
+    bottom: 180,
     alignItems: 'center',
   },
   iconWrapper: {

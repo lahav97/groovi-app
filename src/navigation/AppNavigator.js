@@ -1,13 +1,12 @@
 import React from 'react';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import { NavigationContainer } from '@react-navigation/native';
-import LoginScreen from '../../screens/LoginScreen';
-import FeedScreen from '../../screens/FeedScreen';
+import LoginScreen from '../screens/authentication/LoginScreen';
+import FeedScreen from '../screens/main/FeedScreen';
 import PhoneOrEmailScreen from '../screens/authentication/PhoneOrEmailScreen';
-import ProfileScreen from '../../screens/ProfileScreen';
+import ProfileScreen from '../screens/main/ProfileScreen';
 import SignupNavigator from './SignupNavigator';
-import VideoTrimScreen from '../../screens/VideoTrimScreen';
-
+import FilterScreen from '../screens/main/FilterScreen';
 const Stack = createNativeStackNavigator();
 
 const AppNavigator = () => {
@@ -19,7 +18,7 @@ const AppNavigator = () => {
         <Stack.Screen name="SignupFlow" component={SignupNavigator} />
         <Stack.Screen name="Feed" component={FeedScreen} />
         <Stack.Screen name="Profile" component={ProfileScreen} />
-        <Stack.Screen name="VideoTrim" component={VideoTrimScreen} />
+        <Stack.Screen name="Filter" component={FilterScreen} /> 
       </Stack.Navigator>
     </NavigationContainer>
   );

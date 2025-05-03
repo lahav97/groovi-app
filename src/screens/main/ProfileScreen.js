@@ -16,8 +16,8 @@ import {
 } from 'react-native';
 import { Ionicons, FontAwesome } from '@expo/vector-icons';
 import { Video } from 'expo-av';
-import BottomNavigation from '../components/navigation/BottomNavigation';
-import { COLORS, SIZES, LAYOUT } from '../styles/theme';
+import BottomNavigation from '../../components/navigationBar/BottomNavigation';
+import { COLORS, SIZES, LAYOUT } from '../../styles/theme';
 import { useIsFocused } from '@react-navigation/native';
 import Swiper from 'react-native-swiper';
 

@@ -1,14 +1,15 @@
 /**
  * @module FeedScreen
  * Displays a vertically scrollable video feed, allowing swipe to switch between videos.
+ * Each swipe moves exactly one video, and videos always fit the screen perfectly.
  */
-import React, { useRef, useState } from 'react';
-import { View, FlatList, Dimensions, StyleSheet, PanResponder } from 'react-native';
-import VideoItem from '../components/video/VideoItem';
-import { VIDEOS } from '../data/mockData';
-import BottomNavigation from '../components/navigation/BottomNavigation';
-import TopBar from '../components/navigation/TopNavigation';
-import { LAYOUT } from '../styles/theme';
+import React, { useRef, useState, useEffect } from 'react';
+import { View, FlatList, Dimensions, StyleSheet } from 'react-native';
+import VideoItem from '../../components/video/VideoItem';
+import { VIDEOS } from '../../data/mockData';
+import BottomNavigation from '../../components/navigationBar/BottomNavigation';
+import TopBar from '../../components/navigationBar/TopNavigation';
+import { LAYOUT } from '../../styles/theme';
 import { useIsFocused } from '@react-navigation/native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
@@ -19,141 +20,128 @@ const FeedScreen = () => {
   const isFocused = useIsFocused();
   const insets = useSafeAreaInsets();
   const flatListRef = useRef(null);
-  const isScrollingRef = useRef(false);
-  const lastScrollTimestamp = useRef(0);
-
+  
+  // Calculate exact video height to fit the screen perfectly
   const videoHeight = SCREEN_HEIGHT - insets.bottom;
-
+  
+  // Track touch positions and scroll state
+  const touchStartRef = useRef(0);
+  const isScrollingRef = useRef(false);
+  const lastScrollTimeRef = useRef(0);
+  
   /**
-   * @function FeedScreen
-   * @description Main feed screen showing videos one at a time, controlling scroll behavior manually.
-   * @returns {JSX.Element}
+   * Handle viewable items change
    */
   const onViewRef = useRef(({ viewableItems }) => {
     if (viewableItems.length > 0) {
-      setCurrentVisibleIndex(viewableItems[0].index);
+      const newIndex = viewableItems[0].index;
+      if (newIndex !== currentVisibleIndex) {
+        setCurrentVisibleIndex(newIndex);
+      }
     }
   });
 
-  const viewConfigRef = useRef({ viewAreaCoveragePercentThreshold: 80 });
+  const viewConfigRef = useRef({
+    viewAreaCoveragePercentThreshold: 60,
+    minimumViewTime: 100
+  });
 
   /**
-   * @function scrollToNextVideo
-   * @description Scrolls to the next video in the feed.
-   */  const scrollToNextVideo = () => {
-    if (currentVisibleIndex < VIDEOS.length - 1) {
-      flatListRef.current?.scrollToIndex({
-        index: currentVisibleIndex + 1,
-        animated: true
-      });
-    }
-  };
-
-  /**
-   * @function scrollToPrevVideo
-   * @description Scrolls to the previous video in the feed.
-   */  const scrollToPrevVideo = () => {
-    if (currentVisibleIndex > 0) {
-      flatListRef.current?.scrollToIndex({
-        index: currentVisibleIndex - 1,
-        animated: true
-      });
-    }
-  };
-
-  const panResponder = useRef(
-    PanResponder.create({
-      onStartShouldSetPanResponder: () => false,
-      onMoveShouldSetPanResponder: (evt, gestureState) => {
-        return Math.abs(gestureState.dy) > 10 && Math.abs(gestureState.dx) < Math.abs(gestureState.dy);
-      },
-      onPanResponderGrant: () => {
-        isScrollingRef.current = false;
-      },
-      onPanResponderMove: (evt, gestureState) => {
-      },
-      onPanResponderRelease: (evt, gestureState) => {
-        const now = Date.now();
-        if (now - lastScrollTimestamp.current < 500) {
-          return;
-        }
-        
-        // Determine direction and scroll exactly one video
-        if (gestureState.dy < -50) { // Swipe up - next video
-          scrollToNextVideo();
-          lastScrollTimestamp.current = now;
-        } else if (gestureState.dy > 50) { // Swipe down - previous video
-          scrollToPrevVideo();
-          lastScrollTimestamp.current = now;
-        }
-      }
-    })
-  ).current;
-
-    /**
-   * @function handleScrollEnd
-   * @description Aligns the scroll position exactly to a video after momentum ends.
-   * @param {Object} event - Scroll event.
+   * Handle touch start - record initial position
    */
-  const handleScrollEnd = (event) => {
-    const offsetY = event.nativeEvent.contentOffset.y;
-    const index = Math.round(offsetY / videoHeight);
+  const handleTouchStart = (e) => {
+    const touchY = e.nativeEvent.pageY;
+    touchStartRef.current = touchY;
+  };
+
+  /**
+   * Handle touch end - determine scroll direction and navigate
+   */
+  const handleTouchEnd = (e) => {
+    // Prevent rapid consecutive scrolls
+    const now = Date.now();
+    if (now - lastScrollTimeRef.current < 300 || isScrollingRef.current) {
+      return;
+    }
     
-    // If we're not already perfectly aligned with a video, scroll to the nearest one
-    if (offsetY !== index * videoHeight) {
-      flatListRef.current?.scrollToIndex({
-        index,
+    const touchEndY = e.nativeEvent.pageY;
+    const diff = touchStartRef.current - touchEndY;
+    
+    // Only respond to deliberate swipes (not small movements or taps)
+    if (Math.abs(diff) < 20) {
+      return;
+    }
+    
+    isScrollingRef.current = true;
+    lastScrollTimeRef.current = now;
+    
+    if (diff > 0) { 
+      // Swipe UP - move to next video (higher index)
+      moveToIndex(currentVisibleIndex + 1);
+    } else { 
+      // Swipe DOWN - move to previous video (lower index)
+      moveToIndex(currentVisibleIndex - 1);
+    }
+  };
+
+  /**
+   * Move to a specific index with bounds checking
+   */
+  const moveToIndex = (index) => {
+    // Ensure index is within bounds
+    if (index < 0) {
+      index = 0;  // Clamp to first video
+    } else if (index >= VIDEOS.length) {
+      index = VIDEOS.length - 1;  // Clamp to last video
+    }
+    
+    // Use scrollToOffset for precise positioning
+    if (index !== currentVisibleIndex) {
+      flatListRef.current?.scrollToOffset({
+        offset: index * videoHeight,
         animated: true
       });
       setCurrentVisibleIndex(index);
     }
+    
+    setTimeout(() => {
+      isScrollingRef.current = false;
+    }, 300);
   };
 
   /**
-   * @function handleScroll
-   * @description Controls scrolling velocity to avoid jumping multiple videos at once.
-   * @param {Object} event - Scroll event.
-   */  const handleScroll = (event) => {
-    if (isScrollingRef.current) return;
-    
-    const offsetY = event.nativeEvent.contentOffset.y;
-    const velocity = Math.abs(event.nativeEvent.velocity.y);
-    
-    // If the velocity is very high (fast swipe), we want to control it
-    if (velocity > 1.5) {
-      isScrollingRef.current = true;
-      
-      // Calculate the direction of the scroll
-      const direction = event.nativeEvent.velocity.y > 0 ? 1 : -1;
-      
-      // Calculate the target index (just one video away)
-      const targetIndex = currentVisibleIndex + direction;
-      
-      // Clamp the index between 0 and VIDEOS.length - 1
-      const clampedIndex = Math.max(0, Math.min(VIDEOS.length - 1, targetIndex));
-      
-      // Scroll to the target index
-      setTimeout(() => {
-        flatListRef.current?.scrollToIndex({
-          index: clampedIndex,
-          animated: true
-        });
-        
-        // Reset the scrolling flag after animation completes
-        setTimeout(() => {
-          isScrollingRef.current = false;
-        }, 300);
-      }, 10);
+   * Enforce perfect alignment whenever needed
+   */
+  const enforcePerfectAlignment = () => {
+    moveToIndex(currentVisibleIndex);
+  };
+
+  // Ensure perfect alignment when component mounts or dimensions change
+  useEffect(() => {
+    if (flatListRef.current) {
+      enforcePerfectAlignment();
     }
+  }, [videoHeight, insets]);
+
+  /**
+   * Handle any end of scrolling to enforce proper alignment
+   */
+  const handleScrollEnd = () => {
+    enforcePerfectAlignment();
   };
 
   return (
-    <View style={styles.container} {...panResponder.panHandlers}>
+    <View 
+      style={styles.container}
+      onTouchStart={handleTouchStart}
+      onTouchEnd={handleTouchEnd}
+    >
       {/* Video Feed */}
-      <View style={[styles.feedContainer, { paddingBottom: LAYOUT.navHeight }]}>
+      <View style={styles.feedContainer}>
         <FlatList
           ref={flatListRef}
           data={VIDEOS}
+          ListFooterComponent={<View style={{ height: 55 }} />}
           renderItem={({ item, index }) => (
             <VideoItem
               item={item}
@@ -161,20 +149,15 @@ const FeedScreen = () => {
               height={videoHeight}
             />
           )}
-          snapToInterval={videoHeight}
-          snapToAlignment="start"
-          decelerationRate={0.9} // Slightly reduced to help with control
-          scrollEventThrottle={16}
+          scrollEnabled={false} // Disable default scrolling - we handle it manually
           onViewableItemsChanged={onViewRef.current}
           viewabilityConfig={viewConfigRef.current}
           onMomentumScrollEnd={handleScrollEnd}
-          onScroll={handleScroll}
           getItemLayout={(data, index) => ({
             length: videoHeight,
             offset: videoHeight * index,
             index,
           })}
-          pagingEnabled={true}
           showsVerticalScrollIndicator={false}
           initialScrollIndex={0}
           maxToRenderPerBatch={3}
@@ -188,7 +171,7 @@ const FeedScreen = () => {
       </View>
 
       {/* Bottom Navigation */}
-      <View style={styles.bottomNavContainer}>
+      <View style={[styles.bottomNavContainer, { height: LAYOUT.navHeight, bottom: insets.bottom }]}>
         <BottomNavigation />
       </View>
     </View>
@@ -212,10 +195,8 @@ const styles = StyleSheet.create({
   },
   bottomNavContainer: {
     position: 'absolute',
-    bottom: 0,
     left: 0,
     right: 0,
-    height: LAYOUT.navHeight,
     backgroundColor: 'rgba(0,0,0,0.9)',
     borderTopWidth: StyleSheet.hairlineWidth,
     borderTopColor: '#333',

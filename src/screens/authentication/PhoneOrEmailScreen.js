@@ -18,6 +18,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { useNavigation } from '@react-navigation/native';
 import PhoneInput from 'react-native-phone-number-input';
 import * as Localization from 'expo-localization';
+import Button from '../../components/common/Button';
 
 /**
  * @function getDefaultCountryCode
@@ -136,9 +137,12 @@ const PhoneOrEmailScreen = () => {
 
         {authError !== '' && <Text style={styles.errorText}>{authError}</Text>}
 
-        <TouchableOpacity style={styles.continueButton} onPress={handleContinue}>
-          <Text style={styles.continueText}>Continue</Text>
-        </TouchableOpacity>
+        <Button
+          title="Continue"
+          onPress={handleContinue}
+          style={styles.continueButton}
+          textStyle={styles.continueText}
+        />
       </KeyboardAvoidingView>
     </LinearGradient>
   );

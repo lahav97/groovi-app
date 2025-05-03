@@ -11,7 +11,8 @@ import * as Facebook from 'expo-auth-session/providers/facebook';
 import * as Google from 'expo-auth-session/providers/google';
 import * as WebBrowser from 'expo-web-browser';
 import { GOOGLE_CLIENT_ID, GOOGLE_ANDROID_ID, FACEBOOK_APP_ID } from '@env';
-import { COLORS } from '../styles/theme'; 
+import { COLORS } from '../../styles/theme'; 
+import Button from '../../components/common/Button';
 
 WebBrowser.maybeCompleteAuthSession();
 
@@ -59,33 +60,33 @@ const LoginScreen = () => {
     >
       <Text style={[styles.logo, { color: COLORS.static.text }]}>GROOVI</Text>
 
-      <TouchableOpacity
-        style={[styles.buttonBase, styles.whiteButton]}
+      <Button
+        title="Sign Up"
         onPress={() => navigation.navigate('SignupFlow')}
-      >
-        <Text style={styles.blackText}>Sign Up</Text>
-      </TouchableOpacity>
-
-      <TouchableOpacity
         style={[styles.buttonBase, styles.whiteButton]}
+        textStyle={styles.blackText}
+      />
+
+      <Button
+        title="Use phone or email"
         onPress={() => navigation.navigate('Phone Or Email')}
-      >
-        <Text style={styles.blackText}>Use phone or email</Text>
-      </TouchableOpacity>
+        style={[styles.buttonBase, styles.whiteButton]}
+        textStyle={styles.blackText}
+      />
 
-      <TouchableOpacity
-        style={[styles.buttonBase, styles.googleButton]}
+      <Button
+        title="Continue with Google"
         onPress={() => promptGoogleLogin()}
-      >
-        <Text style={styles.googleText}>Continue with Google</Text>
-      </TouchableOpacity>
+        style={[styles.buttonBase, styles.googleButton]}
+        textStyle={styles.googleText}
+      />
 
-      <TouchableOpacity
-        style={[styles.buttonBase, styles.fbButton]}
+      <Button
+        title="Continue with Facebook"
         onPress={() => promptFbLogin()}
-      >
-        <Text style={styles.fbText}>Continue with Facebook</Text>
-      </TouchableOpacity>
+        style={[styles.buttonBase, styles.fbButton]}
+        textStyle={styles.fbText}
+      />
 
       <TouchableOpacity>
         <Text style={styles.troubleText}>Trouble Logging In?</Text>
