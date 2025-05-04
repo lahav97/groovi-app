@@ -2,9 +2,9 @@ import psycopg2
 import os
 import json
 
-# Database connection details
-DB_HOST = "database-1.cy2tiqi5hhhj.us-east-1.rds.amazonaws.com"
-DB_NAME = "testone"
+# Database connection details until we get the env. varibles in the lambda
+DB_HOST = "groovi-db-1.czwe08o8mo26.us-east-1.rds.amazonaws.com"
+DB_NAME = "groovi_1"
 DB_USER = "postgres"
 DB_PASSWORD = "123456789"
 DB_PORT = 5432
@@ -15,6 +15,7 @@ def lambda_handler(event, context):
     try:
         body = json.loads(event['body'])
         username = body['username']
+        full_name = body['full_name']
         phone_number = body['phone_number']
         email = body['email']
         address = body['address']
@@ -26,7 +27,6 @@ def lambda_handler(event, context):
         rating = body.get('rating', None)
         user_type = body['user_type']
         genres = body.get('genres', [])
-        full_name: body['full_name']
         videos = body.get('videos', [])  # NEW: get videos list from input, default empty
     except Exception as e:
         return {
@@ -50,26 +50,18 @@ def lambda_handler(event, context):
 
         # Insert into users table and get the user_id
         insert_user_query = """
-        INSERT INTO users (username, phone_number, email, address, password, profile_picture, bio, social_links, instruments, rating, user_type, genres, full_name, videos )
+        INSERT INTO users (username, full_name, phone_number, email, address, password, profile_picture, bio, social_links, instruments, rating, user_type, genres, videos )
         VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
         RETURNING id;
         """
 
         cursor.execute(insert_user_query, (
-            username, phone_number, email, address, password,
+            username, full_name, phone_number, email, address, password,
             profile_picture, bio, social_links, instruments, rating,
-            user_type, genres, full_name, videos
+            user_type, genres, videos
         ))
 
         user_id = cursor.fetchone()[0]  # Get the new user's id
-
-        '''# Insert videos into videos table
-        for video_url in videos:
-            insert_video_query = """
-            INSERT INTO videos (user_id, video_url)
-            VALUES (%s, %s);
-            """
-            cursor.execute(insert_video_query, (user_id, video_url))'''
 
         conn.commit()
 

@@ -3,9 +3,9 @@ import psycopg2
 import json
 import os
 
-# Database connection details
-DB_HOST = "database-1.cy2tiqi5hhhj.us-east-1.rds.amazonaws.com"
-DB_NAME = "testone"
+# Database connection details until we get the env. varibles in the lambda
+DB_HOST = "groovi-db-1.czwe08o8mo26.us-east-1.rds.amazonaws.com"
+DB_NAME = "groovi_1"
 DB_USER = "postgres"
 DB_PASSWORD = "123456789"
 DB_PORT = 5432
