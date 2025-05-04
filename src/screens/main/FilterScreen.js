@@ -29,7 +29,7 @@ const INSTRUMENTS = {
 };
 const SKILL_LEVELS = ['Beginner', 'Intermediate', 'Pro'];
 const GENRES = ['Rock', 'Jazz', 'Pop', 'Classical', 'Other'];
-const GENDERS = ['Male', 'Female', 'Any'];
+const GENDERS = ['Male', 'Female', 'Other', 'Any'];
 
 
 // Collapsible section component for better organization
@@ -208,7 +208,7 @@ const FilterScreen = () => {
         contentContainerStyle={styles.scroll}
         showsVerticalScrollIndicator={false}
       >
-        <View style={[styles.headerRow, {paddingTop: 23}]}>
+        <View style={[styles.headerRow, { paddingTop: 20 }]}>
           <TouchableOpacity style={styles.backIcon} onPress={navigateBack}>
             <Ionicons name="arrow-back" size={28} color={textColor} />
           </TouchableOpacity>

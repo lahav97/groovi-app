@@ -20,7 +20,7 @@ import BottomNavigation from '../../components/navigationBar/BottomNavigation';
 import { COLORS, SIZES, LAYOUT } from '../../styles/theme';
 import { useIsFocused } from '@react-navigation/native';
 import Swiper from 'react-native-swiper';
-
+import { useNavigation } from '@react-navigation/native';
 const { width } = Dimensions.get('window');
 
 const mockVideos = [
@@ -38,6 +38,7 @@ const mockVideos = [
  * @returns {JSX.Element}
  */
 const ProfileScreen = () => {
+  const navigation = useNavigation();
   const [pausedStatus, setPausedStatus] = useState({});
   const [currentIndex, setCurrentIndex] = useState(0);
   const colorScheme = useColorScheme();
@@ -94,7 +95,7 @@ const ProfileScreen = () => {
         <TouchableOpacity>
           <Ionicons name="settings-outline" size={SIZES.icon} color={theme.text} />
         </TouchableOpacity>
-        <TouchableOpacity>
+        <TouchableOpacity onPress={() => navigation.navigate('EditProfile')}>
           <Ionicons name="create-outline" size={SIZES.icon} color={theme.text} />
         </TouchableOpacity>
       </View>
