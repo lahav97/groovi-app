@@ -7,12 +7,21 @@
     "platforms": ["ios", "android", "web"],
     "userInterfaceStyle": "automatic",
     "android": {
+      "package": "com.groovi.app",
       "newArchEnabled": false
     },
     "ios": {
+      "bundleIdentifier": "com.groovi.app",
       "newArchEnabled": false
     },
-    "plugins": ["expo-localization"],
-    "scheme": "groovi"
+    "plugins": [
+      "expo-localization"
+    ],
+    "scheme": "groovi",
+    "extra": {
+      "eas": {
+        "projectId": "46aa4db4-94ed-4428-8aa7-6b1605678369"
+      }
+    }
   }
 }

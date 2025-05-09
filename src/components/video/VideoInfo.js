@@ -19,7 +19,7 @@ const VideoInfo = ({ video }) => {
 const styles = StyleSheet.create({
   container: {
     position: 'absolute',
-    bottom: 100,
+    bottom: 50,
     left: 10,
     right: 60,
     zIndex: 1,

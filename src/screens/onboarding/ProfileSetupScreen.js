@@ -15,6 +15,8 @@ import {
   useColorScheme,
   Image,
   ActivityIndicator,
+  KeyboardAvoidingView,
+  Platform,
 } from 'react-native';
 import * as Location from 'expo-location';
 import * as ImagePicker from 'expo-image-picker';
@@ -468,20 +470,222 @@ const ProfileSetupScreen = () => {
   };
   
   return (
-    <View style={[styles.container, { backgroundColor: isDark ? '#000' : '#fff' }]}>
-      <View style={styles.headerRow}>
-        <TouchableOpacity style={styles.backButton} onPress={() => navigation.goBack()}>
-          <Ionicons name="arrow-back" size={28} color={isDark ? '#fff' : '#000'} />
-        </TouchableOpacity>
-        <Text style={[styles.title, { color: isDark ? '#fff' : '#000' }]}>
-          Set up your profile
-        </Text>
-        <View style={{ width: 28 }} />
-      </View>
+    <KeyboardAvoidingView 
+      style={{ flex: 1 }}
+      behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+    >
+      <View style={[styles.container, { backgroundColor: isDark ? '#000' : '#fff' }]}>
+        <View style={styles.headerRow}>
+          <TouchableOpacity style={styles.backButton} onPress={() => navigation.goBack()}>
+            <Ionicons name="arrow-back" size={28} color={isDark ? '#fff' : '#000'} />
+          </TouchableOpacity>
+          <Text style={[styles.title, { color: isDark ? '#fff' : '#000' }]}>
+            Set up your profile
+          </Text>
+          <View style={{ width: 28 }} />
+        </View>
 
-      <ScrollView contentContainerStyle={styles.scroll}>
-        <Text style={[styles.sectionTitle, { color: isDark ? '#fff' : '#000' }]}>Location</Text>
-        {useManualLocation ? (
+        <ScrollView 
+          contentContainerStyle={[
+            styles.scroll,
+            // Add padding at the bottom to account for the button's height
+            { paddingBottom: 100 }
+          ]}
+        >
+          <Text style={[styles.sectionTitle, { color: isDark ? '#fff' : '#000' }]}>Location</Text>
+          {useManualLocation ? (
+            <TextInput
+              style={[
+                styles.input,
+                {
+                  backgroundColor: isDark ? '#222' : '#eee',
+                  color: isDark ? '#fff' : '#000',
+                },
+              ]}
+              placeholder="Enter your city"
+              placeholderTextColor={isDark ? '#aaa' : '#666'}
+              value={manualLocation}
+              onChangeText={setManualLocation}
+            />
+          ) : (
+            <Text style={[styles.infoText, { color: isDark ? '#aaa' : '#555' }]}>
+              {location || 'Detecting location...'}
+            </Text>
+          )}
+
+          <Text style={[styles.sectionTitle, { color: isDark ? '#fff' : '#000' }]}>
+            Profile Picture
+          </Text>
+          
+          <TouchableOpacity 
+            onPress={pickProfilePicture} 
+            style={[styles.profilePictureContainer, {
+              backgroundColor: isDark ? '#222' : '#eee',
+            }]}
+          >
+            {profilePictureUri ? (
+              <Image 
+                source={{ uri: profilePictureUri }} 
+                style={styles.profilePicture} 
+                resizeMode="cover"
+              />
+            ) : (
+              <View style={styles.profilePicturePlaceholder}>
+                <Ionicons name="person-circle-outline" size={60} color={isDark ? '#ccc' : '#555'} />
+                <Text style={{ 
+                  fontSize: 15, 
+                  color: isDark ? '#ccc' : '#333', 
+                  marginTop: 10,
+                  textAlign: 'center'
+                }}>
+                  Upload Profile Picture
+                </Text>
+              </View>
+            )}
+          </TouchableOpacity>
+
+          <Text style={[styles.sectionTitle, { color: isDark ? '#fff' : '#000' }]}>
+            Personal Info
+          </Text>
+          <TextInput
+            style={[
+              styles.input,
+              {
+                height: 100,
+                backgroundColor: isDark ? '#222' : '#eee',
+                color: isDark ? '#fff' : '#000',
+              },
+            ]}
+            placeholder="Tell us about yourself..."
+            placeholderTextColor={isDark ? '#aaa' : '#666'}
+            value={bio}
+            onChangeText={setBio}
+            multiline
+          />
+
+          <Text style={[styles.sectionTitle, { color: isDark ? '#fff' : '#000' }]}>
+            Upload Videos
+          </Text>
+
+          <TouchableOpacity
+            style={[styles.uploadBtn, { backgroundColor: isDark ? '#222' : '#eee' }]}
+            onPress={pickVideo}
+            disabled={currentUploadingVideo !== null}
+          >
+            {currentUploadingVideo !== null ? (
+              <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+                <ActivityIndicator size="small" color={isDark ? '#ccc' : '#555'} style={{ marginRight: 10 }} />
+                <Text style={{ fontSize: 15, color: isDark ? '#ccc' : '#333' }}>
+                  Uploading video {currentUploadingVideo + 1}...
+                </Text>
+              </View>
+            ) : (
+              <>
+                <Ionicons name="cloud-upload-outline" size={24} color={isDark ? '#ccc' : '#555'} />
+                <Text style={{ fontSize: 15, color: isDark ? '#ccc' : '#333' }}>
+                  Choose videos (max 30s / 4MB)
+                </Text>
+              </>
+            )}
+          </TouchableOpacity>
+
+          {videoThumbnails.length > 0 && (
+            <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 12, marginVertical: 10 }}>
+              {videoThumbnails.map((thumb, i) => (
+                <View key={i} style={{ position: 'relative', alignItems: 'center' }}>
+                  <Image
+                    source={{ uri: thumb }}
+                    style={{
+                      width: 70,
+                      height: 100,
+                      borderRadius: 10,
+                      backgroundColor: '#000',
+                    }}
+                  />
+                  <View
+                    style={{
+                      position: 'absolute',
+                      top: 6,
+                      right: 6,
+                      backgroundColor: 'rgba(0,0,0,0.7)',
+                      borderRadius: 12,
+                      padding: 3,
+                    }}
+                  >
+                    {i === currentUploadingVideo ? (
+                      <ActivityIndicator size="small" color="#fff" />
+                    ) : (
+                      <Ionicons 
+                        name={i < videoUrls.length ? "checkmark-circle" : "time-outline"} 
+                        size={16} 
+                        color={i < videoUrls.length ? "#4caf50" : "#ff9800"} 
+                      />
+                    )}
+                  </View>
+                  <View style={{ flexDirection: 'row', marginTop: 4 }}>
+                    <TouchableOpacity
+                      onPress={() => moveVideo(i, i - 1)}
+                      disabled={i === 0}
+                      style={{ marginHorizontal: 2, opacity: i === 0 ? 0.3 : 1 }}
+                    >
+                      <Ionicons name="arrow-back-circle" size={22} color="#888" />
+                    </TouchableOpacity>
+                    <TouchableOpacity
+                      onPress={() => moveVideo(i, i + 1)}
+                      disabled={i === videoThumbnails.length - 1}
+                      style={{ marginHorizontal: 2, opacity: i === videoThumbnails.length - 1 ? 0.3 : 1 }}
+                    >
+                      <Ionicons name="arrow-forward-circle" size={22} color="#888" />
+                    </TouchableOpacity>
+                    <TouchableOpacity
+                      onPress={() => deleteVideo(i)}
+                      style={{ marginHorizontal: 2 }}
+                    >
+                      <Ionicons name="trash-bin" size={22} color="#888" />
+                    </TouchableOpacity>
+                  </View>
+                </View>
+              ))}
+            </View>
+          )}
+
+          {videoError !== '' && (
+            <Text style={{ color: 'red', fontSize: 13, marginTop: 4 }}>{videoError}</Text>
+          )}
+
+
+          <Text style={[styles.sectionTitle, { color: isDark ? '#fff' : '#000' }]}>
+            Favorite Genres
+          </Text>
+          <View style={styles.genreContainer}>
+            {predefinedGenres.map((genre) => (
+              <TouchableOpacity
+                key={genre}
+                style={[
+                  styles.genreChip,
+                  {
+                    backgroundColor: genres.includes(genre)
+                      ? '#ff6ec4'
+                      : isDark
+                      ? '#444'
+                      : '#ddd',
+                  },
+                ]}
+                onPress={() => toggleGenre(genre)}
+              >
+                <Text
+                  style={{
+                    fontSize: 14,
+                    color: genres.includes(genre) ? '#fff' : isDark ? '#eee' : '#333',
+                    fontWeight: genres.includes(genre) ? 'bold' : 'normal',
+                  }}
+                >
+                  {genre}
+                </Text>
+              </TouchableOpacity>
+            ))}
+          </View>
+
           <TextInput
             style={[
               styles.input,
@@ -490,236 +694,50 @@ const ProfileSetupScreen = () => {
                 color: isDark ? '#fff' : '#000',
               },
             ]}
-            placeholder="Enter your city"
+            placeholder="Other genre (optional)"
             placeholderTextColor={isDark ? '#aaa' : '#666'}
-            value={manualLocation}
-            onChangeText={setManualLocation}
+            value={customGenre}
+            onChangeText={(text) => {
+              setCustomGenre(text);
+              if (text.trim() && !genres.includes(text) && text.trim() !== '') {
+                setGenres([...genres, text.trim()]);
+                setCustomGenre('');
+              }
+            }}
           />
-        ) : (
-          <Text style={[styles.infoText, { color: isDark ? '#aaa' : '#555' }]}>
-            {location || 'Detecting location...'}
-          </Text>
-        )}
 
-        <Text style={[styles.sectionTitle, { color: isDark ? '#fff' : '#000' }]}>
-          Profile Picture
-        </Text>
-        
-        <TouchableOpacity 
-          onPress={pickProfilePicture} 
-          style={[styles.profilePictureContainer, {
-            backgroundColor: isDark ? '#222' : '#eee',
-          }]}
-        >
-          {profilePictureUri ? (
-            <Image 
-              source={{ uri: profilePictureUri }} 
-              style={styles.profilePicture} 
-              resizeMode="cover"
-            />
-          ) : (
-            <View style={styles.profilePicturePlaceholder}>
-              <Ionicons name="person-circle-outline" size={60} color={isDark ? '#ccc' : '#555'} />
-              <Text style={{ 
-                fontSize: 15, 
-                color: isDark ? '#ccc' : '#333', 
-                marginTop: 10,
-                textAlign: 'center'
-              }}>
-                Upload Profile Picture
-              </Text>
-            </View>
-          )}
-        </TouchableOpacity>
-
-        <Text style={[styles.sectionTitle, { color: isDark ? '#fff' : '#000' }]}>
-          Personal Info
-        </Text>
-        <TextInput
-          style={[
-            styles.input,
-            {
-              height: 100,
-              backgroundColor: isDark ? '#222' : '#eee',
-              color: isDark ? '#fff' : '#000',
-            },
-          ]}
-          placeholder="Tell us about yourself..."
-          placeholderTextColor={isDark ? '#aaa' : '#666'}
-          value={bio}
-          onChangeText={setBio}
-          multiline
-        />
-
-        <Text style={[styles.sectionTitle, { color: isDark ? '#fff' : '#000' }]}>
-          Upload Videos
-        </Text>
-
-        <TouchableOpacity
-          style={[styles.uploadBtn, { backgroundColor: isDark ? '#222' : '#eee' }]}
-          onPress={pickVideo}
-          disabled={currentUploadingVideo !== null}
-        >
-          {currentUploadingVideo !== null ? (
-            <View style={{ flexDirection: 'row', alignItems: 'center' }}>
-              <ActivityIndicator size="small" color={isDark ? '#ccc' : '#555'} style={{ marginRight: 10 }} />
-              <Text style={{ fontSize: 15, color: isDark ? '#ccc' : '#333' }}>
-                Uploading video {currentUploadingVideo + 1}...
-              </Text>
-            </View>
-          ) : (
-            <>
-              <Ionicons name="cloud-upload-outline" size={24} color={isDark ? '#ccc' : '#555'} />
-              <Text style={{ fontSize: 15, color: isDark ? '#ccc' : '#333' }}>
-                Choose videos (max 30s / 4MB)
-              </Text>
-            </>
-          )}
-        </TouchableOpacity>
-
-        {videoThumbnails.length > 0 && (
-          <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 12, marginVertical: 10 }}>
-            {videoThumbnails.map((thumb, i) => (
-              <View key={i} style={{ position: 'relative', alignItems: 'center' }}>
-                <Image
-                  source={{ uri: thumb }}
-                  style={{
-                    width: 70,
-                    height: 100,
-                    borderRadius: 10,
-                    backgroundColor: '#000',
-                  }}
-                />
-                <View
-                  style={{
-                    position: 'absolute',
-                    top: 6,
-                    right: 6,
-                    backgroundColor: 'rgba(0,0,0,0.7)',
-                    borderRadius: 12,
-                    padding: 3,
-                  }}
-                >
-                  {i === currentUploadingVideo ? (
-                    <ActivityIndicator size="small" color="#fff" />
-                  ) : (
-                    <Ionicons 
-                      name={i < videoUrls.length ? "checkmark-circle" : "time-outline"} 
-                      size={16} 
-                      color={i < videoUrls.length ? "#4caf50" : "#ff9800"} 
-                    />
-                  )}
-                </View>
-                <View style={{ flexDirection: 'row', marginTop: 4 }}>
-                  <TouchableOpacity
-                    onPress={() => moveVideo(i, i - 1)}
-                    disabled={i === 0}
-                    style={{ marginHorizontal: 2, opacity: i === 0 ? 0.3 : 1 }}
-                  >
-                    <Ionicons name="arrow-back-circle" size={22} color="#888" />
-                  </TouchableOpacity>
-                  <TouchableOpacity
-                    onPress={() => moveVideo(i, i + 1)}
-                    disabled={i === videoThumbnails.length - 1}
-                    style={{ marginHorizontal: 2, opacity: i === videoThumbnails.length - 1 ? 0.3 : 1 }}
-                  >
-                    <Ionicons name="arrow-forward-circle" size={22} color="#888" />
-                  </TouchableOpacity>
-                  <TouchableOpacity
-                    onPress={() => deleteVideo(i)}
-                    style={{ marginHorizontal: 2 }}
-                  >
-                    <Ionicons name="trash-bin" size={22} color="#888" />
-                  </TouchableOpacity>
-                </View>
-              </View>
-            ))}
-          </View>
-        )}
-
-        {videoError !== '' && (
-          <Text style={{ color: 'red', fontSize: 13, marginTop: 4 }}>{videoError}</Text>
-        )}
-
-
-        <Text style={[styles.sectionTitle, { color: isDark ? '#fff' : '#000' }]}>
-          Favorite Genres
-        </Text>
-        <View style={styles.genreContainer}>
-          {predefinedGenres.map((genre) => (
-            <TouchableOpacity
-              key={genre}
-              style={[
-                styles.genreChip,
-                {
-                  backgroundColor: genres.includes(genre)
-                    ? '#ff6ec4'
-                    : isDark
-                    ? '#444'
-                    : '#ddd',
-                },
-              ]}
-              onPress={() => toggleGenre(genre)}
+          <Button
+            disabled={!isFormComplete() || isUploading}
+            onPress={handleContinue}
+            style={[styles.continueButton, (!isFormComplete() || isUploading) && styles.disabledButton]}
+          >
+            <LinearGradient
+              colors={['#ff6ec4', '#ffc93c', '#1c92d2']}
+              start={{ x: 0, y: 1 }}
+              end={{ x: 1, y: 0 }}
+              style={styles.gradient}
             >
-              <Text
-                style={{
-                  fontSize: 14,
-                  color: genres.includes(genre) ? '#fff' : isDark ? '#eee' : '#333',
-                  fontWeight: genres.includes(genre) ? 'bold' : 'normal',
-                }}
-              >
-                {genre}
-              </Text>
-            </TouchableOpacity>
-          ))}
-        </View>
-
-        <TextInput
-          style={[
-            styles.input,
-            {
-              backgroundColor: isDark ? '#222' : '#eee',
-              color: isDark ? '#fff' : '#000',
-            },
-          ]}
-          placeholder="Other genre (optional)"
-          placeholderTextColor={isDark ? '#aaa' : '#666'}
-          value={customGenre}
-          onChangeText={(text) => {
-            setCustomGenre(text);
-            if (text.trim() && !genres.includes(text) && text.trim() !== '') {
-              setGenres([...genres, text.trim()]);
-              setCustomGenre('');
-            }
-          }}
-        />
-      </ScrollView>
-
-      <Button
-        disabled={!isFormComplete() || isUploading}
-        onPress={handleContinue}
-        style={[styles.continueButton, (!isFormComplete() || isUploading) && styles.disabledButton]}
-      >
-        <LinearGradient
-          colors={['#ff6ec4', '#ffc93c', '#1c92d2']}
-          start={{ x: 0, y: 1 }}
-          end={{ x: 0, y: 0 }}
-          style={styles.gradient}
-        >
-          {isUploading ? (
-            <ActivityIndicator color="#fff" size="small" />
-          ) : (
-            <Text style={styles.continueText}>Finish</Text>
-          )}
-        </LinearGradient>
-      </Button>
-    </View>
+              {isUploading ? (
+                <ActivityIndicator color="#fff" size="small" />
+              ) : (
+                <Text style={styles.continueText}>FINISH</Text>
+              )}
+            </LinearGradient>
+          </Button>
+        </ScrollView>
+      </View>
+    </KeyboardAvoidingView>
   );
 };
 
 const styles = StyleSheet.create({
-  container: { flex: 1 },
-  scroll: { padding: 20, paddingBottom: 100 },
+  container: { 
+    flex: 1,
+  },
+  scroll: { 
+    padding: 20,
+    paddingBottom: 60, // match InstrumentsScreen
+  },
   headerRow: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -750,7 +768,10 @@ const styles = StyleSheet.create({
     fontSize: 15,
     marginBottom: 12,
   },
-  infoText: { fontSize: 14, marginBottom: 8 },
+  infoText: { 
+    fontSize: 14, 
+    marginBottom: 8,
+  },
   uploadBtn: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -770,20 +791,24 @@ const styles = StyleSheet.create({
     paddingVertical: 6,
     paddingHorizontal: 14,
   },
+  buttonContainer: {
+  },
   continueButton: {
-    position: 'absolute',
-    bottom: 30,
-    left: 20,
-    right: 20,
+    marginTop: 2,
+    marginBottom: 40,
+    width: '100%',
     borderRadius: 30,
     overflow: 'hidden',
   },
   disabledButton: {
-    opacity: 0.4,
+    opacity: 0.5,
   },
   gradient: {
+    width: '100%',
     paddingVertical: 16,
+    paddingHorizontal: 32,
     alignItems: 'center',
+    justifyContent: 'center',
     borderRadius: 30,
   },
   continueText: {
@@ -791,6 +816,9 @@ const styles = StyleSheet.create({
     fontWeight: 'bold',
     fontSize: 16,
     letterSpacing: 1,
+    textShadowColor: 'rgba(0, 0, 0, 0.4)',
+    textShadowOffset: { width: 1, height: 1 },
+    textShadowRadius: 1,
   },
   profilePictureContainer: {
     width: 120,

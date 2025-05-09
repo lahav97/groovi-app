@@ -160,12 +160,12 @@ const EditProfileScreen = ({ navigation }) => {
       <ScrollView contentContainerStyle={{ padding: 20, paddingBottom: 120 }}>
         <Text style={[styles.label, { color: isDark ? '#fff' : '#000' }]}>Location</Text>
         <TextInput
+        
           value={location}
           onChangeText={setLocation}
           placeholder="Your city"
           style={[styles.input, { backgroundColor: isDark ? '#222' : '#eee', color: isDark ? '#fff' : '#000' }]}
         />
-
         <Text style={[styles.label, { color: isDark ? '#fff' : '#000' }]}>Profile Picture</Text>
         <TouchableOpacity onPress={pickProfilePicture} style={styles.profilePictureContainer}>
           {profilePictureUri ? (

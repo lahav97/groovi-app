@@ -2,7 +2,6 @@
  * @module SignUpScreen
  * Handles user sign up with full name, username, phone or email, password, and gender.
  */
-
 import React, { useState, useRef } from 'react';
 import {
   View,

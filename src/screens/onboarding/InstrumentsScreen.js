@@ -308,6 +308,7 @@ const styles = StyleSheet.create({
     opacity: 0.5,
   },
   gradient: {
+    width: '100%',
     paddingVertical: 16,
     paddingHorizontal: 32,
     alignItems: 'center',
