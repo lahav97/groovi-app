@@ -1,14 +1,20 @@
 import React from 'react';
-import { View, TouchableOpacity, StyleSheet } from 'react-native';
+import { View, TouchableOpacity, StyleSheet, useColorScheme } from 'react-native';
 import Icon from 'react-native-vector-icons/Ionicons';
+import { COLORS } from '../../styles/theme';
+import { useNavigation } from '@react-navigation/native';
 
 const TopNavigation = () => {
+  const colorScheme = useColorScheme();
+  const theme = colorScheme === 'dark' ? COLORS.dark : COLORS.light;
+
   const ICON_SIZE = 30;
-  const ICON_COLOR = '#fff';
+  const ICON_COLOR = theme.icon;
+  const navigation = useNavigation();
 
   return (
     <View style={styles.topNav}>
-      <TouchableOpacity style={styles.navItem}>
+      <TouchableOpacity style={styles.navItem} onPress={() => navigation.navigate('Filter')}>
         <Icon name="options-outline" size={ICON_SIZE} color={ICON_COLOR} />
       </TouchableOpacity>
 

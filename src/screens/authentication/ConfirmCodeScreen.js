@@ -3,10 +3,11 @@
  * Screen for confirming a user's signup by entering a verification code.
  */
 import React, { useState } from 'react';
-import { View, Text, TextInput, TouchableOpacity, StyleSheet, Alert } from 'react-native';
+import { View, Text, TextInput, StyleSheet, Alert } from 'react-native';
 import { Auth } from 'aws-amplify';
 import { useNavigation, useRoute } from '@react-navigation/native';
 import { LinearGradient } from 'expo-linear-gradient';
+import Button from '../../components/common/Button';
 
 /**
  * @function ConfirmCodeScreen
@@ -20,7 +21,7 @@ const ConfirmCodeScreen = () => {
 
   const [code, setCode] = useState('');
 
-    /**
+  /**
    * @function handleConfirm
    * @description Confirms the sign-up using the verification code and signs the user in.
    */
@@ -69,15 +70,21 @@ const ConfirmCodeScreen = () => {
           placeholderTextColor="#666"
         />
 
-        <TouchableOpacity style={styles.confirmButton} onPress={handleConfirm}>
-          <Text style={styles.confirmText}>CONFIRM</Text>
-        </TouchableOpacity>
+        <Button
+          title="CONFIRM"
+          onPress={handleConfirm}
+          style={styles.confirmButton}
+          textStyle={styles.confirmText}
+        />
 
         <View style={styles.resendContainer}>
           <Text style={styles.resendText}>Didn't receive a code?</Text>
-          <TouchableOpacity style={styles.resendButton} onPress={handleResendCode}>
-            <Text style={styles.resendButtonText}>RESEND CODE</Text>
-          </TouchableOpacity>
+          <Button
+            title="RESEND CODE"
+            onPress={handleResendCode}
+            style={styles.resendButton}
+            textStyle={styles.resendButtonText}
+          />
         </View>
       </View>
     </LinearGradient>

@@ -2,18 +2,22 @@
  * @module LoginScreen
  * Displays login options including email/phone signup, Google and Facebook login.
  */
-
-import React from 'react';
+import React, { useEffect } from 'react';
 import { Text, StyleSheet, TouchableOpacity } from 'react-native';
 import { useNavigation } from '@react-navigation/native';
 import { LinearGradient } from 'expo-linear-gradient';
+import { GOOGLE_CLIENT_ID, GOOGLE_ANDROID_ID, FACEBOOK_APP_ID } from '@env';
+import { COLORS } from '../../styles/theme'; 
+import { getGoogleProfile, getFacebookProfile, signInToCognito,} from '../../utils/socialAuth';
 import * as Facebook from 'expo-auth-session/providers/facebook';
 import * as Google from 'expo-auth-session/providers/google';
 import * as WebBrowser from 'expo-web-browser';
-import { GOOGLE_CLIENT_ID, GOOGLE_ANDROID_ID, FACEBOOK_APP_ID } from '@env';
-import { COLORS } from '../styles/theme'; 
+import Button from '../../components/common/Button';
 
 WebBrowser.maybeCompleteAuthSession();
+
+const redirectUri = 'https://auth.expo.io/@lahav97/groovi-app';
+console.log('REDIRECT_URI', redirectUri);
 
 /**
  * @function LoginScreen
@@ -26,29 +30,44 @@ const LoginScreen = () => {
   const [fbRequest, fbResponse, promptFbLogin] = Facebook.useAuthRequest({
     clientId: FACEBOOK_APP_ID,
     scopes: ['public_profile', 'email'],
+    responseType: 'token',
+    useProxy: true,
+    redirectUri,   
   });
 
   const [googleRequest, googleResponse, promptGoogleLogin] = Google.useAuthRequest({
     expoClientId: GOOGLE_CLIENT_ID,
     androidClientId: GOOGLE_ANDROID_ID,
+    redirectUri,
+    scopes: ['openid', 'profile', 'email'],
   });
 
-  // You can leave these hooks if you want to debug token access
-  // useEffect(() => {
-  //   if (fbResponse?.type === 'success') {
-  //     const { access_token } = fbResponse.params;
-  //     console.log('📘 Facebook access token:', access_token);
-  //     // Later: Trigger Cognito sign-in here
-  //   }
-  // }, [fbResponse]);
+  /* ---------- GOOGLE response handler ---------- */
+  useEffect(() => {
+    if (googleResponse?.type === 'success') {
+      const { accessToken, expiresIn } = googleResponse.authentication;
+  
+      (async () => {
+        const profile = await getGoogleProfile(accessToken);
+        await signInToCognito('google', accessToken, expiresIn, profile);
+  
+        navigation.navigate('Feed');
+      })().catch(console.error);
+    }
+  }, [googleResponse]);
 
-  // useEffect(() => {
-  //   if (googleResponse?.type === 'success') {
-  //     const { authentication } = googleResponse;
-  //     console.log('🔵 Google access token:', authentication.accessToken);
-  //     // Later: Trigger Cognito sign-in here
-  //   }
-  // }, [googleResponse]);
+  /* ---------- FACEBOOK response handler ---------- */
+  useEffect(() => {
+    if (fbResponse?.type === 'success' && fbResponse.authentication) {
+      const { accessToken, expiresIn } = fbResponse.authentication;
+  
+      (async () => {
+        const profile = await getFacebookProfile(accessToken);
+        await signInToCognito('facebook', accessToken, expiresIn, profile);
+        navigation.navigate('Feed');
+      })().catch(console.error);
+    }
+  }, [fbResponse]);
 
   return (
     <LinearGradient
@@ -59,33 +78,33 @@ const LoginScreen = () => {
     >
       <Text style={[styles.logo, { color: COLORS.static.text }]}>GROOVI</Text>
 
-      <TouchableOpacity
-        style={[styles.buttonBase, styles.whiteButton]}
+      <Button
+        title="Sign Up"
         onPress={() => navigation.navigate('SignupFlow')}
-      >
-        <Text style={styles.blackText}>Sign Up</Text>
-      </TouchableOpacity>
-
-      <TouchableOpacity
         style={[styles.buttonBase, styles.whiteButton]}
+        textStyle={styles.blackText}
+      />
+
+      <Button
+        title="Use phone or email"
         onPress={() => navigation.navigate('Phone Or Email')}
-      >
-        <Text style={styles.blackText}>Use phone or email</Text>
-      </TouchableOpacity>
+        style={[styles.buttonBase, styles.whiteButton]}
+        textStyle={styles.blackText}
+      />
 
-      <TouchableOpacity
-        style={[styles.buttonBase, styles.googleButton]}
+      <Button
+        title="Continue with Google"
         onPress={() => promptGoogleLogin()}
-      >
-        <Text style={styles.googleText}>Continue with Google</Text>
-      </TouchableOpacity>
+        style={[styles.buttonBase, styles.googleButton]}
+        textStyle={styles.googleText}
+      />
 
-      <TouchableOpacity
-        style={[styles.buttonBase, styles.fbButton]}
+      <Button
+        title="Continue with Facebook"
         onPress={() => promptFbLogin()}
-      >
-        <Text style={styles.fbText}>Continue with Facebook</Text>
-      </TouchableOpacity>
+        style={[styles.buttonBase, styles.fbButton]}
+        textStyle={styles.fbText}
+      />
 
       <TouchableOpacity>
         <Text style={styles.troubleText}>Trouble Logging In?</Text>

@@ -1,6 +1,6 @@
 import React from 'react';
 import { render, fireEvent, waitFor } from '@testing-library/react-native';
-import InstrumentsScreen from '../screens/InstrumentsScreen';
+import InstrumentsScreen from '../screens/onboarding/InstrumentsScreen';
 import { NavigationContainer } from '@react-navigation/native';
 import { SignupFlowProvider } from '../context/SignupFlowContext';
 

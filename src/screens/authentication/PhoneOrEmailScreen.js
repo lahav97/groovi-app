@@ -18,6 +18,8 @@ import { Ionicons } from '@expo/vector-icons';
 import { useNavigation } from '@react-navigation/native';
 import PhoneInput from 'react-native-phone-number-input';
 import * as Localization from 'expo-localization';
+import Button from '../../components/common/Button';
+import { Auth } from 'aws-amplify';
 
 /**
  * @function getDefaultCountryCode
@@ -40,42 +42,85 @@ const PhoneOrEmailScreen = () => {
   const [phone, setPhone] = useState('');
   const [formattedPhone, setFormattedPhone] = useState('');
   const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
   const [authError, setAuthError] = useState('');
+  const [isLoading, setIsLoading] = useState(false);
   const navigation = useNavigation();
   const phoneInputRef = useRef(null);
 
-    /**
+  /**
    * @function handleContinue
-   * @description Validates user input and navigates to the next screen if valid.
+   * @description Validates user input and signs in the user if valid.
    */
-  const handleContinue = () => {
+  const handleContinue = async () => {
     let valid = true;
+    setAuthError('');
+    
+    if (!password) {
+      setAuthError('Please enter a password');
+      return;
+    }
 
     if (authMethod === 'phone') {
       const isValid = phoneInputRef.current?.isValidNumber(formattedPhone);
 
       if (!isValid) {
         setAuthError('Please enter a valid phone number');
-        valid = false;
+        return;
       } else {
-        setAuthError('');
         console.log('📞 Phone is valid:', formattedPhone);
+        setIsLoading(true);
+        
+        try {
+          await Auth.signIn({
+            username: formattedPhone,
+            password: password,
+          });
+          setIsLoading(false);
+          navigation.navigate('Feed');
+        } catch (error) {
+          setIsLoading(false);
+          console.error('Error signing in with phone:', error);
+          
+          if (error.code === 'UserNotFoundException') {
+            setAuthError('Account not found. Please check your phone number.');
+          } else if (error.code === 'NotAuthorizedException') {
+            setAuthError('Incorrect password. Please try again.');
+          } else {
+            setAuthError(error.message || 'Failed to sign in. Please try again.');
+          }
+        }
       }
     } else {
+      // Email authentication
       const isValidEmail = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
       if (!isValidEmail) {
         setAuthError('Please enter a valid email address');
-        valid = false;
+        return;
       } else {
-        setAuthError('');
         console.log('📧 Email is valid:', email);
+        setIsLoading(true);
+        try {
+          await Auth.signIn({
+            username: email, 
+            password: password,
+          });
+          setIsLoading(false);
+          navigation.navigate('Feed');
+        } catch (error) {
+          setIsLoading(false);
+          console.error('Error signing in with email:', error);
+          
+          if (error.code === 'UserNotFoundException') {
+            setAuthError('Account not found. Please check your email.');
+          } else if (error.code === 'NotAuthorizedException') {
+            setAuthError('Incorrect password. Please try again.');
+          } else {
+            setAuthError(error.message || 'Failed to sign in. Please try again.');
+          }
+        }
       }
     }
-
-    if (!valid) return;
-
-    // Proceed with verification logic later (e.g., Cognito)
-    navigation.navigate('Feed');
   };
 
   return (
@@ -94,13 +139,19 @@ const PhoneOrEmailScreen = () => {
 
         <View style={styles.methodToggleContainer}>
           <TouchableOpacity
-            onPress={() => setAuthMethod('phone')}
+            onPress={() => {
+              setAuthMethod('phone');
+              setAuthError('');
+            }}
             style={[styles.methodButton, authMethod === 'phone' && styles.methodSelected]}
           >
             <Text style={authMethod === 'phone' ? styles.methodTextSelected : styles.methodText}>Use Phone</Text>
           </TouchableOpacity>
           <TouchableOpacity
-            onPress={() => setAuthMethod('email')}
+            onPress={() => {
+              setAuthMethod('email');
+              setAuthError('');
+            }}
             style={[styles.methodButton, authMethod === 'email' && styles.methodSelected]}
           >
             <Text style={authMethod === 'email' ? styles.methodTextSelected : styles.methodText}>Use Email</Text>
@@ -120,7 +171,10 @@ const PhoneOrEmailScreen = () => {
             textContainerStyle={styles.phoneTextContainer}
             textInputStyle={styles.phoneInputText}
             codeTextStyle={styles.codeTextStyle}
-            textInputProps={{ placeholderTextColor: '#666' }}
+            textInputProps={{ 
+              placeholderTextColor: '#666',
+              placeholder: 'Phone Number'
+            }}
           />
         ) : (
           <TextInput
@@ -134,11 +188,24 @@ const PhoneOrEmailScreen = () => {
           />
         )}
 
+        <TextInput
+          placeholder="Password"
+          value={password}
+          onChangeText={setPassword}
+          style={styles.input}
+          placeholderTextColor="#666"
+          secureTextEntry
+        />
+
         {authError !== '' && <Text style={styles.errorText}>{authError}</Text>}
 
-        <TouchableOpacity style={styles.continueButton} onPress={handleContinue}>
-          <Text style={styles.continueText}>Continue</Text>
-        </TouchableOpacity>
+        <Button
+          title={isLoading ? "Signing in..." : "Continue"}
+          onPress={handleContinue}
+          style={styles.continueButton}
+          textStyle={styles.continueText}
+          disabled={isLoading}
+        />
       </KeyboardAvoidingView>
     </LinearGradient>
   );

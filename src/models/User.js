@@ -11,6 +11,7 @@ class User {
       genres,
       location,
       videos,
+      profilePicture,
       bio,
     }) {
       this.fullName = fullName;
@@ -25,6 +26,7 @@ class User {
       this.location = location;
       this.videos = videos;
       this.bio = bio;
+      this.profilePicture = profilePicture;
     }
   }
   

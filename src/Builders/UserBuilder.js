@@ -15,6 +15,11 @@ class UserBuilder {
         return this;
     }
 
+    setProfilePicture(profilePicture) {
+        this.user.profilePicture = profilePicture;
+        return this;
+    }
+    
     setGender(gender) {
         this.user.gender = gender;
         return this;

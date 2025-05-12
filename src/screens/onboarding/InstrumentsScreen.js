@@ -20,7 +20,8 @@ import { Ionicons } from '@expo/vector-icons';
 import { useNavigation } from '@react-navigation/native';
 import { LinearGradient } from 'expo-linear-gradient';
 import * as Haptics from 'expo-haptics';
-import { useSignupBuilder } from '../context/SignupFlowContext';
+import { useSignupBuilder } from '../../context/SignupFlowContext';
+import Button from '../../components/common/Button';
 
 
 if (Platform.OS === 'android' && UIManager.setLayoutAnimationEnabledExperimental) {
@@ -43,7 +44,7 @@ const skillLevels = ['Beginner', 'Intermediate', 'Pro'];
  * @description Screen that lets users select instruments and their skill levels as part of their profile setup.
  * @returns {JSX.Element}
  */
-const InstrumentsScreen = () => {
+  const InstrumentsScreen = () => {
   const navigation = useNavigation();
   const isDark = useColorScheme() === 'dark';
   const backgroundColor = isDark ? '#1c1c1e' : '#fff';
@@ -248,7 +249,7 @@ const InstrumentsScreen = () => {
           </View>
         )}
 
-        <TouchableOpacity
+        <Button
           disabled={selectedInstruments.length === 0}
           onPress={handleContinue}
           style={[styles.continueButton, selectedInstruments.length === 0 && styles.disabledButton]}
@@ -261,7 +262,7 @@ const InstrumentsScreen = () => {
           >
             <Text style={styles.continueText}>CONTINUE</Text>
           </LinearGradient>
-        </TouchableOpacity>
+        </Button>
       </ScrollView>
     </View>
   );
@@ -307,6 +308,7 @@ const styles = StyleSheet.create({
     opacity: 0.5,
   },
   gradient: {
+    width: '100%',
     paddingVertical: 16,
     paddingHorizontal: 32,
     alignItems: 'center',
