@@ -88,10 +88,10 @@ if __name__ == "__main__":
 
     test_event = {
         "body": json.dumps({
-            "username": "lahav97",
+            "username": "Mergui",
             "phone_number": "+972543170570",
-            "email": "lahav@example.com",
-            "address": "Mountain View",
+            "email": "Mergui@example.com",
+            "address": "Tel aviv,",
             "password": "safe_password",
             "profile_picture": "https://s3.amazonaws.com/yourbucket/images/profile-pic.jpg",
             "bio": "I love to play the guitar",

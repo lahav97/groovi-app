@@ -27,7 +27,7 @@ def lambda_handler(event, context):
                 FROM users
                 WHERE videos IS NOT NULL AND array_length(videos, 1) > 0
                 ORDER BY RANDOM()
-                LIMIT 5
+                LIMIT 4
             """)
             users = cur.fetchall()
 
@@ -49,10 +49,8 @@ def lambda_handler(event, context):
 
         return {
             "statusCode": 200,
-            "headers": {
-                "Content-Type": "application/json"
-            },
-            "body": json.dumps(result)
+            "body": json.dumps(result, ensure_ascii=False),  # alllow non-ASCII characters like ó for Cajón in instruments
+            "headers": {"Content-Type": "application/json; charset=utf-8"}
         }
 
     except Exception as e:
@@ -63,3 +61,11 @@ def lambda_handler(event, context):
 
     finally:
         conn.close()
+
+
+# Local testing
+if __name__ == "__main__":
+    import json
+
+    response = lambda_handler(None, None)
+    print(response)
