@@ -37,7 +37,7 @@ const mockVideos = [
  * @description Displays the user's profile page including video swiper, info, and bottom navigation.
  * @returns {JSX.Element}
  */
-const ProfileScreen = () => {
+const ProfileScreen = () => { 
   const navigation = useNavigation();
   const [pausedStatus, setPausedStatus] = useState({});
   const [currentIndex, setCurrentIndex] = useState(0);

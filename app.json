@@ -8,6 +8,7 @@
     "userInterfaceStyle": "automatic",
     "android": {
       "package": "com.groovi.app",
+      "permissions": ["WRITE_EXTERNAL_STORAGE", "READ_EXTERNAL_STORAGE"],
       "newArchEnabled": false
     },
     "ios": {
@@ -15,7 +16,8 @@
       "newArchEnabled": false
     },
     "plugins": [
-      "expo-localization"
+      "expo-localization",
+      "@config-plugins/ffmpeg-kit-react-native"
     ],
     "scheme": "groovi",
     "extra": {

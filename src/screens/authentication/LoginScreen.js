@@ -86,8 +86,8 @@ const LoginScreen = () => {
       />
 
       <Button
-        title="Use phone or email"
-        onPress={() => navigation.navigate('Phone Or Email')}
+        title="Login with email"
+        onPress={() => navigation.navigate('LoginWithEmail')}
         style={[styles.buttonBase, styles.whiteButton]}
         textStyle={styles.blackText}
       />
