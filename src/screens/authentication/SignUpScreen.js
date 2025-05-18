@@ -11,7 +11,6 @@ import {
   StyleSheet,
   ScrollView,
   Alert,
-  Platform,
 } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useNavigation } from '@react-navigation/native';
@@ -45,14 +44,7 @@ const SignUpScreen = () => {
   const [passwordError, setPasswordError] = React.useState('');
   const [dateError, setDateError] = React.useState('');
 
-  /**
-   * @function isValidEmail
-   * @description Validates an email string.
-   * @param {string} email - Email to validate.
-   * @returns {boolean}
-   */
-  const isValidEmail = (email) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
-  
+  const CHECK_EMAIL_API_URL = 'https://9u6y4sfrn2.execute-api.us-east-1.amazonaws.com/groovi/build_profile/check_email?email=';
   /**
    * @function isValidPassword
    * @description Validates if a password has at least one capital letter and one number.
@@ -102,16 +94,21 @@ const SignUpScreen = () => {
    */
   const isEmailExists = async (email) => {
     try {
-      // Since the API endpoint returns a 404, we'll skip this check for now
-      // In a production environment, you would implement proper email existence checking
-      const response = await axios.get(`https://9u6y4sfrn2.execute-api.us-east-1.amazonaws.com/groovi/build_profile/check_email?email=${email}`);
-      console.log('Email existence check response:', response.data);
+      const response = await axios.get(`${CHECK_EMAIL_API_URL}${email}`);
       return response.data.found === true;
     } catch (error) {
       console.error('Error checking if email exists:', error);
       return false;
     }
   };
+
+  /**
+   * @function isValidEmail
+   * @description Validates an email string.
+   * @param {string} email - Email to validate.
+   * @returns {boolean}
+   */
+  const isValidEmail = (email) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
   
   /**
    * @function handleDateUpdate
@@ -186,14 +183,20 @@ const SignUpScreen = () => {
       setAuthError('Enter a valid email address');
       valid = false;
     } else {
-      setAuthError('');
-      // In a production app, you would check if the email exists
-      // For development purposes, we're skipping this check
-      // const emailExists = await isEmailExists(email);
-      // if (emailExists) {
-      //   setAuthError('Email is already in use');
-      //   valid = false;
-      // }
+      try{
+        const emailExists = await isEmailExists(email);
+        
+        if (emailExists) {
+          setAuthError('This email is already registered');
+          valid = false;
+        }
+        else{
+          setAuthError('');
+        }
+      } catch (error) {
+        console.error('Error checking if email exists:', error);
+        setAuthError(''); 
+      }
     }
 
     // Validate password
@@ -204,28 +207,10 @@ const SignUpScreen = () => {
       setPasswordError('');
     }
 
-    if (!fullName.trim()) {
-      Alert.alert('Error', 'Please enter your full name');
-      return;
-    }
-
     // Validate birthday
     if (!birthdayDate) {
       setDateError('Please select your birthday');
       valid = false;
-    }
-
-    if (!username.trim()) {
-      Alert.alert('Error', 'Please enter a username');
-      return;
-    }
-
-    if (!valid) {
-      Alert.alert(
-        'Validation Error', 
-        'Please correct the errors in the form before continuing.'
-      );
-      return;
     }
 
     builder
@@ -485,7 +470,6 @@ const SignUpScreen = () => {
           <Button
             title="Continue"
             onPress={() => {
-              console.log('Continue button pressed');
               handleContinue();
             }}
             style={styles.continueButton}

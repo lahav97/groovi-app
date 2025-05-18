@@ -17,7 +17,6 @@ import Button from '../../components/common/Button';
 WebBrowser.maybeCompleteAuthSession();
 
 const redirectUri = 'https://auth.expo.io/@lahav97/groovi-app';
-console.log('REDIRECT_URI', redirectUri);
 
 /**
  * @function LoginScreen

@@ -17,12 +17,13 @@ import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
 import { useNavigation } from '@react-navigation/native';
 import Button from '../../components/common/Button';
-import { Auth } from 'aws-amplify';
+import { useAuth } from '../../context/AuthContext';
+import { saveUserEmail } from '../../utils/userUtils';
 
 /**
- * @function PhoneOrEmailScreen
- * @description Allows users to log in either via phone number or email address.
- * @returns {JSX.Element} The PhoneOrEmailScreen component.
+ * @function LoginWithEmailScreen
+ * @description Allows users to log in via email address.
+ * @returns {JSX.Element} The LoginWithEmailScreen component.
  */
 const LoginWithEmailScreen = () => {
   const [email, setEmail] = useState('');
@@ -31,6 +32,9 @@ const LoginWithEmailScreen = () => {
   const [isLoading, setIsLoading] = useState(false);
   const [showPassword, setShowPassword] = useState(false);
   const navigation = useNavigation();
+  
+  // Use the auth context
+  const { signIn } = useAuth();
 
   /**
    * @function handleContinue
@@ -50,14 +54,20 @@ const LoginWithEmailScreen = () => {
       console.log('📧 Email is valid:', email);
       setIsLoading(true);
       try {
-        await Auth.signIn({
-          username: email, 
-          password: password,
-        });
-        setIsLoading(false);
-        navigation.navigate('Feed');
+        // Use the signIn method from auth context instead of direct Auth call
+        const result = await signIn(email, password);
+
+        if (result.success) {
+          // Navigation will be handled by AppNavigator based on auth state
+          console.log('Sign in successful');
+          
+          // Save email to AsyncStorage
+          await saveUserEmail(email);
+          console.log('Email saved to storage:', email);
+        } else {
+          setAuthError(result.error || 'Failed to sign in. Please try again.');
+        }
       } catch (error) {
-        setIsLoading(false);
         console.error('Error signing in with email:', error);
         if (error.code === 'UserNotFoundException') {
           setAuthError('Account not found. Please check your email.');
@@ -66,6 +76,8 @@ const LoginWithEmailScreen = () => {
         } else {
           setAuthError(error.message || 'Failed to sign in. Please try again.');
         }
+      } finally {
+        setIsLoading(false);
       }
     }
   };

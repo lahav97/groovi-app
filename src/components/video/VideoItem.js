@@ -27,10 +27,12 @@ const VideoItem = ({ item, isVisible, height }) => {
   const [hasError, setHasError] = useState(false);
   const [localVideoUri, setLocalVideoUri] = useState(null);
   const [isPlaying, setIsPlaying] = useState(false);
+  const currentPositionRef = useRef(0); // Use ref instead of state for position tracking
   const initialLoadRef = useRef(true);
   const retryCountRef = useRef(0);
   const colorScheme = useColorScheme();
   const COLOR = colorScheme === 'dark' ? COLORS.dark : COLORS.light;
+  const positionUpdateIntervalRef = useRef(null);
   
   // Function to download and cache the video locally
   const cacheVideo = async (videoUrl) => {
@@ -48,13 +50,11 @@ const VideoItem = ({ item, isVisible, height }) => {
       // Check if file already exists
       const fileInfo = await FileSystem.getInfoAsync(localUri);
       if (fileInfo.exists) {
-        console.log('Video already cached');
         setLocalVideoUri(localUri);
         return localUri;
       }
       
       // Download the file
-      console.log(`Downloading video from ${videoUrl} to ${localUri}`);
       const downloadResult = await FileSystem.downloadAsync(videoUrl, localUri);
       
       if (downloadResult.status === 200) {
@@ -78,7 +78,19 @@ const VideoItem = ({ item, isVisible, height }) => {
     if (item.videoUrl) {
       cacheVideo(item.videoUrl);
     }
+    
+    // Reset position when item changes
+    currentPositionRef.current = 0;
   }, [item.videoUrl]);
+
+  // Cleanup intervals on unmount
+  useEffect(() => {
+    return () => {
+      if (positionUpdateIntervalRef.current) {
+        clearInterval(positionUpdateIntervalRef.current);
+      }
+    };
+  }, []);
 
   useEffect(() => {
     let timeout;
@@ -88,12 +100,11 @@ const VideoItem = ({ item, isVisible, height }) => {
     return () => clearTimeout(timeout);
   }, [showPlayIcon]);
 
-  // Handle video visibility state changes
+  // Handle video visibility state changes without position manipulation
   useEffect(() => {
     if ((!isVisible || !isFocused) && videoRef.current) {
       videoRef.current.pauseAsync();
     } else if (isVisible && isFocused && videoRef.current && !paused) {
-      // Resume playback when becoming visible again
       videoRef.current.playAsync();
     }
   }, [isVisible, isFocused, paused]);
@@ -116,9 +127,21 @@ const VideoItem = ({ item, isVisible, height }) => {
     }
   }, [isPlaying, hasError]);
 
-  const handleTogglePlayback = () => {
-    setPaused(!paused);
-    setShowPlayIcon(true);
+  const handleTogglePlayback = async () => {
+    try {
+      if (videoRef.current) {
+        if (paused) {
+          await videoRef.current.playAsync();
+        } else {
+          await videoRef.current.pauseAsync();
+        }
+        
+        setPaused(!paused);
+        setShowPlayIcon(true);
+      }
+    } catch (error) {
+      console.error('Error toggling playback:', error);
+    }
   };
 
   const handleVideoLoad = () => {
@@ -128,6 +151,24 @@ const VideoItem = ({ item, isVisible, height }) => {
     setHasError(false);
     initialLoadRef.current = false;
     retryCountRef.current = 0; // Reset retry count on successful load
+    
+    // Start position tracking interval when video loads
+    if (positionUpdateIntervalRef.current) {
+      clearInterval(positionUpdateIntervalRef.current);
+    }
+    
+    positionUpdateIntervalRef.current = setInterval(async () => {
+      if (videoRef.current && !paused && isVisible && isFocused) {
+        try {
+          const status = await videoRef.current.getStatusAsync();
+          if (status.isLoaded && status.isPlaying) {
+            currentPositionRef.current = status.positionMillis;
+          }
+        } catch (e) {
+          // Silently ignore errors during position tracking
+        }
+      }
+    }, 1000); // Update position only once per second for better performance
   };
 
   const handleVideoError = (error) => {
@@ -140,7 +181,6 @@ const VideoItem = ({ item, isVisible, height }) => {
 
   const handlePlaybackStatusUpdate = (status) => {
     // Only show loading indicator on initial load or if truly stalled
-    // and don't show it if the video is already playing for a while
     if (status.isLoaded) {
       // Update playing state
       setIsPlaying(status.isPlaying && !status.isPaused);
@@ -154,6 +194,7 @@ const VideoItem = ({ item, isVisible, height }) => {
       // Auto-repeat if video ends (as a backup to isLooping prop)
       if (status.didJustFinish && !status.isLooping) {
         videoRef.current?.replayAsync();
+        currentPositionRef.current = 0; // Reset position when video loops
       }
     }
   };
@@ -183,7 +224,11 @@ const VideoItem = ({ item, isVisible, height }) => {
           try {
             if (videoRef.current) {
               await videoRef.current.unloadAsync();
-              await videoRef.current.loadAsync({ uri: localVideoUri }, {}, false);
+              await videoRef.current.loadAsync(
+                { uri: localVideoUri },
+                { positionMillis: currentPositionRef.current }, // Use position in load options
+                false
+              );
               await videoRef.current.playAsync();
             }
             return;
@@ -198,14 +243,22 @@ const VideoItem = ({ item, isVisible, height }) => {
           // If we have the video locally, use it
           if (videoRef.current) {
             await videoRef.current.unloadAsync();
-            await videoRef.current.loadAsync({ uri: cachedUri }, {}, false);
+            await videoRef.current.loadAsync(
+              { uri: cachedUri },
+              { positionMillis: currentPositionRef.current }, // Use position in load options
+              false
+            );
             await videoRef.current.playAsync();
           }
         } else {
           // Fall back to original URL
           if (videoRef.current) {
             await videoRef.current.unloadAsync();
-            await videoRef.current.loadAsync({ uri: item.videoUrl }, {}, false);
+            await videoRef.current.loadAsync(
+              { uri: item.videoUrl },
+              { positionMillis: currentPositionRef.current }, // Use position in load options
+              false
+            );
             await videoRef.current.playAsync();
           }
         }
@@ -252,8 +305,8 @@ const VideoItem = ({ item, isVisible, height }) => {
           onLoad={handleVideoLoad}
           onError={handleVideoError}
           onPlaybackStatusUpdate={handlePlaybackStatusUpdate}
-          progressUpdateIntervalMillis={500}
-          positionMillis={0}
+          progressUpdateIntervalMillis={1000} // Lower frequency updates for better performance
+          // Don't set positionMillis prop here - it causes glitches when constantly updated
           rate={1.0}
           volume={1.0}
           // Increased buffer size for smoother playback
@@ -300,6 +353,7 @@ const VideoItem = ({ item, isVisible, height }) => {
 };
 
 const styles = StyleSheet.create({
+  // Your existing styles
   videoContainer: {
     width: width,
     justifyContent: 'center',

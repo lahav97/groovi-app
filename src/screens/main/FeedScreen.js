@@ -4,7 +4,7 @@
  * Implements infinite loading to fetch more videos as the user scrolls.
  */
 import React, { useRef, useState, useEffect, useCallback } from 'react';
-import { View, FlatList, Dimensions, StyleSheet, ActivityIndicator, Text } from 'react-native';
+import { View, FlatList, Dimensions, StyleSheet, ActivityIndicator, Text, TouchableOpacity } from 'react-native';
 import VideoItem from '../../components/video/VideoItem';
 import BottomNavigation from '../../components/navigationBar/BottomNavigation';
 import TopBar from '../../components/navigationBar/TopNavigation';
@@ -13,6 +13,7 @@ import { useIsFocused } from '@react-navigation/native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { fetchVideos } from '../../services/videoService';
 import { useFocusEffect } from '@react-navigation/native';
+import { useNavigation } from '@react-navigation/native';
 
 const { height: SCREEN_HEIGHT } = Dimensions.get('window');
 
@@ -21,11 +22,13 @@ const FeedScreen = () => {
   const [videos, setVideos] = useState([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
-  const [lastVideoId, setLastVideoId] = useState(null);
+  const [hasMoreVideos, setHasMoreVideos] = useState(true); // Track if more videos are available
   
   const isFocused = useIsFocused();
   const insets = useSafeAreaInsets();
   const flatListRef = useRef(null);
+  const navigation = useNavigation();
+  const apiCallInProgressRef = useRef(false); // Track if API call is in progress
   
   // Calculate exact video height to fit the screen perfectly
   const videoHeight = SCREEN_HEIGHT - insets.bottom;
@@ -40,38 +43,64 @@ const FeedScreen = () => {
    * Fetch videos from the API
    */
   const loadVideos = useCallback(async (refresh = false) => {
-    if (loading) return;
+    // Prevent multiple concurrent API calls
+    if (loading || apiCallInProgressRef.current) return;
     
+    // Don't try to load more videos if we know there aren't any more
+    if (!refresh && !hasMoreVideos) return;
+    
+    apiCallInProgressRef.current = true;
     setLoading(true);
     setError(null);
     
     try {
-      // If refreshing, use null for lastVideoId, otherwise use the current lastVideoId
-      const lastId = refresh ? null : (videos.length > 0 ? videos[videos.length - 1].user_id : null);
-      
-      const newVideos = await fetchVideos(lastId);
+      // If API call fails, use mock data as fallback
+      let newVideos;
+      try {
+        newVideos = await fetchVideos();
+        
+        // If we got empty response, there are no more videos
+        if (newVideos.length === 0) {
+          setHasMoreVideos(false);
+          return;
+        }
+      } catch (apiError) {
+        console.error('API call failed:', apiError);
+        
+        // Use mock data as fallback only for initial load
+        if (videos.length === 0) {
+          console.log('Using mock data as fallback');
+          newVideos = VIDEOS;
+        } else {
+          // If not initial load, propagate the error
+          throw apiError;
+        }
+      }
       
       if (refresh) {
+        // Replace all videos on refresh
         setVideos(newVideos);
       } else {
-        // Append new videos to existing list, avoiding duplicates by user_id
-        const uniqueNewVideos = newVideos.filter(
-          newVideo => !videos.some(existingVideo => existingVideo.user_id === newVideo.user_id)
-        );
-        setVideos(prev => [...prev, ...uniqueNewVideos]);
+        // For "load more", add new videos without duplicates
+        const existingIds = new Set(videos.map(v => v.id || v.user_id));
+        const uniqueNewVideos = newVideos.filter(v => !existingIds.has(v.id || v.user_id));
+        
+        if (uniqueNewVideos.length === 0) {
+          // If no new unique videos, we've reached the end
+          setHasMoreVideos(false);
+        } else {
+          setVideos(prev => [...prev, ...uniqueNewVideos]);
+        }
       }
       
-      // Store the ID of the last video for pagination
-      if (newVideos.length > 0) {
-        setLastVideoId(newVideos[newVideos.length - 1].user_id);
-      }
     } catch (err) {
       console.error('Failed to fetch videos:', err);
       setError('Failed to load videos. Please try again.');
     } finally {
       setLoading(false);
+      apiCallInProgressRef.current = false;
     }
-  }, [loading, videos]);
+  }, [loading, videos, hasMoreVideos]);
   
   // Load initial videos when the component mounts
   useEffect(() => {
@@ -101,8 +130,9 @@ const FeedScreen = () => {
         setCurrentVisibleIndex(newIndex);
         
         // Load more videos when the user reaches the 3rd video from the end
-        if (newIndex >= videos.length - 3 && !loading) {
-          loadVideos();
+        // But only if we believe more videos exist AND we're not currently loading
+        if (newIndex >= videos.length - 3 && !loading && hasMoreVideos) {
+          loadVideos(false);
         }
       }
     }
@@ -171,8 +201,9 @@ const FeedScreen = () => {
       setCurrentVisibleIndex(index);
       
       // Load more videos when reaching the third video from the end
-      if (index >= videos.length - 3 && !loading) {
-        loadVideos();
+      // But only if we believe more videos exist AND we're not currently loading
+      if (index >= videos.length - 3 && !loading && hasMoreVideos && !apiCallInProgressRef.current) {
+        loadVideos(false);
       }
     }
     
@@ -202,6 +233,12 @@ const FeedScreen = () => {
     enforcePerfectAlignment();
   };
 
+  // Function to retry loading videos
+  const handleRetry = () => {
+    setHasMoreVideos(true); // Reset this flag
+    loadVideos(true);
+  };
+
   // Show loading indicator for initial load
   if (loading && videos.length === 0) {
     return (
@@ -216,6 +253,9 @@ const FeedScreen = () => {
     return (
       <View style={[styles.container, styles.errorContainer]}>
         <Text style={styles.errorText}>{error}</Text>
+        <TouchableOpacity style={styles.retryButton} onPress={handleRetry}>
+          <Text style={styles.retryButtonText}>Retry</Text>
+        </TouchableOpacity>
       </View>
     );
   }
@@ -244,12 +284,12 @@ const FeedScreen = () => {
             renderItem={({ item, index }) => (
               <VideoItem
                 item={{
-                  id: item.user_id,
-                  user: item.username,
-                  description: `Playing ${item.instruments?.join(', ')}`,
-                  videoUrl: item.video_url,
-                  likes: Math.floor(Math.random() * 100), // Placeholder likes
-                  comments: Math.floor(Math.random() * 50), // Placeholder comments
+                  id: item.user_id || item.id,
+                  user: item.username || item.user,
+                  description: item.description || `Playing ${item.instruments?.join(', ')}`,
+                  videoUrl: item.video_url || item.videoUrl,
+                  likes: item.likes || Math.floor(Math.random() * 100), // Fallback with random likes
+                  comments: item.comments || Math.floor(Math.random() * 50), // Fallback with random comments
                 }}
                 isVisible={index === currentVisibleIndex && isFocused}
                 height={videoHeight}
@@ -268,8 +308,10 @@ const FeedScreen = () => {
             initialScrollIndex={0}
             maxToRenderPerBatch={3}
             windowSize={5}
-            keyExtractor={(item, index) => `${item.user_id}-${index}`}
-            />
+            keyExtractor={(item, index) => 
+              item.id?.toString() || item.video_id?.toString() || item.videoUrl || `${item.user_id}-${index}`
+            }
+          />
         ) : null}
       </View>
 
@@ -323,6 +365,18 @@ const styles = StyleSheet.create({
     color: 'white',
     fontSize: 16,
     textAlign: 'center',
+    marginBottom: 20,
+  },
+  retryButton: {
+    backgroundColor: '#1c92d2',
+    paddingVertical: 12,
+    paddingHorizontal: 24,
+    borderRadius: 25,
+  },
+  retryButtonText: {
+    color: 'white',
+    fontSize: 16,
+    fontWeight: 'bold',
   },
   footerLoading: {
     height: 100,
