@@ -12,6 +12,17 @@ DB_PORT = 5432
 
 
 def lambda_handler(event, context):
+    # Parse username from request
+    try:
+        body = json.loads(event['body'])
+        requesting_username = body['username']
+    except (KeyError, TypeError, json.JSONDecodeError):
+        return {
+            "statusCode": 400,
+            "body": json.dumps({"error": "Invalid input. Expected a JSON body with 'username' field."}),
+            "headers": {"Content-Type": "application/json"}
+        }
+
     conn = psycopg2.connect(
         host=DB_HOST,
         dbname=DB_NAME,
@@ -25,10 +36,10 @@ def lambda_handler(event, context):
             cur.execute("""
                 SELECT id, username, videos, instruments
                 FROM users
-                WHERE videos IS NOT NULL AND array_length(videos, 1) > 0
+                WHERE username != %s AND videos IS NOT NULL AND array_length(videos, 1) > 0
                 ORDER BY RANDOM()
-                LIMIT 4
-            """)
+                LIMIT 5
+            """, (requesting_username,))
             users = cur.fetchall()
 
             result = []
@@ -65,7 +76,10 @@ def lambda_handler(event, context):
 
 # Local testing
 if __name__ == "__main__":
-    import json
-
-    response = lambda_handler(None, None)
+    test_event = {
+        "body": json.dumps({
+            "username": "lahav97"
+        })
+    }
+    response = lambda_handler(test_event, None)
     print(response)
