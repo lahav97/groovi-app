@@ -14,7 +14,7 @@ DB_PORT = 5432
 ALLOWED_FIELDS = {
     "phone_number", "address", "profile_picture",
     "bio", "social_links", "instruments", "rating",
-    "genres", "videos", "full_name"
+    "genres", "videos", "full_name", "gender"
 }
 
 # Fields that can be used to identify the user
@@ -85,7 +85,7 @@ def lambda_handler(event, context):
 
         return {
             "statusCode": 200,
-            "body": json.dumps(updated_user, ensure_ascii=False),
+            "body": json.dumps(updated_user, ensure_ascii=False, default=str),
             "headers": {"Content-Type": "application/json; charset=utf-8"}
         }
 
@@ -100,11 +100,11 @@ def lambda_handler(event, context):
 if __name__ == "__main__":
     test_event = {
         "body": json.dumps({
-            "email": "eyalmu44@gmail.com",
-            "full_name": "Eyal Muttath"
+            "username": "ed_sheeran",
+            "gender": "male"
         })
     }
 
     response = lambda_handler(test_event, None)
     print("=== Lambda Response ===")
-    print(json.dumps(response, ensure_ascii=False))
+    print(response)
