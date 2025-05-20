@@ -16,7 +16,7 @@ def lambda_handler(event, context):
         body = json.loads(event['body'])
         username = body['username']
         full_name = body['full_name']
-        phone_number = body['phone_number']
+        phone_number = body.get('phone_number', None)
         email = body['email']
         address = body['address']
         password = body['password']
@@ -88,22 +88,30 @@ if __name__ == "__main__":
 
     test_event = {
         "body": json.dumps({
-            "username": "Mergui",
-            "phone_number": "+972543170570",
-            "email": "Mergui@example.com",
-            "address": "Tel aviv,",
-            "password": "safe_password",
-            "profile_picture": "https://s3.amazonaws.com/yourbucket/images/profile-pic.jpg",
-            "bio": "I love to play the guitar",
-            "social_links": "https://www.instagram.com/lahav",
+            "username": "taligolergant",
+            # "phone_number": "",
+            "email": "taligolergant@example.com",
+            "address": "Tel Aviv",
+            "password": "blabla",
+            # "profile_picture": ,
+            "bio": "HELLO WORLD",
+            # "social_links": "https://www.instagram.com/lahav",
             "instruments": {
-                 "Cello": "Beginner",
-                 "Keyboard": "Intermediate"
-            },  # SERIALIZE instruments to JSON string
+                "Singer": "Expert",
+                "Piano": "Intermediate",
+                "Guitar": "Beginner"
+            },
             "rating": 4.9,
             "user_type": "musician",
-            "genres": ["Rock", "Jazz", "Hip Hop"],  # 👈 KEEP genres as normal list (text[])
-            "full_name": "Lahav Rabinovitz"
+            "genres": ["Musical Theatre", "Pop", "Indie", "Jazz"],
+            "full_name": "Tali Golergant",
+            "videos": [
+                "https://groovi.s3.amazonaws.com/taligolergant_12.mp4",
+                "https://groovi.s3.amazonaws.com/taligolergant_13.mp4",
+                "https://groovi.s3.amazonaws.com/taligolergant_14.mp4",
+                "https://groovi.s3.amazonaws.com/taligolergant_15.mp4"
+            ],
+            "gender": "female"
         })
     }
 
