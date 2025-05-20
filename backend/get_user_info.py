@@ -95,7 +95,7 @@ if __name__ == "__main__":
     test_event_username = {
        "body": json.dumps({
            "field": "username",
-           "value": "lahav78"
+           "value": "lahav97"
         })
     }
 

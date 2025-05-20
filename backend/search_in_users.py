@@ -61,13 +61,12 @@ def lambda_handler(event, context):
 
 # Local testing
 if __name__ == "__main__":
-    import json
 
     # Example 1: test by email
     test_event_email = {
         "body": json.dumps({
             "field": "email",
-            "value": "margi7.official@gmail.com"
+            "value": "margi.official@gmail.com"
         })
     }
 
@@ -77,7 +76,7 @@ if __name__ == "__main__":
     #        "field": "username",
     #        "value": "lahav77"
     #   })
-    #}
+    # }
 
     print("=== Test by Email ===")
     print(lambda_handler(test_event_email, None))
