@@ -1,7 +1,13 @@
-import { useState, useEffect, useCallback, useRef } from 'react'; // Added useRef import
+// Enhanced userProfileManager.js with video persistence
+
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { fetchUserProfile } from '../services/profileService';
 import { getCurrentUserEmail } from '../utils/userUtils';
 import { useIsFocused } from '@react-navigation/native';
+import AsyncStorage from '@react-native-async-storage/async-storage';
+
+const PROFILE_CACHE_KEY = 'profileCache';
+const PROFILE_VIDEOS_KEY = 'profileVideos';
 
 /**
  * Custom hook to manage profile data fetching and state
@@ -12,7 +18,7 @@ import { useIsFocused } from '@react-navigation/native';
  * @param {boolean} options.autoLoad - Whether to load profile automatically
  * @returns {Object} Profile management state and functions
  */
-const useProfileManager = ({
+const userProfileManager = ({
     email = null,
     username = null,
     loadOnFocus = true,
@@ -49,6 +55,32 @@ const useProfileManager = ({
       setError(null);
       
       try {
+        // Try to load from cache first unless forced
+        if (!force) {
+          const cached = await AsyncStorage.getItem(PROFILE_CACHE_KEY);
+          if (cached) {
+            const parsed = JSON.parse(cached);
+            
+            // IMPORTANT: Check if we need to restore videos from separate cache
+            if (!parsed.videos || parsed.videos.length === 0) {
+              const cachedVideos = await AsyncStorage.getItem(PROFILE_VIDEOS_KEY);
+              if (cachedVideos) {
+                parsed.videos = JSON.parse(cachedVideos);
+                console.log('Restored videos into cached profile:', parsed.videos.length);
+                
+                // Update the cache with the restored videos
+                await AsyncStorage.setItem(PROFILE_CACHE_KEY, JSON.stringify(parsed));
+              }
+            }
+            
+            setProfile(parsed);
+            setLoading(false);
+            isLoadingRef.current = false;
+            return parsed;
+          }
+        }
+        
+        // If no cache or forced refresh, load from API
         let userEmail = email;
         let user = username;
         
@@ -66,12 +98,37 @@ const useProfileManager = ({
         const value = userEmail || user;
                 
         // Fetch profile data
+        console.log(`Fetching profile for ${field}: ${value}`);
         const profileData = await fetchUserProfile(field, value);
+        
+        // Save videos separately for more reliable caching
+        if (profileData.videos && profileData.videos.length > 0) {
+          await AsyncStorage.setItem(PROFILE_VIDEOS_KEY, JSON.stringify(profileData.videos));
+          console.log('Cached profile videos separately:', profileData.videos.length);
+        }
+        
+        // Cache the full profile
+        await AsyncStorage.setItem(PROFILE_CACHE_KEY, JSON.stringify(profileData));
+        
         setProfile(profileData);
         return profileData;
       } catch (err) {
         console.error('Failed to load profile:', err);
         setError(err.message || 'Could not load profile data');
+        
+        // Try to use cached data as fallback if API fails
+        try {
+          const cached = await AsyncStorage.getItem(PROFILE_CACHE_KEY);
+          if (cached) {
+            const parsed = JSON.parse(cached);
+            console.log('Using cached profile as fallback after API error');
+            setProfile(parsed);
+            return parsed;
+          }
+        } catch (cacheError) {
+          console.error('Cache fallback also failed:', cacheError);
+        }
+        
         return null;
       } finally {
         setLoading(false);
@@ -97,7 +154,7 @@ const useProfileManager = ({
         console.error('Error checking if current user profile:', error);
         return false;
       }
-    }, [email]); // Removed profile from dependencies
+    }, [email]);
     
     // Load profile on mount if autoLoad is true
     useEffect(() => {
@@ -113,7 +170,7 @@ const useProfileManager = ({
         const now = Date.now();
         if (now - lastFocusTimeRef.current > 1000) {
           lastFocusTimeRef.current = now;
-          loadProfile();
+          loadProfile(false); // Don't force reload, use cache if available
         }
       }
     }, [isFocused, loadOnFocus, loadProfile]);
@@ -128,4 +185,4 @@ const useProfileManager = ({
     };
 };
 
-export default useProfileManager;
+export default userProfileManager;

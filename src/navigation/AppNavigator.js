@@ -10,9 +10,9 @@ import ProfileScreen from '../screens/main/ProfileScreen';
 import SignupNavigator from './SignupNavigator';
 import FilterScreen from '../screens/main/FilterScreen';
 import EditProfileScreen from '../screens/main/EditProfileScreen';
+import { SignupFlowProvider } from '../context/SignupFlowContext';
 import InstrumentsScreen from '../screens/onboarding/InstrumentsScreen';
 import ProfileSetupScreen from '../screens/onboarding/ProfileSetupScreen';
-import { SignupFlowProvider } from '../context/SignupFlowContext';
 
 // Ignore specific harmless warnings
 LogBox.ignoreLogs([
@@ -34,10 +34,17 @@ const AuthStack = () => (
   </Stack.Navigator>
 );
 
-const AppStack = () => (
-  <Stack.Navigator screenOptions={{ headerShown: false }} initialRouteName="Instruments">
+// This navigator handles the onboarding flow
+const OnboardingStack = () => (
+  <Stack.Navigator screenOptions={{ headerShown: false }}>
     <Stack.Screen name="Instruments" component={InstrumentsScreen} />
     <Stack.Screen name="Profile Setup" component={ProfileSetupScreen} />
+  </Stack.Navigator>
+);
+
+// Main app screens
+const MainStack = () => (
+  <Stack.Navigator screenOptions={{ headerShown: false }}>
     <Stack.Screen name="Feed" component={FeedScreen} />
     <Stack.Screen name="Profile" component={ProfileScreen} />
     <Stack.Screen name="Filter" component={FilterScreen} /> 
@@ -46,12 +53,12 @@ const AppStack = () => (
 );
 
 const AppNavigator = () => {
-  const { isSignedIn, isLoading } = useAuth();
+  const { isSignedIn, isLoading, hasCompletedOnboarding } = useAuth();
 
   // Log navigation state changes for debugging
   useEffect(() => {
-    console.log('Auth state changed. isSignedIn:', isSignedIn);
-  }, [isSignedIn]);
+    console.log('Auth state changed. isSignedIn:', isSignedIn, 'hasCompletedOnboarding:', hasCompletedOnboarding);
+  }, [isSignedIn, hasCompletedOnboarding]);
 
   // Show loading screen while checking auth state
   if (isLoading) {
@@ -70,7 +77,13 @@ const AppNavigator = () => {
   return (
     <NavigationContainer>
       <SignupFlowProvider>
-        {isSignedIn ? <AppStack /> : <AuthStack />}
+        {!isSignedIn ? (
+          <AuthStack />
+        ) : !hasCompletedOnboarding ? (
+          <OnboardingStack />
+        ) : (
+          <MainStack />
+        )}
       </SignupFlowProvider>
     </NavigationContainer>
   );

@@ -3,7 +3,7 @@
  * Screen for confirming a user's signup by entering a verification code.
  */
 import React, { useState, useEffect } from 'react';
-import { View, Text, TextInput, StyleSheet, Alert } from 'react-native';
+import { View, Text, TextInput, StyleSheet, Alert, ActivityIndicator } from 'react-native';
 import { useNavigation, useRoute } from '@react-navigation/native';
 import { LinearGradient } from 'expo-linear-gradient';
 import Button from '../../components/common/Button';
@@ -26,27 +26,19 @@ const ConfirmCodeScreen = () => {
   const [statusType, setStatusType] = useState(null); // 'success', 'error', 'info'
   
   // Use the auth context and signup builder
-  const { confirmSignUp, resendConfirmationCode, signIn, isSignedIn } = useAuth();
+  const { confirmSignUp, resendConfirmationCode, signIn } = useAuth();
   const signupBuilder = useSignupBuilder();
   
   // Store credentials in the builder for later use in ProfileSetupScreen
   useEffect(() => {
     if (username && password) {
-      // Make sure these methods exist in your builder
       if (signupBuilder.setUsername && signupBuilder.setPassword) {
         signupBuilder.setUsername(username);
         signupBuilder.setPassword(password);
+        console.log('Stored credentials in builder for later use');
       }
     }
   }, [username, password, signupBuilder]);
-
-  // Watch for sign-in state changes and redirect if needed
-  useEffect(() => {
-    if (isSignedIn) {
-      console.log('User is signed in, navigation should be handled by AppNavigator');
-      // No need to do anything - AppNavigator will show the authenticated routes
-    }
-  }, [isSignedIn, navigation]);
 
   // Clear status message after a delay
   useEffect(() => {
@@ -73,7 +65,7 @@ const ConfirmCodeScreen = () => {
 
     setIsConfirming(true);
     try {
-      // Only confirm the signup without signing in
+      // First, confirm the signup without signing in
       console.log(`Confirming signup for user: ${username} with code: ${code}`);
       const confirmResult = await confirmSignUp(username, code);
       
@@ -89,12 +81,22 @@ const ConfirmCodeScreen = () => {
       setStatusMessage('Account confirmed successfully!');
       setStatusType('success');
       
-      // Try to sign in the user automatically - this will change isSignedIn state
-      // which will cause AppNavigator to render the authenticated routes
-      await signIn(username, password);
+      const signInResult = await signIn(username, password);
       
-      // No need to navigate manually - the AppNavigator will handle it based on isSignedIn
-      
+      if (signInResult.success) {
+        console.log('✅ Sign-in successful! Moving to Instruments screen...');
+        
+        navigation.reset({
+          index: 0,
+          routes: [{ name: 'Instruments' }]
+        });
+      } else {
+        // Failed to sign in automatically
+        setStatusMessage('Account confirmed, but failed to sign in automatically. Please log in.');
+        setStatusType('error');
+        navigation.navigate('LoginWithEmail');
+      }
+    
     } catch (error) {
       console.error('❌ Error in confirmation process:', error);
       setStatusMessage(error.message || 'Failed to complete the confirmation process');
@@ -169,7 +171,13 @@ const ConfirmCodeScreen = () => {
           style={styles.confirmButton}
           textStyle={styles.confirmText}
           disabled={isConfirming || isResending || !code.trim()}
-        />
+        >
+          {isConfirming ? (
+            <ActivityIndicator color="#000" size="small" />
+          ) : (
+            <Text style={styles.confirmText}>CONFIRM</Text>
+          )}
+        </Button>
 
         <View style={styles.resendContainer}>
           <Text style={styles.resendText}>Didn't receive a code?</Text>
@@ -179,7 +187,13 @@ const ConfirmCodeScreen = () => {
             style={styles.resendButton}
             textStyle={styles.resendButtonText}
             disabled={isConfirming || isResending}
-          />
+          >
+            {isResending ? (
+              <ActivityIndicator color="#000" size="small" />
+            ) : (
+              <Text style={styles.resendButtonText}>RESEND CODE</Text>
+            )}
+          </Button>
         </View>
       </View>
     </LinearGradient>

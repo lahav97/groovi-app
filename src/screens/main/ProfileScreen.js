@@ -1,4 +1,9 @@
-import React, { useRef, useState, useEffect } from 'react';
+/**
+ * @module ProfileScreen
+ * Displays the user's profile with videos, user information, and interactive elements.
+ */
+
+import React, { useState, useRef, useEffect } from 'react';
 import {
   View,
   Text,
@@ -9,6 +14,7 @@ import {
   SafeAreaView,
   useColorScheme,
   ActivityIndicator,
+  RefreshControl,
 } from 'react-native';
 import { Ionicons, FontAwesome } from '@expo/vector-icons';
 import { Video } from 'expo-av';
@@ -16,36 +22,82 @@ import BottomNavigation from '../../components/navigationBar/BottomNavigation';
 import { COLORS, SIZES, LAYOUT } from '../../styles/theme';
 import { useIsFocused } from '@react-navigation/native';
 import Swiper from 'react-native-swiper';
-import AsyncStorage from '@react-native-async-storage/async-storage';
-import useProfileManager from '../../hooks/useProfileManager';
-import { useAuth } from '../../context/AuthContext';
-
+import { useNavigation } from '@react-navigation/native';
+import userProfileManager from '../../hooks/userProfileManager';
 
 const { width } = Dimensions.get('window');
+
 /**
  * @function ProfileScreen
- * @description Displays the user's profile page including video swiper, info, and bottom navigation.
+ * @description Displays the current user's profile page including video swiper, info, and bottom navigation.
  * @returns {JSX.Element}
  */
-const ProfileScreen = ({ route, navigation }) => { 
+const ProfileScreen = () => {
+  const navigation = useNavigation();
   const [pausedStatus, setPausedStatus] = useState({});
   const [currentIndex, setCurrentIndex] = useState(0);
+  const [refreshing, setRefreshing] = useState(false);
   const colorScheme = useColorScheme();
   const theme = colorScheme === 'dark' ? COLORS.dark : COLORS.light;
   const isFocused = useIsFocused();
   const videoRefs = useRef({});
   const swiperRef = useRef(null);
-  const { signOut } = useAuth();
-  // Use the ProfileManager hook to handle profile loading/state
+
+  console.log('🔍 ProfileScreen: Component rendering');
+
+  // Load current user's profile
   const { 
     profile, 
     loading, 
     error, 
     refreshProfile 
-  } = useProfileManager({
-    loadOnFocus: true, // Automatically reload when screen comes into focus
-    autoLoad: true     // Automatically load when component mounts
+  } = userProfileManager({
+    autoLoad: true,
+    loadOnFocus: true
   });
+
+  // DEBUG: Log profile data
+  useEffect(() => {
+    console.log('🔍 ProfileScreen: Profile state changed', {
+      hasProfile: !!profile,
+      loading,
+      error: error || 'No error'
+    });
+
+    if (profile) {
+      console.log('🎥 ProfileScreen: Profile data:', {
+        username: profile.username,
+        videosCount: profile.videos ? profile.videos.length : 0,
+        videosType: typeof profile.videos,
+        instruments: profile.instruments,
+        bio: profile.bio
+      });
+      
+      if (profile.videos) {
+        console.log('🎬 ProfileScreen: Videos data:', profile.videos);
+      }
+    }
+  }, [profile, loading, error]);
+
+  /**
+   * Convert profile videos (array of URL strings) to video objects
+   */
+  const getVideoObjects = () => {
+    if (!profile?.videos || !Array.isArray(profile.videos)) {
+      console.log('⚠️ ProfileScreen: No videos found in profile');
+      return [];
+    }
+
+    const videoObjects = profile.videos.map((videoUrl, index) => ({
+      id: `profile-video-${index}`,
+      uri: videoUrl
+    }));
+
+    console.log('🎬 ProfileScreen: Created video objects:', videoObjects.length);
+    return videoObjects;
+  };
+
+  const videoObjects = getVideoObjects();
 
   /**
    * @function togglePause
@@ -53,28 +105,39 @@ const ProfileScreen = ({ route, navigation }) => {
    * @param {string} id - Video ID
    */
   const togglePause = (id) => {
+    console.log('🎬 ProfileScreen: Toggle pause for video:', id);
     setPausedStatus(prev => ({ ...prev, [id]: !prev[id] }));
+  };
+
+  /**
+   * @function onRefresh
+   * @description Handle pull-to-refresh
+   */
+  const onRefresh = async () => {
+    console.log('🔄 ProfileScreen: Refreshing profile...');
+    setRefreshing(true);
+    try {
+      await refreshProfile();
+    } catch (error) {
+      console.error('❌ ProfileScreen: Refresh failed:', error);
+    } finally {
+      setRefreshing(false);
+    }
   };
 
   useEffect(() => {
     if (!isFocused) {
+      console.log('📱 ProfileScreen: Screen lost focus, pausing videos');
       // Pause all videos when screen is not focused
       Object.values(videoRefs.current).forEach(ref => {
         if (ref?.pauseAsync) {
           ref.pauseAsync();
         }
       });
+    } else {
+      console.log('📱 ProfileScreen: Screen gained focus');
     }
   }, [isFocused]);
-
-  const handleLogout = async () => {
-    try {
-      await AsyncStorage.removeItem('userEmail');
-      signOut(); 
-    } catch (error) {
-      console.error('Error logging out:', error);
-    }
-  };
 
   /**
    * @function onIndexChanged
@@ -82,46 +145,74 @@ const ProfileScreen = ({ route, navigation }) => {
    * @param {number} index - The index of the newly active video.
    */
   const onIndexChanged = (index) => {
+    console.log(`🎬 ProfileScreen: Video index changed to: ${index}`);
     setCurrentIndex(index);
     
-    if (!profile?.videos || profile.videos.length === 0) return;
-    
     // Pause all videos except the current one
-    profile.videos.forEach((_, videoIndex) => {
-      const videoId = `video-${videoIndex}`;
-      if (videoIndex !== index && videoRefs.current[videoId]?.pauseAsync) {
-        videoRefs.current[videoId].pauseAsync();
+    videoObjects.forEach(video => {
+      if (video.id !== videoObjects[index].id && videoRefs.current[video.id]?.pauseAsync) {
+        videoRefs.current[video.id].pauseAsync();
       }
     });
     
     // Play the current video if it's not manually paused
-    const currentVideoId = `video-${index}`;
-    if (!pausedStatus[currentVideoId] && videoRefs.current[currentVideoId]?.playAsync) {
-      videoRefs.current[currentVideoId].playAsync();
+    if (!pausedStatus[videoObjects[index].id] && videoRefs.current[videoObjects[index].id]?.playAsync) {
+      videoRefs.current[videoObjects[index].id].playAsync();
     }
+  };
+
+  /**
+   * Format instruments for display
+   */
+  const formatInstruments = () => {
+    if (!profile?.instruments) return 'Guitar, Acoustic Guitar';
+    
+    if (typeof profile.instruments === 'object') {
+      return Object.keys(profile.instruments).join(', ');
+    }
+    
+    if (Array.isArray(profile.instruments)) {
+      return profile.instruments.join(', ');
+    }
+    
+    return profile.instruments.toString();
   };
 
   // Loading state
   if (loading && !profile) {
+    console.log('📱 ProfileScreen: Showing loading state');
     return (
-      <View style={[styles.container, styles.loadingContainer]}>
-        <ActivityIndicator size="large" color="white" />
-        <Text style={styles.loadingText}>Loading profile...</Text>
-      </View>
+      <SafeAreaView style={[styles.container, { backgroundColor: theme.background }]}>
+        <View style={styles.loadingContainer}>
+          <ActivityIndicator size="large" color="#ff6ec4" />
+          <Text style={[styles.loadingText, { color: theme.text }]}>Loading your profile...</Text>
+        </View>
+        <View style={styles.bottomNav}>
+          <BottomNavigation />
+        </View>
+      </SafeAreaView>
     );
   }
 
-  // Error state
+  // Error state  
   if (error && !profile) {
+    console.log('❌ ProfileScreen: Showing error state:', error);
     return (
-      <View style={[styles.container, styles.errorContainer]}>
-        <Text style={styles.errorText}>{error}</Text>
-        <TouchableOpacity onPress={refreshProfile} style={styles.retryButton}>
-          <Text style={styles.retryButtonText}>Retry</Text>
-        </TouchableOpacity>
-      </View>
+      <SafeAreaView style={[styles.container, { backgroundColor: theme.background }]}>
+        <View style={styles.errorContainer}>
+          <Text style={[styles.errorText, { color: theme.text }]}>Failed to load profile</Text>
+          <TouchableOpacity style={styles.retryButton} onPress={refreshProfile}>
+            <Text style={styles.retryButtonText}>Try Again</Text>
+          </TouchableOpacity>
+        </View>
+        <View style={styles.bottomNav}>
+          <BottomNavigation />
+        </View>
+      </SafeAreaView>
     );
   }
+
+  console.log('✅ ProfileScreen: Rendering main profile view');
 
   return (
     <SafeAreaView style={[styles.container, { backgroundColor: theme.background }]}>
@@ -136,10 +227,30 @@ const ProfileScreen = ({ route, navigation }) => {
       </View>
 
       {/* Content */}
-      <ScrollView contentContainerStyle={[styles.scrollContent, { paddingBottom: LAYOUT.navHeight + 30 }]}>
+      <ScrollView 
+        contentContainerStyle={[styles.scrollContent, { paddingBottom: LAYOUT.navHeight + 30 }]}
+        refreshControl={
+          <RefreshControl
+            refreshing={refreshing}
+            onRefresh={onRefresh}
+            tintColor={theme.text}
+            colors={['#ff6ec4']}
+          />
+        }
+      >
+        {/* DEBUG BOX - Remove this when everything works */}
+        {/* <View style={styles.debugBox}>
+          <Text style={styles.debugText}>
+            DEBUG: Profile = {profile ? 'LOADED' : 'NOT LOADED'}
+          </Text>
+          <Text style={styles.debugText}>
+            Videos: {videoObjects.length} found
+          </Text>
+        </View> */}
+
         {/* Video Swiper */}
-        <View style={styles.videoContainer}>
-          {profile?.videos && profile.videos.length > 0 ? (
+        {videoObjects.length > 0 ? (
+          <View style={styles.videoContainer}>
             <Swiper
               ref={swiperRef}
               style={styles.swiper}
@@ -149,112 +260,106 @@ const ProfileScreen = ({ route, navigation }) => {
               dotStyle={styles.dot}
               activeDotStyle={styles.activeDot}
               paginationStyle={styles.pagination}
-              removeClippedSubviews={false}
+              removeClippedSubviews={true}
+              loadMinimal={true}
+              loadMinimalSize={1}
               scrollEnabled={true}
               showsButtons={false}
               width={width}
             >
-              {profile.videos.map((videoUrl, index) => (
-                <View key={`slide-${index}`} style={styles.slide}>
-                  <TouchableOpacity 
-                    style={styles.videoWrapper} 
-                    onPress={() => togglePause(`video-${index}`)}
-                    activeOpacity={0.9}
-                  >
-                    <Video
-                      ref={(ref) => { videoRefs.current[`video-${index}`] = ref; }}
-                      source={{ uri: videoUrl }}
-                      style={styles.video}
-                      resizeMode="cover"
-                      isLooping
-                      shouldPlay={!pausedStatus[`video-${index}`] && isFocused && currentIndex === index}
-                      isMuted={false}
-                    />
-                  </TouchableOpacity>
-                </View>
-              ))}
+              {videoObjects.map((video) => {
+                console.log(`🎬 ProfileScreen: Rendering video ${video.id} with URI:`, video.uri);
+                return (
+                  <View key={video.id} style={styles.slide}>
+                    <TouchableOpacity 
+                      style={styles.videoWrapper} 
+                      onPress={() => togglePause(video.id)}
+                      activeOpacity={0.9}
+                    >
+                      <Video
+                        ref={(ref) => { 
+                          videoRefs.current[video.id] = ref;
+                          console.log(`🎬 ProfileScreen: Video ref set for ${video.id}`);
+                        }}
+                        source={{ uri: video.uri }}
+                        style={styles.video}
+                        resizeMode="cover"
+                        isLooping
+                        shouldPlay={
+                          !pausedStatus[video.id] && 
+                          isFocused && 
+                          currentIndex === videoObjects.findIndex(v => v.id === video.id)
+                        }
+                        useNativeControls={false}
+                        isMuted={false}
+                        onLoad={() => {
+                          console.log(`✅ ProfileScreen: Video ${video.id} loaded successfully`);
+                        }}
+                        onLoadStart={() => {
+                          console.log(`⏳ ProfileScreen: Video ${video.id} loading started`);
+                        }}
+                        onBuffer={() => {
+                          console.log(`📶 ProfileScreen: Video ${video.id} buffering`);
+                        }}
+                        onError={(error) => {
+                          console.log(`❌ ProfileScreen: Video ${video.id} error:`, error);
+                        }}
+                      />
+                    </TouchableOpacity>
+                  </View>
+                );
+              })}
             </Swiper>
-          ) : (
-            <View style={styles.noVideosContainer}>
-              <Ionicons name="videocam-off" size={50} color={theme.text} />
-              <Text style={[styles.noVideosText, { color: theme.text }]}>No videos available</Text>
-            </View>
-          )}
-        </View>
+          </View>
+        ) : (
+          <View style={styles.noVideosContainer}>
+            <Ionicons name="videocam-outline" size={60} color={theme.textSecondary} />
+            <Text style={[styles.noVideosText, { color: theme.textSecondary }]}>
+              No videos uploaded yet
+            </Text>
+          </View>
+        )}
 
         <View style={styles.usernameSection}>
           <Ionicons name="person-circle-outline" size={SIZES.icon} color={theme.text} />
-          <Text style={[styles.username, { color: theme.text }]}>@{profile?.username || 'musician'}</Text>
+          <Text style={[styles.username, { color: theme.text }]}>
+            @{profile?.username || 'Loading...'}
+          </Text>
         </View>
 
-        {/* Stars/Rating only if we have a rating */}
-        {profile?.rating && (
-          <View style={styles.stars}>
-            {[...Array(5)].map((_, i) => (
-              <FontAwesome 
-                key={i} 
-                name={i < profile.rating ? "star" : "star-o"} 
-                size={SIZES.iconSmall || 16} 
-                color="gold" 
-              />
-            ))}
-          </View>
-        )}
+        <View style={styles.stars}>
+          {[...Array(5)].map((_, i) => (
+            <FontAwesome key={i} name="star" size={SIZES.iconSmall || 16} color="gold" />
+          ))}
+        </View>
 
-        {/* Bio */}
-        {profile?.bio && (
-          <View style={styles.infoItem}>
-            <Ionicons name="information-circle-outline" size={SIZES.icon} color={theme.text} />
-            <Text style={[styles.infoText, { color: theme.text }]}>{profile.bio}</Text>
-          </View>
-        )}
+        <View style={styles.infoItem}>
+          <Ionicons name="information-circle-outline" size={SIZES.icon} color={theme.text} />
+          <Text style={[styles.infoText, { color: theme.text }]}>
+            {profile?.bio || 'I love to play the guitar !!'}
+          </Text>
+        </View>
 
-        {/* Instruments */}
-        {profile?.instruments && Object.keys(profile.instruments).length > 0 && (
-          <View style={styles.infoItem}>
-            <Ionicons name="musical-notes-outline" size={SIZES.icon} color={theme.text} />
-            <Text style={[styles.infoText, { color: theme.text }]}>
-              {Object.entries(profile.instruments)
-                .map(([instrument, level]) => `${instrument} (${level})`)
-                .join(', ')}
-            </Text>
-          </View>
-        )}
+        <View style={styles.infoItem}>
+          <Ionicons name="musical-notes-outline" size={SIZES.icon} color={theme.text} />
+          <Text style={[styles.infoText, { color: theme.text }]}>
+            {formatInstruments()}
+          </Text>
+        </View>
 
-        {/* Genres */}
-        {profile?.genres && profile.genres.length > 0 && (
-          <View style={styles.infoItem}>
-            <Ionicons name="musical-note-outline" size={SIZES.icon} color={theme.text} />
-            <Text style={[styles.infoText, { color: theme.text }]}>
-              {profile.genres.join(', ')}
-            </Text>
-          </View>
-        )}
+        <View style={styles.infoItem}>
+          <Ionicons name="location-outline" size={SIZES.icon} color={theme.text} />
+          <Text style={[styles.infoText, { color: theme.text }]}>
+            {profile?.address || profile?.location || 'Tel Aviv'}
+          </Text>
+        </View>
 
-        {/* Location */}
-        {profile?.address && (
-          <View style={styles.infoItem}>
-            <Ionicons name="location-outline" size={SIZES.icon} color={theme.text} />
-            <Text style={[styles.infoText, { color: theme.text }]}>{profile.address}</Text>
-          </View>
-        )}
-
-        {/* Social Links */}
-        {profile?.social_links && (
-          <View style={styles.infoItem}>
-            <Ionicons name="link-outline" size={SIZES.icon} color={theme.text} />
-            <Text style={[styles.infoText, { color: theme.text }]}>{profile.social_links}</Text>
-          </View>
-        )}
-
-        {/* Logout Button */}
-        <TouchableOpacity 
-          style={styles.logoutButton}
-          onPress={handleLogout}
-        >
-          <Ionicons name="log-out-outline" size={SIZES.icon} color="#ff6ec4" />
-          <Text style={styles.logoutText}>Log Out</Text>
-        </TouchableOpacity>
+        <View style={styles.infoItem}>
+          <Ionicons name="link-outline" size={SIZES.icon} color={theme.text} />
+          <Text style={[styles.infoText, { color: theme.text }]}>
+            {profile?.social_links || '@social_link'}
+          </Text>
+        </View>
       </ScrollView>
 
       {/* Bottom Nav */}
@@ -271,6 +376,50 @@ const styles = StyleSheet.create({
   container: {
     flex: 1,
     justifyContent: 'space-between',
+  },
+  loadingContainer: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  loadingText: {
+    marginTop: 15,
+    fontSize: 16,
+    fontWeight: '500',
+  },
+  errorContainer: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    padding: 20,
+  },
+  errorText: {
+    fontSize: 18,
+    fontWeight: 'bold',
+    marginBottom: 20,
+    textAlign: 'center',
+  },
+  retryButton: {
+    backgroundColor: '#ff6ec4',
+    paddingVertical: 12,
+    paddingHorizontal: 24,
+    borderRadius: 25,
+  },
+  retryButtonText: {
+    color: 'white',
+    fontSize: 16,
+    fontWeight: 'bold',
+  },
+  debugBox: {
+    backgroundColor: 'rgba(255, 0, 0, 0.2)',
+    padding: 10,
+    marginBottom: 10,
+    borderRadius: 5,
+  },
+  debugText: {
+    color: 'white',
+    fontSize: 12,
+    marginBottom: 2,
   },
   topIcons: {
     position: 'absolute',
@@ -290,6 +439,19 @@ const styles = StyleSheet.create({
     marginBottom: 20,
     width: width - 40,
     overflow: 'hidden',
+  },
+  noVideosContainer: {
+    height: 400,
+    justifyContent: 'center',
+    alignItems: 'center',
+    backgroundColor: 'rgba(255,255,255,0.05)',
+    borderRadius: SIZES.radius,
+    marginBottom: 20,
+  },
+  noVideosText: {
+    marginTop: 10,
+    fontSize: 16,
+    fontStyle: 'italic',
   },
   swiper: {
     height: 400,
@@ -351,7 +513,6 @@ const styles = StyleSheet.create({
   infoText: {
     fontSize: SIZES.font.medium,
     marginLeft: 10,
-    flex: 1,
   },
   bottomNav: {
     position: 'absolute',
@@ -362,68 +523,5 @@ const styles = StyleSheet.create({
     backgroundColor: '#000',
     zIndex: 100,
     justifyContent: 'center',
-  },
-  // Loading and error states
-  loadingContainer: {
-    justifyContent: 'center',
-    alignItems: 'center',
-    backgroundColor: '#000',
-  },
-  loadingText: {
-    color: 'white',
-    marginTop: 10,
-    fontSize: 16,
-  },
-  errorContainer: {
-    justifyContent: 'center',
-    alignItems: 'center',
-    backgroundColor: '#000',
-    padding: 20,
-  },
-  errorText: {
-    color: 'white',
-    fontSize: 16,
-    textAlign: 'center',
-    marginBottom: 20,
-  },
-  retryButton: {
-    backgroundColor: '#ff6ec4',
-    paddingVertical: 10,
-    paddingHorizontal: 20,
-    borderRadius: 20,
-  },
-  retryButtonText: {
-    color: 'white',
-    fontWeight: 'bold',
-  },
-  noVideosContainer: {
-    flex: 1,
-    justifyContent: 'center',
-    alignItems: 'center',
-    backgroundColor: 'rgba(0,0,0,0.2)',
-    borderRadius: SIZES.radius,
-  },
-  noVideosText: {
-    marginTop: 10,
-    fontSize: 16,
-  },
-  // Logout button styles
-  logoutButton: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginTop: 30,
-    marginBottom: 20,
-    padding: 15,
-    backgroundColor: 'rgba(255, 110, 196, 0.1)',
-    borderRadius: 20,
-    borderWidth: 1,
-    borderColor: '#ff6ec4',
-  },
-  logoutText: {
-    color: '#ff6ec4',
-    fontSize: 16,
-    fontWeight: 'bold',
-    marginLeft: 10,
   },
 });

@@ -42,7 +42,7 @@ const ProfileSetupScreen = () => {
   const navigation = useNavigation();
   const isDark = useColorScheme() === 'dark';
   const builder = useSignupBuilder();
-  const { signIn, user } = useAuth();
+  const { signIn, user, completeOnboarding } = useAuth();
   const [location, setLocation] = useState('');
   const [manualLocation, setManualLocation] = useState('');
   const [useManualLocation, setUseManualLocation] = useState(false);
@@ -431,7 +431,7 @@ const uploadFileToS3 = async (fileUri, presignedUrl) => {
   const isFormComplete = () => {
     const hasLocation = useManualLocation ? manualLocation : location;
     // Check if all videos are uploaded by comparing lengths
-    const allVideosUploaded = videos.length > 0 && videos.length === videoUrls.length;
+    const allVideosUploaded = videos.length > 0 && videos.length === videoUrls.filter(url => !!url).length;
     return hasLocation && bio.trim() && allVideosUploaded && genres.length > 0 && profilePictureUri;
   };
 
@@ -440,7 +440,6 @@ const uploadFileToS3 = async (fileUri, presignedUrl) => {
    * @description Builds the final user profile object and navigates to Feed screen.
    */
   const handleContinue = async () => {
-
     if (!isFormComplete()) {
       if (videos.length > videoUrls.length) {
         Alert.alert('Not all videos uploaded', 'Please wait for all videos to finish uploading.');
@@ -451,15 +450,15 @@ const uploadFileToS3 = async (fileUri, presignedUrl) => {
     setIsUploading(true);
     try {
       const finalLocation = useManualLocation ? manualLocation : location;
-
+  
       // Create the complete user object with already uploaded videos
       const updatedUser = builder
-        .setLocation(finalLocation)
-        .setBio(bio)
-        .setGenres(genres)
-        .setProfilePicture(profilePictureUri)
-        .setVideos(videoUrls)
-        .build();
+      .setLocation(finalLocation)
+      .setBio(bio)
+      .setGenres(genres)
+      .setProfilePicture(profilePictureUri)
+      .setVideos(videoUrls.filter(url => !!url))
+      .build();
       
       console.log('Updated user data with video URLs:', updatedUser);
       
@@ -478,14 +477,14 @@ const uploadFileToS3 = async (fileUri, presignedUrl) => {
         instruments: updatedUser.instruments || {},
         videoUrls: videoUrls,
       };
-
+  
       // Add optional fields only if they exist
       if (updatedUser.link) {
         requestBody.link = updatedUser.link;
       }
-
+  
       console.log('Request body being sent to Lambda:', requestBody);
-
+  
       // Send user info to creation Lambda
       const res = await axios.post(
         BUILD_PROFILE_API_URL,
@@ -494,18 +493,19 @@ const uploadFileToS3 = async (fileUri, presignedUrl) => {
       
       console.log('Lambda response:', res.data);
       
-      const signInResult = await signIn(requestBody.email, requestBody.password);
-
-      if (signInResult) {
-        // Navigate to feed
-        navigation.reset({
-          index: 0,
-          routes: [{ name: 'Feed' }],
-        });
-      } else {
-        console.error('Sign-in failed');
-        Alert.alert('Error', 'Failed to sign in. Please try again.');
+      // IMPORTANT ADDITION: Mark onboarding as complete in Cognito
+      const onboardingResult = await completeOnboarding();
+      console.log('Onboarding completion result:', onboardingResult);
+      
+      if (!onboardingResult.success) {
+        console.warn('Warning: Failed to mark onboarding as complete:', onboardingResult.error);
       }
+      
+      // Navigate to feed
+      navigation.reset({
+        index: 0,
+        routes: [{ name: 'Feed' }],
+      });
     } catch (error) {
       console.error('Error in profile setup:', error.response?.data || error.message);
       Alert.alert('Error', error.message || 'Failed to complete profile setup. Please try again.');
