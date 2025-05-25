@@ -9,6 +9,8 @@ import 'react-native-url-polyfill/auto';
 import awsConfig from './src/utils/awsConfig';
 import AppNavigator from './src/navigation/AppNavigator';
 import React, { useEffect } from 'react';
+import { SignupFlowProvider } from './src/context/SignupFlowContext';
+
 
 Amplify.configure(awsConfig);
 
@@ -48,9 +50,11 @@ export default function App() {
   return (
     <GestureHandlerRootView style={styles.container}>
       <SafeAreaProvider>
-        <AuthProvider>
-          <AppNavigator />
-        </AuthProvider>
+        <SignupFlowProvider>
+          <AuthProvider>
+            <AppNavigator />
+          </AuthProvider>
+        </SignupFlowProvider>
       </SafeAreaProvider>
     </GestureHandlerRootView>
   );

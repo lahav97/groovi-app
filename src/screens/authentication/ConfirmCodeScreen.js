@@ -9,6 +9,8 @@ import { LinearGradient } from 'expo-linear-gradient';
 import Button from '../../components/common/Button';
 import { useAuth } from '../../context/AuthContext';
 import { useSignupBuilder } from '../../context/SignupFlowContext';
+import AsyncStorage from '@react-native-async-storage/async-storage';
+
 
 /**
  * @function ConfirmCodeScreen
@@ -18,12 +20,17 @@ import { useSignupBuilder } from '../../context/SignupFlowContext';
 const ConfirmCodeScreen = () => {
   const navigation = useNavigation();
   const route = useRoute();
-  const { username, password } = route.params || {};
   const [code, setCode] = useState('');
   const [isConfirming, setIsConfirming] = useState(false);
   const [isResending, setIsResending] = useState(false);
   const [statusMessage, setStatusMessage] = useState(null);
   const [statusType, setStatusType] = useState(null); // 'success', 'error', 'info'
+  const { user } = route.params || {};
+  const username = user?.username;
+  const password = user?.password;
+
+  console.log('🛬 Received user from SignUpScreen:', user);
+
   
   // Use the auth context and signup builder
   const { confirmSignUp, resendConfirmationCode, signIn } = useAuth();
@@ -31,14 +38,20 @@ const ConfirmCodeScreen = () => {
   
   // Store credentials in the builder for later use in ProfileSetupScreen
   useEffect(() => {
-    if (username && password) {
-      if (signupBuilder.setUsername && signupBuilder.setPassword) {
-        signupBuilder.setUsername(username);
-        signupBuilder.setPassword(password);
-        console.log('Stored credentials in builder for later use');
-      }
+    if (user && signupBuilder) {
+      signupBuilder
+        .setUsername(user.username)
+        .setPassword(user.password)
+        .setFullName(user.fullName)
+        .setEmail(user.email)
+        .setUserType(user.userType)
+        .setGender(user.gender)
+        .setPhoneNumber(user.phoneNumber)
+        .setBirthDate(user.birthDate);
+  
+      console.log('✅ ConfirmCodeScreen restored full user into builder:', signupBuilder.build());
     }
-  }, [username, password, signupBuilder]);
+  }, [user, signupBuilder]);
 
   // Clear status message after a delay
   useEffect(() => {
@@ -57,6 +70,12 @@ const ConfirmCodeScreen = () => {
    * @description Confirms the sign-up using the verification code and signs in the user.
    */
   const handleConfirm = async () => {
+    if (!username) {
+      setStatusMessage('Something went wrong. Missing username.');
+      setStatusType('error');
+      return;
+    }
+    
     if (!code.trim()) {
       setStatusMessage('Please enter the verification code');
       setStatusType('error');
@@ -84,13 +103,28 @@ const ConfirmCodeScreen = () => {
       const signInResult = await signIn(username, password);
       
       if (signInResult.success) {
-        console.log('✅ Sign-in successful! Moving to Instruments screen...');
-        
-        navigation.reset({
-          index: 0,
-          routes: [{ name: 'Instruments' }]
-        });
-      } else {
+        console.log('✅ Sign-in successful! Rehydrating builder post-login...');
+        const { userData } = signInResult;
+      
+        signupBuilder
+          .setUsername(userData.username)
+          .setEmail(userData.email)
+          .setFullName(user?.fullName || userData.username)
+          .setPassword(password)
+          .setUserType(user?.userType || 'musician')
+          .setGender(user?.gender)
+          .setBirthDate(user?.birthDate)
+          .setPhoneNumber(user?.phoneNumber || null);
+      
+        const builtUser = signupBuilder.build();
+        console.log('🧱 Builder rebuilt after sign-in:', builtUser);
+      
+        await AsyncStorage.setItem('signupBuilderBackup', JSON.stringify(builtUser));
+        console.log('💾 Saved builder backup to AsyncStorage');
+        await new Promise((resolve) => setTimeout(resolve, 300));
+
+      }
+       else {
         // Failed to sign in automatically
         setStatusMessage('Account confirmed, but failed to sign in automatically. Please log in.');
         setStatusType('error');

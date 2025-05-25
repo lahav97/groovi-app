@@ -1,7 +1,8 @@
-// src/context/AuthContext.js - FIXED 
 import React, { createContext, useState, useContext, useEffect } from 'react';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Auth } from 'aws-amplify';
+import BackgroundDataService from '../services/BackgroundDataService';
+import { saveUserEmail, clearUserEmail } from '../utils/userUtils';
 
 const AuthContext = createContext(null);
 
@@ -28,8 +29,8 @@ export const AuthProvider = ({ children }) => {
       // Use the best available source for email
       const userEmail = userInfo.attributes?.email || userInfo.username;
       
-      console.log('Current user attributes:', userInfo.attributes);
-      console.log('Current user email:', userEmail);
+      console.log('🔍 AuthContext: Current user email:', userEmail);
+      console.log('🔍 AuthContext: Has completed onboarding:', onboardingCompleted);
       
       // Format user data consistently
       const userData = {
@@ -47,16 +48,23 @@ export const AuthProvider = ({ children }) => {
       
       // Store user data in AsyncStorage for persistence
       await AsyncStorage.setItem('userData', JSON.stringify(userData));
+      await saveUserEmail(userEmail); // Save email for profile loading
       
-      console.log('User is already signed in:', userData);
-      console.log('Has completed onboarding:', onboardingCompleted);
+      // 🚀 TRIGGER BACKGROUND LOADING if user has completed onboarding
+      if (onboardingCompleted && userEmail) {
+        console.log('🚀 AuthContext: Triggering background data loading...');
+        BackgroundDataService.startStagedLoading(userData);
+      }
+      
+      console.log('✅ AuthContext: User restored from existing session');
     } catch (error) {
       // No authenticated user found
-      console.log('No authenticated user found');
+      console.log('ℹ️ AuthContext: No authenticated user found');
       setUser(null);
       setIsSignedIn(false);
       setHasCompletedOnboarding(false);
       await AsyncStorage.removeItem('userData');
+      await clearUserEmail();
     } finally {
       setIsLoading(false);
     }
@@ -66,24 +74,25 @@ export const AuthProvider = ({ children }) => {
   const signIn = async (email, password) => {
     setIsLoading(true);
     try {
+      console.log('🔐 AuthContext: Attempting sign in for:', email);
+      
       // Sign in with Amplify
       const userInfo = await Auth.signIn(email, password);
       
-      // IMPORTANT: Check if user has completed onboarding
+      // Check if user has completed onboarding
       const onboardingCompleted = userInfo.attributes?.['custom:onboardingCompleted'] === 'true';
       
       // Ensure we're getting the email from the correct place
-      // Either directly from attributes or from the passed parameter
       const userEmail = userInfo.attributes?.email || email || userInfo.username;
       
-      console.log('Sign in successful - User email:', userEmail);
-      console.log('User attributes:', userInfo.attributes);
+      console.log('✅ AuthContext: Sign in successful for:', userEmail);
+      console.log('🔍 AuthContext: Onboarding completed:', onboardingCompleted);
       
       // Format user data
       const userData = {
         id: userInfo.attributes?.sub || userInfo?.username,
         username: userInfo.username,
-        email: userEmail, // Make sure email is saved
+        email: userEmail,
         phone: userInfo.attributes?.phone_number,
         hasCompletedOnboarding: onboardingCompleted
       };
@@ -95,17 +104,24 @@ export const AuthProvider = ({ children }) => {
       
       // Store user data
       await AsyncStorage.setItem('userData', JSON.stringify(userData));
+      await saveUserEmail(userEmail); // Save email for profile loading
       
-      console.log('Signed in successfully:', userData);
-      console.log('Has completed onboarding:', onboardingCompleted);
+      // 🚀 TRIGGER BACKGROUND LOADING if user has completed onboarding
+      if (onboardingCompleted) {
+        console.log('🚀 AuthContext: Starting background data loading after sign in...');
+        // Small delay to let UI update first
+        setTimeout(() => {
+          BackgroundDataService.startStagedLoading(userData);
+        }, 500);
+      }
       
       return { 
         success: true,
         hasCompletedOnboarding: onboardingCompleted,
-        userData // Return the user data for immediate access
+        userData
       };
     } catch (error) {
-      console.error('Sign in error:', error);
+      console.error('❌ AuthContext: Sign in error:', error);
       return { 
         success: false, 
         error: error.message || 'Failed to sign in' 
@@ -119,6 +135,8 @@ export const AuthProvider = ({ children }) => {
   const signUp = async (username, email, password, attributes = {}) => {
     setIsLoading(true);
     try {
+      console.log('📝 AuthContext: Attempting sign up for:', email);
+      
       // Add onboarding attribute defaulting to false
       const updatedAttributes = {
         ...attributes,
@@ -135,7 +153,7 @@ export const AuthProvider = ({ children }) => {
         }
       });
       
-      console.log('Signed up successfully, confirmation required');
+      console.log('✅ AuthContext: Sign up successful, confirmation required');
       
       return {
         success: true,
@@ -145,7 +163,7 @@ export const AuthProvider = ({ children }) => {
         }
       };
     } catch (error) {
-      console.error('Sign up error:', error);
+      console.error('❌ AuthContext: Sign up error:', error);
       return {
         success: false,
         error: error.message || 'Failed to sign up'
@@ -160,11 +178,11 @@ export const AuthProvider = ({ children }) => {
     setIsLoading(true);
     try {
       await Auth.confirmSignUp(username, code);
-      console.log('Confirmed sign up successfully');
+      console.log('✅ AuthContext: Sign up confirmed successfully');
       
       return { success: true };
     } catch (error) {
-      console.error('Confirm sign up error:', error);
+      console.error('❌ AuthContext: Confirm sign up error:', error);
       return {
         success: false,
         error: error.message || 'Failed to confirm sign up'
@@ -174,14 +192,14 @@ export const AuthProvider = ({ children }) => {
     }
   };
 
-  // Check if user exists in Cognito - FIXED THE FUNCTION NAME
+  // Check if user exists in Cognito
   const checkUserExistsInCognito = async (email) => {
     try {
       // An indirect way to check if a user exists - try forgotPassword
       await Auth.forgotPassword(email);
       return { exists: true };
     } catch (error) {
-      console.log('Check user exists error:', error);
+      console.log('ℹ️ AuthContext: Check user exists result:', error.code);
       if (error.code === 'UserNotFoundException') {
         return { exists: false };
       }
@@ -193,6 +211,8 @@ export const AuthProvider = ({ children }) => {
   // Mark onboarding as complete
   const completeOnboarding = async () => {
     try {
+      console.log('🎯 AuthContext: Completing onboarding...');
+      
       const currentUser = await Auth.currentAuthenticatedUser();
       await Auth.updateUserAttributes(currentUser, {
         'custom:onboardingCompleted': 'true'
@@ -206,10 +226,18 @@ export const AuthProvider = ({ children }) => {
       setUser(updatedUser);
       await AsyncStorage.setItem('userData', JSON.stringify(updatedUser));
       
-      console.log('Marked onboarding as complete');
+      // 🚀 TRIGGER BACKGROUND LOADING after onboarding completion
+      if (updatedUser.email) {
+        console.log('🚀 AuthContext: Starting background loading after onboarding completion...');
+        setTimeout(() => {
+          BackgroundDataService.startStagedLoading(updatedUser);
+        }, 1000); // Give UI time to navigate to main app
+      }
+      
+      console.log('✅ AuthContext: Onboarding marked as complete');
       return { success: true };
     } catch (error) {
-      console.error('Error completing onboarding:', error);
+      console.error('❌ AuthContext: Error completing onboarding:', error);
       return {
         success: false,
         error: error.message || 'Failed to mark onboarding as complete'
@@ -217,16 +245,16 @@ export const AuthProvider = ({ children }) => {
     }
   };
 
-  // Resend confirmation code - MOVED INSIDE THE PROVIDER
+  // Resend confirmation code
   const resendConfirmationCode = async (username) => {
     setIsLoading(true);
     try {
       await Auth.resendSignUp(username);
-      console.log('Confirmation code resent successfully');
+      console.log('✅ AuthContext: Confirmation code resent successfully');
       
       return { success: true };
     } catch (error) {
-      console.error('Resend confirmation code error:', error);
+      console.error('❌ AuthContext: Resend confirmation code error:', error);
       return {
         success: false,
         error: error.message || 'Failed to resend confirmation code'
@@ -240,6 +268,8 @@ export const AuthProvider = ({ children }) => {
   const signOut = async () => {
     setIsLoading(true);
     try {
+      console.log('🚪 AuthContext: Signing out...');
+      
       await Auth.signOut();
       
       // Clear state and storage
@@ -247,12 +277,13 @@ export const AuthProvider = ({ children }) => {
       setIsSignedIn(false);
       setHasCompletedOnboarding(false);
       await AsyncStorage.removeItem('userData');
+      await clearUserEmail();
       
-      console.log('Signed out successfully');
+      console.log('✅ AuthContext: Signed out successfully');
       
       return { success: true };
     } catch (error) {
-      console.error('Sign out error:', error);
+      console.error('❌ AuthContext: Sign out error:', error);
       return {
         success: false,
         error: error.message || 'Failed to sign out'
@@ -266,13 +297,24 @@ export const AuthProvider = ({ children }) => {
   const federatedSignIn = async (provider, token, userData) => {
     setIsLoading(true);
     try {
+      console.log('🔗 AuthContext: Federated sign in for provider:', provider);
+      
       setUser(userData);
       setIsSignedIn(true);
       await AsyncStorage.setItem('userData', JSON.stringify(userData));
+      await saveUserEmail(userData.email);
+      
+      // 🚀 TRIGGER BACKGROUND LOADING for social sign in
+      if (userData.email) {
+        console.log('🚀 AuthContext: Starting background loading after social sign in...');
+        setTimeout(() => {
+          BackgroundDataService.startStagedLoading(userData);
+        }, 500);
+      }
       
       return { success: true };
     } catch (error) {
-      console.error('Federated sign in error:', error);
+      console.error('❌ AuthContext: Federated sign in error:', error);
       return {
         success: false,
         error: error.message || 'Failed to sign in'
@@ -282,23 +324,49 @@ export const AuthProvider = ({ children }) => {
     }
   };
 
+  // Force refresh user data and trigger background loading
+  const refreshUser = async () => {
+    console.log('🔄 AuthContext: Refreshing user data...');
+    await checkAuthState();
+  };
+
+  // Get background loading status (for debugging/UI)
+  const getBackgroundLoadingStatus = () => {
+    return BackgroundDataService.getLoadingStatus();
+  };
+
+  // Force refresh all background data
+  const forceRefreshAllData = async () => {
+    console.log('🔄 AuthContext: Force refreshing all background data...');
+    await BackgroundDataService.forceRefreshAll();
+  };
+
   // Provide all auth methods and state
   return (
     <AuthContext.Provider
       value={{
+        // State
         user,
         isLoading,
         isSignedIn,
         hasCompletedOnboarding,
+        
+        // Auth methods
         signIn,
         signUp,
         confirmSignUp,
         signOut,
         federatedSignIn,
-        refreshUser: checkAuthState,
+        
+        // Utility methods
+        refreshUser,
         resendConfirmationCode,
-        checkUserExistsInCognito, // FIXED the function name
-        completeOnboarding
+        checkUserExistsInCognito,
+        completeOnboarding,
+        
+        // Background loading methods
+        getBackgroundLoadingStatus,
+        forceRefreshAllData
       }}
     >
       {children}

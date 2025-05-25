@@ -10,7 +10,7 @@ const BottomNavigation = () => {
 
   return (
     <View style={styles.bottomNav}>
-      <TouchableOpacity style={styles.navItem}>
+      <TouchableOpacity style={styles.navItem} onPress={() => navigation.navigate('Feed')}>
         <Icon name="aperture-outline" size={ICON_SIZE} color={ICON_COLOR} />
       </TouchableOpacity>
 
@@ -22,7 +22,7 @@ const BottomNavigation = () => {
         <Icon name="add-circle-outline" size={36} color={ICON_COLOR} />
       </TouchableOpacity>
 
-      <TouchableOpacity style={styles.navItem} onPress={() => navigation.navigate('Feed')}>
+      <TouchableOpacity style={styles.navItem}>
         <Icon name="home-outline" size={ICON_SIZE} color={ICON_COLOR} />
       </TouchableOpacity>
 

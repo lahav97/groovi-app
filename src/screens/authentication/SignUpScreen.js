@@ -242,7 +242,7 @@ const SignUpScreen = () => {
       });
   
       console.log('✅ SignUp successful');
-      navigation.navigate('Confirm Code', { username: user.username, password: user.password });
+      navigation.navigate('Confirm Code', { user });
     }
     catch (error) {
       console.error('❌ Error signing up:', error);

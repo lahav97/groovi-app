@@ -5,94 +5,102 @@ const FEED_API_URL = 'https://ioeunedt82.execute-api.us-east-1.amazonaws.com/gro
 // Keep track of video IDs we've already fetched to avoid duplicates
 let fetchedVideoIds = new Set();
 let currentOffset = 0;
+let hasReachedActualEnd = false; // Track if we've truly reached the end
 
 /**
- * Fetches videos for the feed with proper pagination
- * @param {number} page - Page number (0, 1, 2, ...)
- * @param {number} requestedLimit - How many videos we want
+ * Fetches videos for the feed with pagination
+ * @param {number} offset - The starting index for fetching videos
+ * @param {number} limit - How many videos to fetch
  * @returns {Promise<Array>} - Array of unique video objects
  */
-export const fetchVideos = async (page = 0, requestedLimit = 5) => {
+export const fetchVideos = async (offset = 0, limit = 5) => {
   try {
-    console.log(`📡 Fetching videos - page: ${page}, requested: ${requestedLimit}`);
-    
-    // For initial load, reset our tracking
-    if (page === 0) {
+    console.log(`📡 Fetching videos - offset: ${offset}, limit: ${limit}`);
+
+    // Reset tracking only if starting from offset 0 (initial load)
+    if (offset === 0) {
       fetchedVideoIds.clear();
-      currentOffset = 0;
-      console.log('🔄 Reset pagination tracking');
+      console.log('🔄 Reset video state tracking');
     }
-    
-    // We'll fetch up to 3 times to get enough unique videos
-    let attempts = 0;
-    let uniqueVideos = [];
-    
-    while (uniqueVideos.length < requestedLimit && attempts < 3) {
-      attempts++;
-      
-      // Calculate lastId for cursor pagination
-      // Use currentOffset to simulate pagination
-      const lastId = currentOffset > 0 ? currentOffset : null;
-      
-      console.log(`📡 API call ${attempts}, lastId: ${lastId}, offset: ${currentOffset}`);
-      
-      const response = await axios.get(FEED_API_URL, {
-        params: {
-          limit: 10, // Always fetch 10 from API
-          lastId: lastId
-        }
-      });
-      
-      if (!response.data || !Array.isArray(response.data)) {
-        console.log('❌ Invalid API response format');
-        break;
+
+    const response = await axios.get(FEED_API_URL, {
+      params: {
+        limit: limit,
+        // The backend uses lastId, so if offset is 0, we don't pass lastId.
+        // Otherwise, we pass the offset as lastId to get videos after that point.
+        lastId: offset > 0 ? offset : null,
       }
-      
-      console.log(`✅ API returned ${response.data.length} videos`);
-      
-      // Filter out videos we've already seen
-      const newVideos = response.data.filter(video => {
-        const videoId = video.id || video.user_id || video.video_url;
-        return videoId && !fetchedVideoIds.has(videoId);
-      });
-      
-      console.log(`🔍 Found ${newVideos.length} new unique videos`);
-      
-      // Add new videos to our collection
-      newVideos.forEach(video => {
-        const videoId = video.id || video.user_id || video.video_url;
-        if (videoId) {
-          fetchedVideoIds.add(videoId);
-          uniqueVideos.push(video);
-        }
-      });
-      
-      // Update offset for next API call
-      currentOffset += response.data.length;
-      
-      // If API returned fewer than 10 videos, we've reached the end
-      if (response.data.length < 10) {
-        console.log('🏁 Reached end of available videos');
-        break;
-      }
-      
-      // If we got no new videos, try a different offset
-      if (newVideos.length === 0) {
-        currentOffset += 5; // Skip ahead a bit
-        console.log(`⏭️ No new videos, skipping to offset ${currentOffset}`);
-      }
+    });
+
+    // Add debug logs for API response and filtering
+    console.log('API returned video IDs:', response.data.map(v => v.id || v.user_id || v.video_url));
+    console.log('Already fetched IDs:', Array.from(fetchedVideoIds));
+
+    if (!response.data || !Array.isArray(response.data)) {
+      console.log('❌ Invalid API response format');
+      // If API returns invalid format, consider it as end of data for this call
+      return [];
     }
+
+    console.log(`✅ API returned ${response.data.length} videos`);
+
+    // If API returns 0 videos, we've reached the actual end
+    if (response.data.length === 0) {
+      console.log('🏁 API returned 0 videos - reached actual end for this offset');
+      hasReachedActualEnd = true;
+      return [];
+    }
+
+    // Filter out videos we've already seen across all fetch calls
+    const uniqueVideos = response.data.filter(video => {
+      const videoId = video.id || video.user_id || video.video_url;
     
-    // Return only the requested number of videos
-    const result = uniqueVideos.slice(0, requestedLimit);
-    console.log(`🎯 Returning ${result.length} unique videos`);
+      // If we've never seen it, keep it
+      if (!fetchedVideoIds.has(videoId)) return true;
     
-    return result;
+      // If we've seen it, keep it with a low chance (10%)
+      const allowRepeat = Math.random() < 0.1;
+      return allowRepeat;
+    });
     
+
+    // Add new unique videos to our tracking set
+    uniqueVideos.forEach(video => {
+      const videoId = video.id || video.user_id || video.video_url;
+      if (videoId) {
+        fetchedVideoIds.add(videoId);
+      }
+    });
+
+    console.log(`🎯 Returning ${uniqueVideos.length} unique videos after filtering`);
+    console.log(`📊 Total unique videos fetched across all calls: ${fetchedVideoIds.size}`);
+
+    return uniqueVideos;
+
   } catch (error) {
     console.error('❌ Error fetching videos:', error);
     return [];
   }
+};
+
+/**
+ * Check if we have more videos available
+ * @returns {boolean} True if more videos might be available
+ */
+export const hasMoreVideos = () => {
+  return !hasReachedActualEnd;
+};
+
+/**
+ * Get current pagination stats
+ * @returns {Object} Current pagination information
+ */
+export const getPaginationStats = () => {
+  return {
+    totalFetched: fetchedVideoIds.size,
+    currentOffset,
+    hasReachedEnd: hasReachedActualEnd
+  };
 };
 
 /**
@@ -101,5 +109,11 @@ export const fetchVideos = async (page = 0, requestedLimit = 5) => {
 export const resetVideoState = () => {
   fetchedVideoIds.clear();
   currentOffset = 0;
+  hasReachedActualEnd = false;
   console.log('🔄 Video state reset');
+};
+
+export const forceResetHasMoreVideos = () => {
+  hasReachedActualEnd = false;
+  console.log('🔁 Force reset hasReachedActualEnd');
 };

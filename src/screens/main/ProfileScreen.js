@@ -1,6 +1,6 @@
 /**
  * @module ProfileScreen
- * Displays the user's profile with videos, user information, and interactive elements.
+ * Enhanced profile screen with cache-first loading for instant navigation
  */
 
 import React, { useState, useRef, useEffect } from 'react';
@@ -23,143 +23,164 @@ import { COLORS, SIZES, LAYOUT } from '../../styles/theme';
 import { useIsFocused } from '@react-navigation/native';
 import Swiper from 'react-native-swiper';
 import { useNavigation } from '@react-navigation/native';
-import userProfileManager from '../../hooks/userProfileManager';
+import { useAuth } from '../../context/AuthContext';
+import { getCurrentUserEmail } from '../../utils/userUtils';
+import { fetchUserProfile } from '../../services/profileService';
+import { getProfileCache, cacheUserProfile } from '../../utils/cacheManager';
 
 const { width } = Dimensions.get('window');
 
 /**
  * @function ProfileScreen
- * @description Displays the current user's profile page including video swiper, info, and bottom navigation.
+ * @description Enhanced profile screen with cache-first loading for instant performance
  * @returns {JSX.Element}
  */
 const ProfileScreen = () => {
   const navigation = useNavigation();
+  const { user } = useAuth();
+  const [profile, setProfile] = useState(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(null);
+  const [refreshing, setRefreshing] = useState(false);
+  const [loadSource, setLoadSource] = useState(''); // Track cache vs API loading
+  
   const [pausedStatus, setPausedStatus] = useState({});
   const [currentIndex, setCurrentIndex] = useState(0);
-  const [refreshing, setRefreshing] = useState(false);
   const colorScheme = useColorScheme();
   const theme = colorScheme === 'dark' ? COLORS.dark : COLORS.light;
   const isFocused = useIsFocused();
   const videoRefs = useRef({});
   const swiperRef = useRef(null);
 
-  console.log('🔍 ProfileScreen: Component rendering');
+  // ============================================================================
+  // CACHE-FIRST PROFILE LOADING
+  // ============================================================================
 
-  // Load current user's profile
-  const { 
-    profile, 
-    loading, 
-    error, 
-    refreshProfile 
-  } = userProfileManager({
-    autoLoad: true,
-    loadOnFocus: true
-  });
+  /**
+   * Load profile with cache-first approach
+   */
+  const loadProfileWithCacheFirst = async (forceRefresh = false) => {
+    try {
+      console.log('⚡ ProfileScreen: Starting cache-first profile loading...');
+      setLoading(true);
+      setError(null);
 
-  // DEBUG: Log profile data
-  useEffect(() => {
-    console.log('🔍 ProfileScreen: Profile state changed', {
-      hasProfile: !!profile,
-      loading,
-      error: error || 'No error'
-    });
-
-    if (profile) {
-      console.log('🎥 ProfileScreen: Profile data:', {
-        username: profile.username,
-        videosCount: profile.videos ? profile.videos.length : 0,
-        videosType: typeof profile.videos,
-        instruments: profile.instruments,
-        bio: profile.bio
-      });
-      
-      if (profile.videos) {
-        console.log('🎬 ProfileScreen: Videos data:', profile.videos);
+      // Get user email
+      const userEmail = user?.email || await getCurrentUserEmail();
+      if (!userEmail) {
+        setError('User email not found');
+        setLoading(false);
+        return;
       }
+
+      // STEP 1: Try cache first (unless force refresh)
+      if (!forceRefresh) {
+        console.log('📦 ProfileScreen: Checking profile cache...');
+        const cachedProfile = await getProfileCache(userEmail);
+        
+        if (cachedProfile) {
+          console.log('⚡ ProfileScreen: Using cached profile (INSTANT LOAD)');
+          setProfile(cachedProfile);
+          setLoadSource('cache');
+          setLoading(false);
+          return;
+        }
+      }
+
+      // STEP 2: Load from API
+      console.log('📡 ProfileScreen: Loading profile from API...');
+      setLoadSource('api');
+      
+      const profileData = await fetchUserProfile('email', userEmail);
+      
+      if (profileData) {
+        console.log('✅ ProfileScreen: Profile loaded from API');
+        setProfile(profileData);
+        
+        // Cache for next time
+        await cacheUserProfile(profileData, userEmail);
+        console.log('💾 ProfileScreen: Profile cached');
+      } else {
+        setError('Profile not found');
+      }
+    } catch (err) {
+      console.error('❌ ProfileScreen: Error loading profile:', err);
+      setError('Failed to load profile');
+    } finally {
+      setLoading(false);
     }
-  }, [profile, loading, error]);
+  };
+
+  /**
+   * Handle pull-to-refresh
+   */
+  const onRefresh = async () => {
+    console.log('🔄 ProfileScreen: Refreshing profile...');
+    setRefreshing(true);
+    await loadProfileWithCacheFirst(true); // Force refresh
+    setRefreshing(false);
+  };
+
+  // ============================================================================
+  // VIDEO HANDLING
+  // ============================================================================
 
   /**
    * Convert profile videos (array of URL strings) to video objects
    */
   const getVideoObjects = () => {
     if (!profile?.videos || !Array.isArray(profile.videos)) {
-      console.log('⚠️ ProfileScreen: No videos found in profile');
       return [];
     }
 
-    const videoObjects = profile.videos.map((videoUrl, index) => ({
+    return profile.videos.map((videoUrl, index) => ({
       id: `profile-video-${index}`,
       uri: videoUrl
     }));
-
-    console.log('🎬 ProfileScreen: Created video objects:', videoObjects.length);
-    return videoObjects;
   };
 
   const videoObjects = getVideoObjects();
 
   /**
-   * @function togglePause
-   * @description Pauses or resumes a video when the user taps on it.
-   * @param {string} id - Video ID
+   * Toggle video pause/play
    */
   const togglePause = (id) => {
-    console.log('🎬 ProfileScreen: Toggle pause for video:', id);
     setPausedStatus(prev => ({ ...prev, [id]: !prev[id] }));
   };
 
   /**
-   * @function onRefresh
-   * @description Handle pull-to-refresh
-   */
-  const onRefresh = async () => {
-    console.log('🔄 ProfileScreen: Refreshing profile...');
-    setRefreshing(true);
-    try {
-      await refreshProfile();
-    } catch (error) {
-      console.error('❌ ProfileScreen: Refresh failed:', error);
-    } finally {
-      setRefreshing(false);
-    }
-  };
-
-  useEffect(() => {
-    if (!isFocused) {
-      console.log('📱 ProfileScreen: Screen lost focus, pausing videos');
-      // Pause all videos when screen is not focused
-      Object.values(videoRefs.current).forEach(ref => {
-        if (ref?.pauseAsync) {
-          ref.pauseAsync();
-        }
-      });
-    } else {
-      console.log('📱 ProfileScreen: Screen gained focus');
-    }
-  }, [isFocused]);
-
-  /**
-   * @function onIndexChanged
-   * @description Handles changes in the video swiper index.
-   * @param {number} index - The index of the newly active video.
+   * Handle video swiper index change
    */
   const onIndexChanged = (index) => {
-    console.log(`🎬 ProfileScreen: Video index changed to: ${index}`);
     setCurrentIndex(index);
     
-    // Pause all videos except the current one
+    // Pause all videos except current one
     videoObjects.forEach(video => {
       if (video.id !== videoObjects[index].id && videoRefs.current[video.id]?.pauseAsync) {
         videoRefs.current[video.id].pauseAsync();
       }
     });
     
-    // Play the current video if it's not manually paused
+    // Play current video if not paused
     if (!pausedStatus[videoObjects[index].id] && videoRefs.current[videoObjects[index].id]?.playAsync) {
       videoRefs.current[videoObjects[index].id].playAsync();
     }
   };
+
+  // Pause videos when screen loses focus
+  useEffect(() => {
+    if (!isFocused) {
+      Object.values(videoRefs.current).forEach(ref => {
+        if (ref?.pauseAsync) {
+          ref.pauseAsync();
+        }
+      });
+    }
+  }, [isFocused]);
+
+  // ============================================================================
+  // HELPER FUNCTIONS
+  // ============================================================================
 
   /**
    * Format instruments for display
@@ -178,14 +199,28 @@ const ProfileScreen = () => {
     return profile.instruments.toString();
   };
 
+  // ============================================================================
+  // LIFECYCLE
+  // ============================================================================
+
+  // Load profile on mount
+  useEffect(() => {
+    loadProfileWithCacheFirst();
+  }, []);
+
+  // ============================================================================
+  // RENDER
+  // ============================================================================
+
   // Loading state
   if (loading && !profile) {
-    console.log('📱 ProfileScreen: Showing loading state');
     return (
       <SafeAreaView style={[styles.container, { backgroundColor: theme.background }]}>
         <View style={styles.loadingContainer}>
           <ActivityIndicator size="large" color="#ff6ec4" />
-          <Text style={[styles.loadingText, { color: theme.text }]}>Loading your profile...</Text>
+          <Text style={[styles.loadingText, { color: theme.text }]}>
+            {loadSource === 'cache' ? 'Loading from cache...' : 'Loading your profile...'}
+          </Text>
         </View>
         <View style={styles.bottomNav}>
           <BottomNavigation />
@@ -196,12 +231,12 @@ const ProfileScreen = () => {
 
   // Error state  
   if (error && !profile) {
-    console.log('❌ ProfileScreen: Showing error state:', error);
     return (
       <SafeAreaView style={[styles.container, { backgroundColor: theme.background }]}>
         <View style={styles.errorContainer}>
           <Text style={[styles.errorText, { color: theme.text }]}>Failed to load profile</Text>
-          <TouchableOpacity style={styles.retryButton} onPress={refreshProfile}>
+          <Text style={[styles.errorSubtext, { color: theme.textSecondary }]}>{error}</Text>
+          <TouchableOpacity style={styles.retryButton} onPress={() => loadProfileWithCacheFirst(true)}>
             <Text style={styles.retryButtonText}>Try Again</Text>
           </TouchableOpacity>
         </View>
@@ -211,8 +246,6 @@ const ProfileScreen = () => {
       </SafeAreaView>
     );
   }
-
-  console.log('✅ ProfileScreen: Rendering main profile view');
 
   return (
     <SafeAreaView style={[styles.container, { backgroundColor: theme.background }]}>
@@ -238,16 +271,6 @@ const ProfileScreen = () => {
           />
         }
       >
-        {/* DEBUG BOX - Remove this when everything works */}
-        {/* <View style={styles.debugBox}>
-          <Text style={styles.debugText}>
-            DEBUG: Profile = {profile ? 'LOADED' : 'NOT LOADED'}
-          </Text>
-          <Text style={styles.debugText}>
-            Videos: {videoObjects.length} found
-          </Text>
-        </View> */}
-
         {/* Video Swiper */}
         {videoObjects.length > 0 ? (
           <View style={styles.videoContainer}>
@@ -267,48 +290,32 @@ const ProfileScreen = () => {
               showsButtons={false}
               width={width}
             >
-              {videoObjects.map((video) => {
-                console.log(`🎬 ProfileScreen: Rendering video ${video.id} with URI:`, video.uri);
-                return (
-                  <View key={video.id} style={styles.slide}>
-                    <TouchableOpacity 
-                      style={styles.videoWrapper} 
-                      onPress={() => togglePause(video.id)}
-                      activeOpacity={0.9}
-                    >
-                      <Video
-                        ref={(ref) => { 
-                          videoRefs.current[video.id] = ref;
-                          console.log(`🎬 ProfileScreen: Video ref set for ${video.id}`);
-                        }}
-                        source={{ uri: video.uri }}
-                        style={styles.video}
-                        resizeMode="cover"
-                        isLooping
-                        shouldPlay={
-                          !pausedStatus[video.id] && 
-                          isFocused && 
-                          currentIndex === videoObjects.findIndex(v => v.id === video.id)
-                        }
-                        useNativeControls={false}
-                        isMuted={false}
-                        onLoad={() => {
-                          console.log(`✅ ProfileScreen: Video ${video.id} loaded successfully`);
-                        }}
-                        onLoadStart={() => {
-                          console.log(`⏳ ProfileScreen: Video ${video.id} loading started`);
-                        }}
-                        onBuffer={() => {
-                          console.log(`📶 ProfileScreen: Video ${video.id} buffering`);
-                        }}
-                        onError={(error) => {
-                          console.log(`❌ ProfileScreen: Video ${video.id} error:`, error);
-                        }}
-                      />
-                    </TouchableOpacity>
-                  </View>
-                );
-              })}
+              {videoObjects.map((video, index) => (
+                <View key={video.id} style={styles.slide}>
+                  <TouchableOpacity 
+                    style={styles.videoWrapper} 
+                    onPress={() => togglePause(video.id)}
+                    activeOpacity={0.9}
+                  >
+                    <Video
+                      ref={(ref) => { videoRefs.current[video.id] = ref; }}
+                      source={{ uri: video.uri }}
+                      style={styles.video}
+                      resizeMode="cover"
+                      isLooping
+                      shouldPlay={
+                        !pausedStatus[video.id] && 
+                        isFocused && 
+                        currentIndex === index
+                      }
+                      isMuted={false}
+                      onError={(error) => {
+                        console.log(`❌ ProfileScreen: Video ${video.id} error:`, error);
+                      }}
+                    />
+                  </TouchableOpacity>
+                </View>
+              ))}
             </Swiper>
           </View>
         ) : (
@@ -320,6 +327,7 @@ const ProfileScreen = () => {
           </View>
         )}
 
+        {/* Profile Information */}
         <View style={styles.usernameSection}>
           <Ionicons name="person-circle-outline" size={SIZES.icon} color={theme.text} />
           <Text style={[styles.username, { color: theme.text }]}>
@@ -370,8 +378,6 @@ const ProfileScreen = () => {
   );
 };
 
-export default ProfileScreen;
-
 const styles = StyleSheet.create({
   container: {
     flex: 1,
@@ -396,6 +402,11 @@ const styles = StyleSheet.create({
   errorText: {
     fontSize: 18,
     fontWeight: 'bold',
+    marginBottom: 8,
+    textAlign: 'center',
+  },
+  errorSubtext: {
+    fontSize: 14,
     marginBottom: 20,
     textAlign: 'center',
   },
@@ -409,17 +420,6 @@ const styles = StyleSheet.create({
     color: 'white',
     fontSize: 16,
     fontWeight: 'bold',
-  },
-  debugBox: {
-    backgroundColor: 'rgba(255, 0, 0, 0.2)',
-    padding: 10,
-    marginBottom: 10,
-    borderRadius: 5,
-  },
-  debugText: {
-    color: 'white',
-    fontSize: 12,
-    marginBottom: 2,
   },
   topIcons: {
     position: 'absolute',
@@ -525,3 +525,5 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
 });
+
+export default ProfileScreen;

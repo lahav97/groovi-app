@@ -28,6 +28,8 @@ import { useSignupBuilder } from '../../context/SignupFlowContext';
 import axios from 'axios';
 import Button from '../../components/common/Button';
 import { useAuth } from '../../context/AuthContext';
+import AsyncStorage from '@react-native-async-storage/async-storage';
+
 
 const FILE_UPLOAD_API_URL = 'https://cy6ikxj5lk.execute-api.us-east-1.amazonaws.com/groovi/file_upload';
 const BUILD_PROFILE_API_URL = 'https://9u6y4sfrn2.execute-api.us-east-1.amazonaws.com/groovi/build_profile';
@@ -58,7 +60,47 @@ const ProfileSetupScreen = () => {
   const [videoCounter, setVideoCounter] = useState(0);
   const [uploadStatuses, setUploadStatuses] = useState([]);
   const [videoKeys, setVideoKeys] = useState(new Set());
+
+  useEffect(() => {
+    const loadUserFromStorage = async () => {
+      try {
+        const stored = await AsyncStorage.getItem('signupBuilderBackup');
+        console.log('📦 Attempting to read signupBuilderBackup from AsyncStorage...');
+
+        if (stored) {
+          const parsedUser = JSON.parse(stored);
+          console.log('✅ Parsed user from storage:', parsedUser);
+
+          console.log('✅ Restored user from storage at ProfileSetupScreen:', parsedUser);
   
+          // Re-inject into builder
+          builder
+            .setFullName(parsedUser.fullName)
+            .setUsername(parsedUser.username)
+            .setEmail(parsedUser.email)
+            .setPassword(parsedUser.password)
+            .setUserType(parsedUser.userType)
+            .setPhoneNumber(parsedUser.phoneNumber)
+            .setGender(parsedUser.gender)
+            .setBirthDate(parsedUser.birthDate)
+            .setInstruments(parsedUser.instruments);
+        } else {
+          console.warn('⚠️ No stored user data found for ProfileSetupScreen');
+        }
+      } catch (err) {
+        console.error('❌ Failed to restore user data from storage:', err);
+      }
+    };
+  
+    loadUserFromStorage();
+  }, []);
+  
+  // TODO:
+  useEffect(() => {
+  const builtUser = builder.build();
+  console.log('🧱 Builder at ProfileSetupScreen:', builtUser);
+}, []);
+
   useEffect(() => {
     (async () => {
       const { status } = await Location.requestForegroundPermissionsAsync();
@@ -452,7 +494,7 @@ const uploadFileToS3 = async (fileUri, presignedUrl) => {
       const finalLocation = useManualLocation ? manualLocation : location;
   
       // Create the complete user object with already uploaded videos
-      const updatedUser = builder
+      const completeUser = builder
       .setLocation(finalLocation)
       .setBio(bio)
       .setGenres(genres)
@@ -460,29 +502,31 @@ const uploadFileToS3 = async (fileUri, presignedUrl) => {
       .setVideos(videoUrls.filter(url => !!url))
       .build();
       
-      console.log('Updated user data with video URLs:', updatedUser);
+      console.log('Updated user data with video URLs:', completeUser);
       
       // Create the request body with all required fields
       const requestBody = {
-        username: updatedUser.username || updatedUser.email,
-        fullName: updatedUser.fullName,
-        email: updatedUser.email,
-        password: updatedUser.password,
-        phoneNumber: updatedUser.phoneNumber || "",
-        userType: updatedUser.userType,
-        bio: updatedUser.bio,
-        location: updatedUser.location,
-        genres: updatedUser.genres,
-        gender: updatedUser.gender || "prefer not to say",
-        instruments: updatedUser.instruments || {},
+        username: completeUser.username,
+        fullName: completeUser.fullName,
+        email: completeUser.email,
+        password: completeUser.password,
+        userType: completeUser.userType,
+        bio: completeUser.bio,
+        location: completeUser.location,
+        genres: completeUser.genres,
+        gender: completeUser.gender,
+        instruments: completeUser.instruments || {},
         videoUrls: videoUrls,
       };
+
+      console.log('Username being sent:', requestBody.username);
   
       // Add optional fields only if they exist
-      if (updatedUser.link) {
-        requestBody.link = updatedUser.link;
+      if (completeUser.link) {
+        requestBody.link = completeUser.link;
       }
   
+      console.log('Username being sent:', requestBody.username);
       console.log('Request body being sent to Lambda:', requestBody);
   
       // Send user info to creation Lambda
