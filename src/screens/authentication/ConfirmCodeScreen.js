@@ -103,7 +103,6 @@ const ConfirmCodeScreen = () => {
       const signInResult = await signIn(username, password);
       
       if (signInResult.success) {
-        console.log('✅ Sign-in successful! Rehydrating builder post-login...');
         const { userData } = signInResult;
       
         signupBuilder
@@ -117,10 +116,8 @@ const ConfirmCodeScreen = () => {
           .setPhoneNumber(user?.phoneNumber || null);
       
         const builtUser = signupBuilder.build();
-        console.log('🧱 Builder rebuilt after sign-in:', builtUser);
       
         await AsyncStorage.setItem('signupBuilderBackup', JSON.stringify(builtUser));
-        console.log('💾 Saved builder backup to AsyncStorage');
         await new Promise((resolve) => setTimeout(resolve, 300));
 
       }

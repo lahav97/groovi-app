@@ -68,12 +68,7 @@ const ProfileSetupScreen = () => {
         console.log('📦 Attempting to read signupBuilderBackup from AsyncStorage...');
 
         if (stored) {
-          const parsedUser = JSON.parse(stored);
-          console.log('✅ Parsed user from storage:', parsedUser);
-
-          console.log('✅ Restored user from storage at ProfileSetupScreen:', parsedUser);
-  
-          // Re-inject into builder
+          const parsedUser = JSON.parse(stored);  
           builder
             .setFullName(parsedUser.fullName)
             .setUsername(parsedUser.username)
@@ -94,12 +89,6 @@ const ProfileSetupScreen = () => {
   
     loadUserFromStorage();
   }, []);
-  
-  // TODO:
-  useEffect(() => {
-  const builtUser = builder.build();
-  console.log('🧱 Builder at ProfileSetupScreen:', builtUser);
-}, []);
 
   useEffect(() => {
     (async () => {

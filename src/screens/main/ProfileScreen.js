@@ -16,7 +16,7 @@ import {
   ActivityIndicator,
   RefreshControl,
 } from 'react-native';
-import { Ionicons, FontAwesome } from '@expo/vector-icons';
+import { Ionicons, FontAwesome, AntDesign } from '@expo/vector-icons';
 import { Video } from 'expo-av';
 import BottomNavigation from '../../components/navigationBar/BottomNavigation';
 import { COLORS, SIZES, LAYOUT } from '../../styles/theme';
@@ -26,7 +26,8 @@ import { useNavigation } from '@react-navigation/native';
 import { useAuth } from '../../context/AuthContext';
 import { getCurrentUserEmail } from '../../utils/userUtils';
 import { fetchUserProfile } from '../../services/profileService';
-import { getProfileCache, cacheUserProfile } from '../../utils/cacheManager';
+import { getProfileCache, cacheUserProfile, clearProfileCache } from '../../utils/cacheManager';
+import { signOut } from '../../services/authService';
 
 const { width } = Dimensions.get('window');
 
@@ -51,6 +52,26 @@ const ProfileScreen = () => {
   const isFocused = useIsFocused();
   const videoRefs = useRef({});
   const swiperRef = useRef(null);
+
+  const handleLogout = async () => {
+    console.log('Logout button pressed');
+    try {
+      // Get user email
+      const userEmail = user?.email || await getCurrentUserEmail();
+      if (userEmail) {
+        // Clear profile cache for the current user
+        await clearProfileCache(userEmail);
+        console.log(`✅ Profile cache cleared for user: ${userEmail}`);
+      }
+
+      // Sign out the user
+      await signOut();
+      console.log('✅ User signed out');
+    } catch (error) {
+      console.error('❌ Error during logout:', error);
+      // Optionally display an error message to the user
+    }
+  };
 
   // ============================================================================
   // CACHE-FIRST PROFILE LOADING
@@ -256,6 +277,9 @@ const ProfileScreen = () => {
         </TouchableOpacity>
         <TouchableOpacity onPress={() => navigation.navigate('EditProfile')}>
           <Ionicons name="create-outline" size={SIZES.icon} color={theme.text} />
+        </TouchableOpacity>
+        <TouchableOpacity onPress={handleLogout}>
+          <AntDesign name="logout" size={SIZES.icon} color={theme.text} />
         </TouchableOpacity>
       </View>
 
