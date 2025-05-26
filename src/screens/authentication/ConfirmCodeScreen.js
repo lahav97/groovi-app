@@ -2,12 +2,15 @@
  * @module ConfirmCodeScreen
  * Screen for confirming a user's signup by entering a verification code.
  */
-import React, { useState } from 'react';
-import { View, Text, TextInput, StyleSheet, Alert } from 'react-native';
-import { Auth } from 'aws-amplify';
+import React, { useState, useEffect } from 'react';
+import { View, Text, TextInput, StyleSheet, Alert, ActivityIndicator } from 'react-native';
 import { useNavigation, useRoute } from '@react-navigation/native';
 import { LinearGradient } from 'expo-linear-gradient';
 import Button from '../../components/common/Button';
+import { useAuth } from '../../context/AuthContext';
+import { useSignupBuilder } from '../../context/SignupFlowContext';
+import AsyncStorage from '@react-native-async-storage/async-storage';
+
 
 /**
  * @function ConfirmCodeScreen
@@ -17,24 +20,120 @@ import Button from '../../components/common/Button';
 const ConfirmCodeScreen = () => {
   const navigation = useNavigation();
   const route = useRoute();
-  const { username, password } = route.params || {};
-
   const [code, setCode] = useState('');
+  const [isConfirming, setIsConfirming] = useState(false);
+  const [isResending, setIsResending] = useState(false);
+  const [statusMessage, setStatusMessage] = useState(null);
+  const [statusType, setStatusType] = useState(null); // 'success', 'error', 'info'
+  const { user } = route.params || {};
+  const username = user?.username;
+  const password = user?.password;
+
+  console.log('🛬 Received user from SignUpScreen:', user);
+
+  
+  // Use the auth context and signup builder
+  const { confirmSignUp, resendConfirmationCode, signIn } = useAuth();
+  const signupBuilder = useSignupBuilder();
+  
+  // Store credentials in the builder for later use in ProfileSetupScreen
+  useEffect(() => {
+    if (user && signupBuilder) {
+      signupBuilder
+        .setUsername(user.username)
+        .setPassword(user.password)
+        .setFullName(user.fullName)
+        .setEmail(user.email)
+        .setUserType(user.userType)
+        .setGender(user.gender)
+        .setPhoneNumber(user.phoneNumber)
+        .setBirthDate(user.birthDate);
+  
+      console.log('✅ ConfirmCodeScreen restored full user into builder:', signupBuilder.build());
+    }
+  }, [user, signupBuilder]);
+
+  // Clear status message after a delay
+  useEffect(() => {
+    let timer;
+    if (statusMessage) {
+      timer = setTimeout(() => {
+        setStatusMessage(null);
+        setStatusType(null);
+      }, 3000); // Clear after 3 seconds
+    }
+    return () => clearTimeout(timer);
+  }, [statusMessage]);
 
   /**
    * @function handleConfirm
-   * @description Confirms the sign-up using the verification code and signs the user in.
+   * @description Confirms the sign-up using the verification code and signs in the user.
    */
   const handleConfirm = async () => {
-    try {
-      await Auth.confirmSignUp(username, code);
-      await Auth.signIn(username, password);
+    if (!username) {
+      setStatusMessage('Something went wrong. Missing username.');
+      setStatusType('error');
+      return;
+    }
+    
+    if (!code.trim()) {
+      setStatusMessage('Please enter the verification code');
+      setStatusType('error');
+      return;
+    }
 
-      Alert.alert('✅ Success', 'Your account has been confirmed!');
-      navigation.navigate('Instruments');
+    setIsConfirming(true);
+    try {
+      // First, confirm the signup without signing in
+      console.log(`Confirming signup for user: ${username} with code: ${code}`);
+      const confirmResult = await confirmSignUp(username, code);
+      
+      if (!confirmResult.success) {
+        console.log('❌ Confirmation failed:', confirmResult.error);
+        setStatusMessage(confirmResult.error || 'Failed to confirm your account');
+        setStatusType('error');
+        setIsConfirming(false);
+        return;
+      }
+      
+      console.log('✅ Account confirmed successfully!');
+      setStatusMessage('Account confirmed successfully!');
+      setStatusType('success');
+      
+      const signInResult = await signIn(username, password);
+      
+      if (signInResult.success) {
+        const { userData } = signInResult;
+      
+        signupBuilder
+          .setUsername(userData.username)
+          .setEmail(userData.email)
+          .setFullName(user?.fullName || userData.username)
+          .setPassword(password)
+          .setUserType(user?.userType || 'musician')
+          .setGender(user?.gender)
+          .setBirthDate(user?.birthDate)
+          .setPhoneNumber(user?.phoneNumber || null);
+      
+        const builtUser = signupBuilder.build();
+      
+        await AsyncStorage.setItem('signupBuilderBackup', JSON.stringify(builtUser));
+        await new Promise((resolve) => setTimeout(resolve, 300));
+
+      }
+       else {
+        // Failed to sign in automatically
+        setStatusMessage('Account confirmed, but failed to sign in automatically. Please log in.');
+        setStatusType('error');
+        navigation.navigate('LoginWithEmail');
+      }
+    
     } catch (error) {
-      console.log('❌ Error confirming sign up:', error);
-      Alert.alert('Error', error.message || 'Failed to confirm sign up.');
+      console.error('❌ Error in confirmation process:', error);
+      setStatusMessage(error.message || 'Failed to complete the confirmation process');
+      setStatusType('error');
+    } finally {
+      setIsConfirming(false);
     }
   };
 
@@ -43,12 +142,26 @@ const ConfirmCodeScreen = () => {
    * @description Resends the confirmation code to the user.
    */
   const handleResendCode = async () => {
+    setIsResending(true);
     try {
-      await Auth.resendSignUp(username);
-      Alert.alert('✅ Success', 'Verification code resent to your email or phone.');
+      // Use the method from AuthContext
+      const result = await resendConfirmationCode(username);
+      
+      if (result.success) {
+        console.log('✅ Verification code resent successfully');
+        setStatusMessage('Verification code resent');
+        setStatusType('success');
+      } else {
+        console.log('❌ Failed to resend code:', result.error);
+        setStatusMessage(result.error || 'Failed to resend verification code');
+        setStatusType('error');
+      }
     } catch (error) {
-      console.log('❌ Error resending code:', error);
-      Alert.alert('Error', error.message || 'Failed to resend code.');
+      console.error('❌ Error resending code:', error);
+      setStatusMessage(error.message || 'Failed to resend code');
+      setStatusType('error');
+    } finally {
+      setIsResending(false);
     }
   };
 
@@ -61,6 +174,18 @@ const ConfirmCodeScreen = () => {
     >
       <View style={styles.inner}>
         <Text style={styles.title}>Enter your verification code</Text>
+        
+        {statusMessage && (
+          <View style={[
+            styles.statusContainer, 
+            statusType === 'success' && styles.successStatus,
+            statusType === 'error' && styles.errorStatus,
+            statusType === 'info' && styles.infoStatus,
+          ]}>
+            <Text style={styles.statusText}>{statusMessage}</Text>
+          </View>
+        )}
+        
         <TextInput
           style={styles.input}
           placeholder="Verification code"
@@ -68,23 +193,38 @@ const ConfirmCodeScreen = () => {
           onChangeText={setCode}
           value={code}
           placeholderTextColor="#666"
+          editable={!isConfirming && !isResending}
         />
 
         <Button
-          title="CONFIRM"
+          title={isConfirming ? "CONFIRMING..." : "CONFIRM"}
           onPress={handleConfirm}
           style={styles.confirmButton}
           textStyle={styles.confirmText}
-        />
+          disabled={isConfirming || isResending || !code.trim()}
+        >
+          {isConfirming ? (
+            <ActivityIndicator color="#000" size="small" />
+          ) : (
+            <Text style={styles.confirmText}>CONFIRM</Text>
+          )}
+        </Button>
 
         <View style={styles.resendContainer}>
           <Text style={styles.resendText}>Didn't receive a code?</Text>
           <Button
-            title="RESEND CODE"
+            title={isResending ? "SENDING..." : "RESEND CODE"}
             onPress={handleResendCode}
             style={styles.resendButton}
             textStyle={styles.resendButtonText}
-          />
+            disabled={isConfirming || isResending}
+          >
+            {isResending ? (
+              <ActivityIndicator color="#000" size="small" />
+            ) : (
+              <Text style={styles.resendButtonText}>RESEND CODE</Text>
+            )}
+          </Button>
         </View>
       </View>
     </LinearGradient>
@@ -123,6 +263,29 @@ const styles = StyleSheet.create({
     borderRadius: 20,
   },
   resendButtonText: { color: '#000', fontSize: 14, fontWeight: 'bold' },
+  // Status message styles
+  statusContainer: {
+    paddingVertical: 10,
+    paddingHorizontal: 20,
+    borderRadius: 20,
+    marginBottom: 20,
+    width: '100%',
+    alignItems: 'center',
+  },
+  successStatus: {
+    backgroundColor: 'rgba(39, 174, 96, 0.8)',
+  },
+  errorStatus: {
+    backgroundColor: 'rgba(231, 76, 60, 0.8)',
+  },
+  infoStatus: {
+    backgroundColor: 'rgba(52, 152, 219, 0.8)',
+  },
+  statusText: {
+    color: 'white',
+    fontWeight: '600',
+    textAlign: 'center',
+  },
 });
 
 export default ConfirmCodeScreen;

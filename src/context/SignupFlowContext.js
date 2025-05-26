@@ -20,4 +20,3 @@ export const SignupFlowProvider = ({ children }) => {
     }
     return context;
   };
-  

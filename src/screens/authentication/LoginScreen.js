@@ -17,7 +17,6 @@ import Button from '../../components/common/Button';
 WebBrowser.maybeCompleteAuthSession();
 
 const redirectUri = 'https://auth.expo.io/@lahav97/groovi-app';
-console.log('REDIRECT_URI', redirectUri);
 
 /**
  * @function LoginScreen
@@ -86,8 +85,8 @@ const LoginScreen = () => {
       />
 
       <Button
-        title="Use phone or email"
-        onPress={() => navigation.navigate('Phone Or Email')}
+        title="Login with email"
+        onPress={() => navigation.navigate('LoginWithEmail')}
         style={[styles.buttonBase, styles.whiteButton]}
         textStyle={styles.blackText}
       />

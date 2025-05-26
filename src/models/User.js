@@ -13,6 +13,7 @@ class User {
       videos,
       profilePicture,
       bio,
+      birthDate,
     }) {
       this.fullName = fullName;
       this.username = username;
@@ -27,6 +28,7 @@ class User {
       this.videos = videos;
       this.bio = bio;
       this.profilePicture = profilePicture;
+      this.birthDate = birthDate;
     }
   }
   

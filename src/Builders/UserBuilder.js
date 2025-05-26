@@ -10,6 +10,11 @@ class UserBuilder {
         return this;
     }
 
+    setBirthDate(birthDate) {
+        this.user.birthDate = birthDate;
+        return this;
+    }
+
     setUsername(username) {
         this.user.username = username;
         return this;

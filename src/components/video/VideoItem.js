@@ -7,26 +7,90 @@ import {
   StyleSheet,
   Dimensions,
   useColorScheme,
+  ActivityIndicator,
 } from 'react-native';
 import { Video } from 'expo-av';
 import Icon from 'react-native-vector-icons/Ionicons';
-import useLikeVideo from '../../hooks/useLikeVideo';
 import { COLORS } from '../../styles/theme';
 import { useIsFocused } from '@react-navigation/native';
-import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import VideoInfo from './VideoInfo';
+import * as FileSystem from 'expo-file-system';
 
 const { width, height: SCREEN_HEIGHT } = Dimensions.get('window');
 
 const VideoItem = ({ item, isVisible, height }) => {
   const videoRef = useRef(null);
   const isFocused = useIsFocused();
-  const { isLiked, toggleLike } = useLikeVideo(item.id);
   const [paused, setPaused] = useState(false);
   const [showPlayIcon, setShowPlayIcon] = useState(false);
+  const [isLoading, setIsLoading] = useState(true);
+  const [hasError, setHasError] = useState(false);
+  const [localVideoUri, setLocalVideoUri] = useState(null);
+  const [isPlaying, setIsPlaying] = useState(false);
+  const currentPositionRef = useRef(0); // Use ref instead of state for position tracking
+  const initialLoadRef = useRef(true);
+  const retryCountRef = useRef(0);
   const colorScheme = useColorScheme();
   const COLOR = colorScheme === 'dark' ? COLORS.dark : COLORS.light;
-  const insets = useSafeAreaInsets();
+  const positionUpdateIntervalRef = useRef(null);
+  
+  // Function to download and cache the video locally
+  const cacheVideo = async (videoUrl) => {
+    try {
+      // Create a unique filename based on the video URL
+      const filename = videoUrl.split('/').pop();
+      const localUri = `${FileSystem.cacheDirectory}videos/${filename}`;
+      
+      // Check if directory exists, if not create it
+      const dirInfo = await FileSystem.getInfoAsync(`${FileSystem.cacheDirectory}videos`);
+      if (!dirInfo.exists) {
+        await FileSystem.makeDirectoryAsync(`${FileSystem.cacheDirectory}videos`, { intermediates: true });
+      }
+
+      // Check if file already exists
+      const fileInfo = await FileSystem.getInfoAsync(localUri);
+      if (fileInfo.exists) {
+        setLocalVideoUri(localUri);
+        return localUri;
+      }
+      
+      // Download the file
+      const downloadResult = await FileSystem.downloadAsync(videoUrl, localUri);
+      
+      if (downloadResult.status === 200) {
+        console.log('Video successfully cached');
+        setLocalVideoUri(localUri);
+        return localUri;
+      } else {
+        console.error('Error caching video:', downloadResult);
+        setLocalVideoUri(null);
+        return null;
+      }
+    } catch (error) {
+      console.error('Error in cacheVideo:', error);
+      setLocalVideoUri(null);
+      return null;
+    }
+  };
+
+  // Load and cache the video when the component mounts or video URL changes
+  useEffect(() => {
+    if (item.videoUrl) {
+      cacheVideo(item.videoUrl);
+    }
+    
+    // Reset position when item changes
+    currentPositionRef.current = 0;
+  }, [item.videoUrl]);
+
+  // Cleanup intervals on unmount
+  useEffect(() => {
+    return () => {
+      if (positionUpdateIntervalRef.current) {
+        clearInterval(positionUpdateIntervalRef.current);
+      }
+    };
+  }, []);
 
   useEffect(() => {
     let timeout;
@@ -36,28 +100,222 @@ const VideoItem = ({ item, isVisible, height }) => {
     return () => clearTimeout(timeout);
   }, [showPlayIcon]);
 
+  // Handle video visibility state changes without position manipulation
   useEffect(() => {
     if ((!isVisible || !isFocused) && videoRef.current) {
       videoRef.current.pauseAsync();
+    } else if (isVisible && isFocused && videoRef.current && !paused) {
+      videoRef.current.playAsync();
     }
-  }, [isVisible, isFocused]);
+  }, [isVisible, isFocused, paused]);
 
-  const handleTogglePlayback = () => {
-    setPaused(!paused);
-    setShowPlayIcon(true);
+  // Set initial loading to false after 5 seconds at most
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      if (isLoading && isPlaying) {
+        setIsLoading(false);
+      }
+    }, 5000);
+    
+    return () => clearTimeout(timer);
+  }, [isLoading, isPlaying]);
+
+  // Clear error state if successfully playing
+  useEffect(() => {
+    if (isPlaying && hasError) {
+      setHasError(false);
+    }
+  }, [isPlaying, hasError]);
+
+  const handleTogglePlayback = async () => {
+    try {
+      if (videoRef.current) {
+        if (paused) {
+          await videoRef.current.playAsync();
+        } else {
+          await videoRef.current.pauseAsync();
+        }
+        
+        setPaused(!paused);
+        setShowPlayIcon(true);
+      }
+    } catch (error) {
+      console.error('Error toggling playback:', error);
+    }
   };
+
+  const handleVideoLoad = () => {
+    setTimeout(() => {
+      setIsLoading(false);
+    }, 300);
+    setHasError(false);
+    initialLoadRef.current = false;
+    retryCountRef.current = 0; // Reset retry count on successful load
+    
+    // Start position tracking interval when video loads
+    if (positionUpdateIntervalRef.current) {
+      clearInterval(positionUpdateIntervalRef.current);
+    }
+    
+    positionUpdateIntervalRef.current = setInterval(async () => {
+      if (videoRef.current && !paused && isVisible && isFocused) {
+        try {
+          const status = await videoRef.current.getStatusAsync();
+          if (status.isLoaded && status.isPlaying) {
+            currentPositionRef.current = status.positionMillis;
+          }
+        } catch (e) {
+          // Silently ignore errors during position tracking
+        }
+      }
+    }, 1000); // Update position only once per second for better performance
+  };
+
+  const handleVideoError = (error) => {
+    console.error('Video error:', error);
+    setHasError(true);
+    setIsLoading(false);
+    setIsPlaying(false);
+    retryLoadVideo();
+  };
+
+  const handlePlaybackStatusUpdate = (status) => {
+    // Only show loading indicator on initial load or if truly stalled
+    if (status.isLoaded) {
+      // Update playing state
+      setIsPlaying(status.isPlaying && !status.isPaused);
+      
+      if (status.isPlaying && !initialLoadRef.current) {
+        // Once it starts playing, hide loading indicator quickly
+        setIsLoading(false);
+        setHasError(false); // Clear any error once playback starts
+      }
+      
+      // Auto-repeat if video ends (as a backup to isLooping prop)
+      if (status.didJustFinish && !status.isLooping) {
+        videoRef.current?.replayAsync();
+        currentPositionRef.current = 0; // Reset position when video loops
+      }
+    }
+  };
+
+  const retryLoadVideo = async () => {
+    setIsLoading(true);
+    
+    // Increment retry counter
+    retryCountRef.current += 1;
+    const maxRetries = 5;
+    
+    // If we've tried too many times, show error state but don't retry again automatically
+    if (retryCountRef.current > maxRetries) {
+      console.log(`Exceeded maximum retries (${maxRetries})`);
+      setHasError(true);
+      setIsLoading(false);
+      return;
+    }
+    
+    try {
+      // Try to reload from cache first
+      if (item.videoUrl) {
+        console.log(`Retry attempt ${retryCountRef.current} for video ${item.id}`);
+        
+        // Try local URI first if available
+        if (localVideoUri) {
+          try {
+            if (videoRef.current) {
+              await videoRef.current.unloadAsync();
+              await videoRef.current.loadAsync(
+                { uri: localVideoUri },
+                { positionMillis: currentPositionRef.current }, // Use position in load options
+                false
+              );
+              await videoRef.current.playAsync();
+            }
+            return;
+          } catch (cacheError) {
+            console.error('Error loading from cache, trying original URL:', cacheError);
+          }
+        }
+        
+        // If no local URI or it failed, try downloading again
+        const cachedUri = await cacheVideo(item.videoUrl);
+        if (cachedUri) {
+          // If we have the video locally, use it
+          if (videoRef.current) {
+            await videoRef.current.unloadAsync();
+            await videoRef.current.loadAsync(
+              { uri: cachedUri },
+              { positionMillis: currentPositionRef.current }, // Use position in load options
+              false
+            );
+            await videoRef.current.playAsync();
+          }
+        } else {
+          // Fall back to original URL
+          if (videoRef.current) {
+            await videoRef.current.unloadAsync();
+            await videoRef.current.loadAsync(
+              { uri: item.videoUrl },
+              { positionMillis: currentPositionRef.current }, // Use position in load options
+              false
+            );
+            await videoRef.current.playAsync();
+          }
+        }
+      }
+    } catch (e) {
+      console.error('Error retrying video load:', e);
+      setHasError(true);
+      setIsLoading(false);
+      
+      // If we still have retries left, try again after a short delay
+      if (retryCountRef.current < maxRetries) {
+        setTimeout(() => {
+          retryLoadVideo();
+        }, 1000); // 1 second delay between retries
+      }
+    }
+  };
+
+  // Hide the error message after a few seconds
+  useEffect(() => {
+    let errorTimeout;
+    if (hasError) {
+      errorTimeout = setTimeout(() => {
+        // Only clear the error visually if we're not still attempting to retry
+        if (retryCountRef.current >= 5) {
+          setHasError(false);
+        }
+      }, 3000);
+    }
+    return () => clearTimeout(errorTimeout);
+  }, [hasError]);
 
   return (
     <TouchableWithoutFeedback onPress={handleTogglePlayback}>
       <View style={[styles.videoContainer, { backgroundColor: COLOR.background, height }]}>
         <Video
           ref={videoRef}
-          source={{ uri: item.videoUrl }}
+          source={{ uri: localVideoUri || item.videoUrl }}
           style={styles.videoPlayer}
           resizeMode="cover"
           shouldPlay={isVisible && isFocused && !paused}
-          isLooping
+          isLooping={true}
           isMuted={false}
+          onLoad={handleVideoLoad}
+          onError={handleVideoError}
+          onPlaybackStatusUpdate={handlePlaybackStatusUpdate}
+          progressUpdateIntervalMillis={1000} // Lower frequency updates for better performance
+          // Don't set positionMillis prop here - it causes glitches when constantly updated
+          rate={1.0}
+          volume={1.0}
+          // Increased buffer size for smoother playback
+          bufferConfig={{
+            minBufferMs: 15000,
+            maxBufferMs: 50000,
+            bufferForPlaybackMs: 2500,
+            bufferForPlaybackAfterRebufferMs: 5000
+          }}
         />
 
         {showPlayIcon && (
@@ -71,36 +329,31 @@ const VideoItem = ({ item, isVisible, height }) => {
           </View>
         )}
 
+        {/* Only show loading indicator during initial load or genuine errors */}
+        {isLoading && !isPlaying && !showPlayIcon && (
+          <View style={styles.centerOverlay}>
+            <ActivityIndicator size="large" color="white" />
+          </View>
+        )}
+
+        {/* Auto-retry button that triggers automatically, but can be pressed manually too */}
+        {hasError && retryCountRef.current >= 5 && (
+          <TouchableOpacity style={styles.retryButton} onPress={() => {
+            retryCountRef.current = 0; // Reset retry counter on manual retry
+            retryLoadVideo();
+          }}>
+            <Text style={styles.retryText}>Retry</Text>
+          </TouchableOpacity>
+        )}
+
         <VideoInfo video={{ username: item.user, description: item.description }} />
-
-        <View style={styles.interactionButtons}>
-          <TouchableOpacity style={styles.iconWrapper} onPress={() => toggleLike(item.id)}>
-            <Icon
-              name={isLiked ? 'heart' : 'heart-outline'}
-              size={30}
-              color={isLiked ? 'red' : COLOR.icon}
-            />
-            <Text style={[styles.iconText, { color: COLOR.icon }]}>
-              {isLiked ? item.likes + 1 : item.likes}
-            </Text>
-          </TouchableOpacity>
-
-          <TouchableOpacity style={styles.iconWrapper}>
-            <Icon name="chatbubble-outline" size={30} color={COLOR.icon} />
-            <Text style={[styles.iconText, { color: COLOR.icon }]}>{item.comments}</Text>
-          </TouchableOpacity>
-
-          <TouchableOpacity style={styles.iconWrapper}>
-            <Icon name="arrow-redo-outline" size={30} color={COLOR.icon} />
-            <Text style={[styles.iconText, { color: COLOR.icon }]}>Share</Text>
-          </TouchableOpacity>
-        </View>
       </View>
     </TouchableWithoutFeedback>
   );
 };
 
 const styles = StyleSheet.create({
+  // Your existing styles
   videoContainer: {
     width: width,
     justifyContent: 'center',
@@ -139,6 +392,17 @@ const styles = StyleSheet.create({
   playIcon: {
     alignSelf: 'center',
   },
+  retryButton: {
+    position: 'absolute',
+    backgroundColor: 'rgba(0, 0, 0, 0.7)',
+    paddingHorizontal: 20,
+    paddingVertical: 10,
+    borderRadius: 20,
+  },
+  retryText: {
+    color: 'white',
+    fontWeight: 'bold',
+  }
 });
 
 export default VideoItem;

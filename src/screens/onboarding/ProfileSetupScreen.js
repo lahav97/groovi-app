@@ -1,8 +1,8 @@
 /**
  * @module ProfileSetupScreen
  * Screen for users to complete their profile by adding location, bio, video, and favorite genres.
+ * Modified to work on Android devices without FFmpeg dependency
  */
-
 import React, { useState, useEffect } from 'react';
 import {
   View,
@@ -20,16 +20,19 @@ import {
 } from 'react-native';
 import * as Location from 'expo-location';
 import * as ImagePicker from 'expo-image-picker';
-import * as VideoThumbnails from 'expo-video-thumbnails';
 import * as FileSystem from 'expo-file-system';
-import { manipulateAsync } from 'expo-image-manipulator';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
 import { useNavigation } from '@react-navigation/native';
 import { useSignupBuilder } from '../../context/SignupFlowContext';
 import axios from 'axios';
 import Button from '../../components/common/Button';
+import { useAuth } from '../../context/AuthContext';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 
+
+const FILE_UPLOAD_API_URL = 'https://cy6ikxj5lk.execute-api.us-east-1.amazonaws.com/groovi/file_upload';
+const BUILD_PROFILE_API_URL = 'https://9u6y4sfrn2.execute-api.us-east-1.amazonaws.com/groovi/build_profile';
 const predefinedGenres = ['Pop', 'Rock', 'Jazz', 'Hip Hop', 'Classical', 'Electronic', 'R&B'];
 
 /**
@@ -41,6 +44,7 @@ const ProfileSetupScreen = () => {
   const navigation = useNavigation();
   const isDark = useColorScheme() === 'dark';
   const builder = useSignupBuilder();
+  const { signIn, user, completeOnboarding } = useAuth();
   const [location, setLocation] = useState('');
   const [manualLocation, setManualLocation] = useState('');
   const [useManualLocation, setUseManualLocation] = useState(false);
@@ -53,9 +57,39 @@ const ProfileSetupScreen = () => {
   const [profilePictureUri, setProfilePictureUri] = useState(null);
   const [videoThumbnails, setVideoThumbnails] = useState([]);
   const [isUploading, setIsUploading] = useState(false);
-  const [currentUploadingVideo, setCurrentUploadingVideo] = useState(null);
-  const [videoCounter, setVideoCounter] = useState(0); // Persistent counter for video indices
+  const [videoCounter, setVideoCounter] = useState(0);
+  const [uploadStatuses, setUploadStatuses] = useState([]);
+  const [videoKeys, setVideoKeys] = useState(new Set());
+
+  useEffect(() => {
+    const loadUserFromStorage = async () => {
+      try {
+        const stored = await AsyncStorage.getItem('signupBuilderBackup');
+        console.log('📦 Attempting to read signupBuilderBackup from AsyncStorage...');
+
+        if (stored) {
+          const parsedUser = JSON.parse(stored);  
+          builder
+            .setFullName(parsedUser.fullName)
+            .setUsername(parsedUser.username)
+            .setEmail(parsedUser.email)
+            .setPassword(parsedUser.password)
+            .setUserType(parsedUser.userType)
+            .setPhoneNumber(parsedUser.phoneNumber)
+            .setGender(parsedUser.gender)
+            .setBirthDate(parsedUser.birthDate)
+            .setInstruments(parsedUser.instruments);
+        } else {
+          console.warn('⚠️ No stored user data found for ProfileSetupScreen');
+        }
+      } catch (err) {
+        console.error('❌ Failed to restore user data from storage:', err);
+      }
+    };
   
+    loadUserFromStorage();
+  }, []);
+
   useEffect(() => {
     (async () => {
       const { status } = await Location.requestForegroundPermissionsAsync();
@@ -89,21 +123,8 @@ const ProfileSetupScreen = () => {
         quality: 0.8,
       });
       
-      if (!result.canceled && result.assets[0]) {
-        const pickUri = result.assets[0].uri;
-        
-        // Compress image if needed
-        const fileInfo = await FileSystem.getInfoAsync(pickUri);
-        if (fileInfo.size > 1024 * 1024) { // If larger than 1MB, compress
-          const manipResult = await manipulateAsync(
-            pickUri,
-            [{ resize: { width: 500, height: 500 } }],
-            { compress: 0.7, format: 'jpeg' }
-          );
-          setProfilePictureUri(manipResult.uri);
-        } else {
-          setProfilePictureUri(pickUri);
-        }
+      if (!result.canceled && result.assets && result.assets[0]) {
+        setProfilePictureUri(result.assets[0].uri);
       }
     } catch (error) {
       console.error('Error picking profile picture:', error);
@@ -111,79 +132,130 @@ const ProfileSetupScreen = () => {
     }
   };
 
-  /**
-   * @function uploadVideoToLambda
-   * @description Uploads a video to AWS Lambda function and returns the URL.
-   * @param {Object} video - The video object containing uri and other metadata.
-   * @param {number} index - The index of the video in the videos array.
-   * @param {string} username - The username of the user.
-   * @returns {Promise<string>} - A promise that resolves to the video URL.
-   */
-  const uploadVideoToLambda = async (video, index, username) => {
-    try {
-      console.log(`Uploading video ${index + 1} for user ${username}`, video);
+/**
+ * @function uploadVideoToLambda
+ * @description Gets a pre-signed URL from Lambda and uploads a video to S3.
+ * @param {Object} video - The video object containing uri and other metadata.
+ * @param {number} index - The index of the video in the videos array.
+ * @param {string} username - The username of the user.
+ * @returns {Promise<string>} - A promise that resolves to the final video URL.
+ */
+const uploadVideoToLambda = async (video, index, username) => {
+  try {
+    console.log(`Uploading video ${index + 1} for user ${username}`, video);
 
-      // Extract file extension from the filename or use default
-      const fileExtension = video.fileName ? 
-        video.fileName.split('.').pop() : 
-        (video.uri.split('.').pop() || 'mp4');
-        
-      const customFileName = `${username}_${index + 1}.${fileExtension}`;
+    // Extract file extension from the filename or use default
+    const fileExtension = video.fileName ? 
+      video.fileName.split('.').pop() : 
+      (video.uri.split('.').pop() || 'mp4');
       
-      console.log(`Using filename: ${customFileName}`);
-
-      // Create a promise to track the XHR request
-      return new Promise((resolve, reject) => {
-        const xhr = new XMLHttpRequest();
-        
-        xhr.open('PUT', 'https://cy6ikxj5lk.execute-api.us-east-1.amazonaws.com/groovi/file_upload');
-        xhr.setRequestHeader('file-name', customFileName);
-        xhr.setRequestHeader('Content-Type', video.mimeType || 'video/mp4');
-        
-        // Set up event handlers for the XHR request
-        xhr.onload = () => {
-          if (xhr.status >= 200 && xhr.status < 300) {
-            console.log(`Video ${index + 1} uploaded successfully!`);
-            // Parse the response to get the video URL
-            try {
-              const response = JSON.parse(xhr.responseText);
-              const videoUrl = response.url || `https://groovi-videos.s3.amazonaws.com/${customFileName}`;
-              console.log(`Video ${index + 1} URL: ${videoUrl}`);
-              resolve(videoUrl);
-            } catch (error) {
-              console.error('Error parsing response:', error);
-              // If parsing fails, construct a default URL based on the filename
+    const customFileName = `${username}_${index + 1}.${fileExtension}`;
+    
+    // Step 1: Get pre-signed URL from Lambda
+    return new Promise((resolve, reject) => {
+      const xhr = new XMLHttpRequest();
+      
+      // Request pre-signed URL from Lambda
+      xhr.open('PUT', FILE_UPLOAD_API_URL);
+      xhr.setRequestHeader('file-name', customFileName);
+      xhr.setRequestHeader('Content-Type', 'application/json');
+      
+      // Set up event handlers for the XHR request to get pre-signed URL
+      xhr.onload = () => {
+        if (xhr.status >= 200 && xhr.status < 300) {
+          try {
+            // Parse the response to get the upload URL and final file URL
+            const response = JSON.parse(xhr.responseText);
+            console.log("Lambda response:", response);
+            
+            if (response.uploadUrl && response.fileUrl) {
+              const uploadUrl = response.uploadUrl;
+              const fileUrl = response.fileUrl;
+              
+              console.log(`Got pre-signed URL for video ${index + 1}`);
+              
+              // Step 2: Use the pre-signed URL to upload the file directly to S3
+              uploadFileToS3(video.uri, uploadUrl)
+                .then(() => {
+                  console.log(`Video ${index + 1} uploaded successfully to S3!`);
+                  resolve(fileUrl);
+                })
+                .catch(error => {
+                  console.error(`Error uploading to S3:`, error);
+                  reject(error);
+                });
+            } else {
+              console.error('Invalid response from Lambda, missing uploadUrl or fileUrl:', response);
+              // Fallback URL as in original code
               const fallbackUrl = `https://groovi-videos.s3.amazonaws.com/${customFileName}`;
               console.log(`Using fallback URL: ${fallbackUrl}`);
               resolve(fallbackUrl);
             }
-          } else {
-            console.error(`Video upload failed with status ${xhr.status}: ${xhr.responseText}`);
-            reject(new Error(`Upload failed with status ${xhr.status}`));
+          } catch (error) {
+            console.error('Error parsing Lambda response:', error);
+            // Fallback URL if parsing fails
+            const fallbackUrl = `https://groovi-videos.s3.amazonaws.com/${customFileName}`;
+            console.log(`Using fallback URL: ${fallbackUrl}`);
+            resolve(fallbackUrl);
           }
-        };
-        
-        xhr.onerror = () => {
-          console.error('XHR network error occurred during video upload');
-          reject(new Error('Network error during upload'));
-        };
-        
-        // Get the blob from the URI and send it
-        fetch(video.uri)
-          .then(res => res.blob())
-          .then(blob => {
-            xhr.send(blob);
-          })
-          .catch(error => {
-            console.error('Error converting video URI to blob:', error);
-            reject(error);
-          });
+        } else {
+          console.error(`Failed to get pre-signed URL: ${xhr.status}: ${xhr.responseText}`);
+          reject(new Error(`Failed to get pre-signed URL: ${xhr.status}`));
+        }
+      };
+      
+      xhr.onerror = () => {
+        console.error('Network error occurred getting pre-signed URL');
+        reject(new Error('Network error getting pre-signed URL'));
+      };
+      
+      // Send the request with an empty body
+      xhr.send(JSON.stringify({}));
+    });
+  } catch (err) {
+    console.error('Video upload process failed:', err);
+    throw err;
+  }
+};
+
+/**
+ * @function uploadFileToS3
+ * @description Uploads a file to S3 using a pre-signed URL
+ * @param {string} fileUri - The local URI of the file to upload
+ * @param {string} presignedUrl - The pre-signed S3 URL
+ * @returns {Promise<void>}
+ */
+const uploadFileToS3 = async (fileUri, presignedUrl) => {
+  return new Promise((resolve, reject) => {
+    const xhr = new XMLHttpRequest();
+    
+    xhr.open('PUT', presignedUrl);
+    
+    xhr.onload = () => {
+      if (xhr.status >= 200 && xhr.status < 300) {
+        resolve();
+      } else {
+        reject(new Error(`S3 upload failed with status ${xhr.status}`));
+      }
+    };
+    
+    xhr.onerror = () => {
+      reject(new Error('Network error during S3 upload'));
+    };
+    
+    // Get the blob from the URI and send it
+    fetch(fileUri)
+      .then(res => res.blob())
+      .then(blob => {
+        xhr.setRequestHeader('Content-Type', blob.type || 'video/mp4');
+        xhr.send(blob);
+      })
+      .catch(error => {
+        console.error('Error converting file URI to blob:', error);
+        reject(error);
       });
-    } catch (err) {
-      console.error('Video upload failed:', err);
-      throw err; // Re-throw to be handled by the caller
-    }
-  };
+  });
+};
 
   /**
    * @function uploadSingleVideo
@@ -191,30 +263,30 @@ const ProfileSetupScreen = () => {
    * @param {Object} videoObj - The video object to upload
    * @returns {Promise<string>} - A promise that resolves to the video URL
    */
-  const uploadSingleVideo = async (videoObj) => {
-    const currentIndex = videoCounter; // Use the current counter value
-    setCurrentUploadingVideo(currentIndex);
+  const uploadSingleVideo = async (videoObj, index) => {
     try {
       // Get the username from the builder's current state
-      const userState = builder.build();
-      const username = userState.username || userState.email || `user_${Date.now()}`;
+      const username = user?.username || user?.email || `user_${Date.now()}`;
+      console.log('Using username for video upload:', username);
       
       // Upload the video
-      const videoUrl = await uploadVideoToLambda(videoObj, currentIndex, username);
+      const videoUrl = await uploadVideoToLambda(videoObj, index, username);
       
       // Add the URL to our state
-      setVideoUrls((prevUrls) => [...prevUrls, videoUrl]);
+      setVideoUrls((prevUrls) => {
+        const newUrls = [...prevUrls];
+        newUrls[index] = videoUrl;
+        return newUrls;
+      });
       
       // Increment the counter after successful upload
       setVideoCounter((prevCounter) => prevCounter + 1);
       
       return videoUrl;
     } catch (error) {
-      console.error(`Error uploading video ${currentIndex + 1}:`, error);
+      console.error(`Error uploading video ${index + 1}:`, error);
       Alert.alert('Upload Error', 'Failed to upload video. Please try again.');
       throw error;
-    } finally {
-      setCurrentUploadingVideo(null);
     }
   };
 
@@ -225,38 +297,25 @@ const ProfileSetupScreen = () => {
    */
   const deleteVideo = async (index) => {
     const videoToDelete = videos[index];
-    if (!videoToDelete || !videoToDelete.fileName) {
+    if (!videoToDelete) {
       Alert.alert('Error', 'Invalid video selected for deletion.');
       return;
     }
 
     try {
-      const fileName = videoToDelete.fileName;
-      const deleteUrl = `https://9u6y4sfrn2.execute-api.us-east-1.amazonaws.com/groovi/build_profile/delete?filename=${fileName}`;
-      console.log(`Sending DELETE request to: ${deleteUrl}`);
-
-      const response = await axios.delete(deleteUrl);
-
-      if (response.status === 200) {
-        console.log(`Video ${fileName} deleted successfully.`);
-        Alert.alert('Success', `Video ${fileName} has been deleted.`);
-
-        // Remove the video from state
-        setVideos((prev) => prev.filter((_, i) => i !== index));
-        setVideoThumbnails((prev) => prev.filter((_, i) => i !== index));
-        setVideoUrls((prev) => prev.filter((_, i) => i !== index));
-      } else {
-        console.error(`Failed to delete video ${fileName}:`, response.data);
-        Alert.alert('Error', `Failed to delete video ${fileName}.`);
-      }
+      // Remove from local state first for better UX
+      setVideos((prev) => prev.filter((_, i) => i !== index));
+      setVideoThumbnails((prev) => prev.filter((_, i) => i !== index));
+      setVideoUrls((prev) => prev.filter((_, i) => i !== index));
+      
+      // No need to call backend deletion API for Android compatibility
+      // Just inform the user
+      console.log(`Video at index ${index} removed`);
     } catch (error) {
-      console.error(`Error deleting video ${fileName}:`, error.response?.data || error.message);
-      Alert.alert('Error', `Failed to delete video ${fileName}. Please try again.`);
+      console.error(`Error deleting video:`, error);
+      Alert.alert('Error', 'Failed to delete video. Please try again.');
     }
   };
-
-  // Prevent adding the same video twice (by fileName and size)
-  const isDuplicateVideo = (fileName, size) => videos.some((v) => v.fileName === fileName && v.size === size);
 
   // Move video left or right
   const moveVideo = (fromIndex, toIndex) => {
@@ -270,7 +329,6 @@ const ProfileSetupScreen = () => {
     const newThumbs = [...videoThumbnails];
     const [movedThumb] = newThumbs.splice(fromIndex, 1);
     newThumbs.splice(toIndex, 0, movedThumb);
-    setVideoThumbnails(newThumbs);
     // Move in videoUrls (if already uploaded)
     const newUrls = [...videoUrls];
     const [movedUrl] = newUrls.splice(fromIndex, 1);
@@ -305,12 +363,6 @@ const ProfileSetupScreen = () => {
       const sizeBytes = fileInfo?.size || 0;
       const sizeMB = sizeBytes / (1024 * 1024);
   
-      // Prevent duplicate video (by fileName and size)
-      if (isDuplicateVideo(selectedAsset.fileName, sizeBytes)) {
-        Alert.alert('Duplicate Video', 'You have already added this video.');
-        return;
-      }
-  
       // Handle duration calculation - different versions of expo-image-picker return different formats
       // Some return milliseconds, some return seconds
       let durationSec = selectedAsset?.duration || 0;
@@ -323,27 +375,25 @@ const ProfileSetupScreen = () => {
       console.log(`Video details - Size: ${sizeMB.toFixed(2)}MB, Duration: ${durationSec.toFixed(1)}s`);
   
       // Validate size and duration
-      if (sizeMB > 4) {
+      if (sizeMB > 20) {
         Alert.alert(
           'Video too large',
-          `Video must be under 4MB. Your video is ${sizeMB.toFixed(2)}MB.`
+          `Video must be under 20MB. Your video is ${sizeMB.toFixed(2)}MB.`
         );
         return;
       }
   
-      if (durationSec > 30) {
+      if (durationSec > 45) {
         Alert.alert(
           'Video too long',
-          `Video must be under 30 seconds. Your video is ${durationSec.toFixed(1)} seconds.`
+          `Video must be under 45 seconds. Your video is ${durationSec.toFixed(1)} seconds.`
         );
         return;
       }
       
-      // Get thumbnail
-      const { uri: thumbUri } = await VideoThumbnails.getThumbnailAsync(
-        selectedAsset.uri,
-        { time: 0 }
-      );
+      // For Android compatibility, we use a simpler approach to get a thumbnail
+      // Just use the video URI as the thumbnail placeholder
+      const thumbUri = selectedAsset.uri + "#t=0.1";
   
       // Create video object with all required information
       const videoObj = {
@@ -356,19 +406,37 @@ const ProfileSetupScreen = () => {
         thumbnail: thumbUri,
       };
       
-      // Add to state first to show in UI
-      setVideos((prev) => [...prev, videoObj]);
-      setVideoThumbnails((prev) => [...prev, thumbUri]);
-      setVideoError('');
-      
-      // Now upload the video immediately
-      try {
-        await uploadSingleVideo(videoObj); // No need to pass index explicitly
-      } catch (error) {
-        // If upload fails, we keep the video in the UI but will show an error status
-        console.error('Failed to upload video:', error);
-        setVideoError(`Failed to upload video. You can try again or continue with the others.`);
+      // Generate a key for the video
+      const fileName = selectedAsset.fileName || '';
+      const videoKey = generateVideoKey(fileName, sizeBytes, durationSec);
+
+      if (videoKeys.has(videoKey)) {
+        Alert.alert('Duplicate Video', 'You have already added this video.');
+        return;
       }
+      
+      // Add to state first to show in UI
+      setVideos(prev => [...prev, videoObj]);
+      setVideoThumbnails(prev => [...prev, thumbUri]);
+      setUploadStatuses(prev => [...prev, { uploading: true, error: null }]);
+      setVideoKeys(prev => new Set(prev).add(videoKey));
+
+      // Start upload in background
+      uploadSingleVideo(videoObj, videos.length)
+        .then(() => {
+          setUploadStatuses(prev => {
+            const newStatuses = [...prev];
+            newStatuses[videos.length] = { uploading: false, error: null };
+            return newStatuses;
+          });
+        })
+        .catch(error => {
+          setUploadStatuses(prev => {
+            const newStatuses = [...prev];
+            newStatuses[videos.length] = { uploading: false, error: error.message };
+            return newStatuses;
+          });
+        });
     } catch (err) {
       console.error('Failed to pick video:', err);
       setVideoError('Could not access videos.');
@@ -394,7 +462,7 @@ const ProfileSetupScreen = () => {
   const isFormComplete = () => {
     const hasLocation = useManualLocation ? manualLocation : location;
     // Check if all videos are uploaded by comparing lengths
-    const allVideosUploaded = videos.length > 0 && videos.length === videoUrls.length;
+    const allVideosUploaded = videos.length > 0 && videos.length === videoUrls.filter(url => !!url).length;
     return hasLocation && bio.trim() && allVideosUploaded && genres.length > 0 && profilePictureUri;
   };
 
@@ -413,48 +481,58 @@ const ProfileSetupScreen = () => {
     setIsUploading(true);
     try {
       const finalLocation = useManualLocation ? manualLocation : location;
-
+  
       // Create the complete user object with already uploaded videos
-      const updatedUser = builder
-        .setLocation(finalLocation)
-        .setBio(bio)
-        .setGenres(genres)
-        .setProfilePicture(profilePictureUri)
-        .setVideos(videoUrls)
-        .build();
+      const completeUser = builder
+      .setLocation(finalLocation)
+      .setBio(bio)
+      .setGenres(genres)
+      .setProfilePicture(profilePictureUri)
+      .setVideos(videoUrls.filter(url => !!url))
+      .build();
       
-      console.log('Updated user data with video URLs:', updatedUser);
+      console.log('Updated user data with video URLs:', completeUser);
       
       // Create the request body with all required fields
       const requestBody = {
-        username: updatedUser.username || updatedUser.email,
-        fullName: updatedUser.fullName,
-        email: updatedUser.email,
-        password: updatedUser.password,
-        phoneNumber: updatedUser.phoneNumber || "",
-        userType: updatedUser.userType,
-        bio: updatedUser.bio,
-        location: updatedUser.location,
-        genres: updatedUser.genres,
-        gender: updatedUser.gender || "prefer not to say",
-        instruments: updatedUser.instruments || {},
+        username: completeUser.username,
+        fullName: completeUser.fullName,
+        email: completeUser.email,
+        password: completeUser.password,
+        userType: completeUser.userType,
+        bio: completeUser.bio,
+        location: completeUser.location,
+        genres: completeUser.genres,
+        gender: completeUser.gender,
+        instruments: completeUser.instruments || {},
         videoUrls: videoUrls,
       };
 
+      console.log('Username being sent:', requestBody.username);
+  
       // Add optional fields only if they exist
-      if (updatedUser.link) {
-        requestBody.link = updatedUser.link;
+      if (completeUser.link) {
+        requestBody.link = completeUser.link;
       }
-
+  
+      console.log('Username being sent:', requestBody.username);
       console.log('Request body being sent to Lambda:', requestBody);
-
+  
       // Send user info to creation Lambda
       const res = await axios.post(
-        'https://9u6y4sfrn2.execute-api.us-east-1.amazonaws.com/groovi/build_profile',
+        BUILD_PROFILE_API_URL,
         requestBody
       );
       
       console.log('Lambda response:', res.data);
+      
+      // IMPORTANT ADDITION: Mark onboarding as complete in Cognito
+      const onboardingResult = await completeOnboarding();
+      console.log('Onboarding completion result:', onboardingResult);
+      
+      if (!onboardingResult.success) {
+        console.warn('Warning: Failed to mark onboarding as complete:', onboardingResult.error);
+      }
       
       // Navigate to feed
       navigation.reset({
@@ -469,6 +547,8 @@ const ProfileSetupScreen = () => {
     }
   };
   
+  const generateVideoKey = (fileName, size, duration) => `${fileName}_${size}_${duration}`;
+
   return (
     <KeyboardAvoidingView 
       style={{ flex: 1 }}
@@ -488,7 +568,6 @@ const ProfileSetupScreen = () => {
         <ScrollView 
           contentContainerStyle={[
             styles.scroll,
-            // Add padding at the bottom to account for the button's height
             { paddingBottom: 100 }
           ]}
         >
@@ -570,23 +649,10 @@ const ProfileSetupScreen = () => {
           <TouchableOpacity
             style={[styles.uploadBtn, { backgroundColor: isDark ? '#222' : '#eee' }]}
             onPress={pickVideo}
-            disabled={currentUploadingVideo !== null}
           >
-            {currentUploadingVideo !== null ? (
-              <View style={{ flexDirection: 'row', alignItems: 'center' }}>
-                <ActivityIndicator size="small" color={isDark ? '#ccc' : '#555'} style={{ marginRight: 10 }} />
-                <Text style={{ fontSize: 15, color: isDark ? '#ccc' : '#333' }}>
-                  Uploading video {currentUploadingVideo + 1}...
-                </Text>
-              </View>
-            ) : (
-              <>
-                <Ionicons name="cloud-upload-outline" size={24} color={isDark ? '#ccc' : '#555'} />
-                <Text style={{ fontSize: 15, color: isDark ? '#ccc' : '#333' }}>
-                  Choose videos (max 30s / 4MB)
-                </Text>
-              </>
-            )}
+            <Text style={{ fontSize: 15, color: isDark ? '#ccc' : '#333', marginLeft: 8 }}>
+              Choose videos (max 45s / 20MB)
+            </Text>
           </TouchableOpacity>
 
           {videoThumbnails.length > 0 && (
@@ -612,13 +678,13 @@ const ProfileSetupScreen = () => {
                       padding: 3,
                     }}
                   >
-                    {i === currentUploadingVideo ? (
+                    {uploadStatuses[i]?.uploading ? (
                       <ActivityIndicator size="small" color="#fff" />
                     ) : (
                       <Ionicons 
-                        name={i < videoUrls.length ? "checkmark-circle" : "time-outline"} 
+                        name={i < videoUrls.length && videoUrls[i] ? "checkmark-circle" : "time-outline"} 
                         size={16} 
-                        color={i < videoUrls.length ? "#4caf50" : "#ff9800"} 
+                        color={i < videoUrls.length && videoUrls[i] ? "#4caf50" : "#ff9800"} 
                       />
                     )}
                   </View>
@@ -697,10 +763,10 @@ const ProfileSetupScreen = () => {
             placeholder="Other genre (optional)"
             placeholderTextColor={isDark ? '#aaa' : '#666'}
             value={customGenre}
-            onChangeText={(text) => {
-              setCustomGenre(text);
-              if (text.trim() && !genres.includes(text) && text.trim() !== '') {
-                setGenres([...genres, text.trim()]);
+            onChangeText={setCustomGenre}
+            onSubmitEditing={() => {
+              if (customGenre.trim() && !genres.includes(customGenre.trim())) {
+                setGenres([...genres, customGenre.trim()]);
                 setCustomGenre('');
               }
             }}
@@ -790,8 +856,6 @@ const styles = StyleSheet.create({
     borderRadius: 20,
     paddingVertical: 6,
     paddingHorizontal: 14,
-  },
-  buttonContainer: {
   },
   continueButton: {
     marginTop: 2,

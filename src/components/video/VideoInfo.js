@@ -1,13 +1,17 @@
 import React from 'react';
-import { View, Text, StyleSheet, useColorScheme } from 'react-native';
+import { View, Text, StyleSheet, useColorScheme, Dimensions } from 'react-native';
 import { COLORS, SIZES } from '../../styles/theme';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
+
+const { height: SCREEN_HEIGHT } = Dimensions.get('window');
 
 const VideoInfo = ({ video }) => {
   const colorScheme = useColorScheme();
   const theme = colorScheme === 'dark' ? COLORS.dark : COLORS.light;
+  const insets = useSafeAreaInsets();
 
   return (
-    <View style={styles.container}>
+    <View style={[styles.container, { bottom: SCREEN_HEIGHT * 0.1 + insets.bottom }]}>
       <Text style={[styles.username, { color: theme.icon }]}>@{video?.username}</Text>
       <Text style={[styles.description, { color: theme.icon }]} numberOfLines={2}>
         {video?.description}
