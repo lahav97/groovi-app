@@ -3,7 +3,7 @@
  * Screen where users select their musical instruments and skill levels for their profile.
  */
 
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   View,
   Text,
@@ -15,14 +15,16 @@ import {
   LayoutAnimation,
   Platform,
   useColorScheme,
+  Alert,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useNavigation } from '@react-navigation/native';
 import { LinearGradient } from 'expo-linear-gradient';
 import * as Haptics from 'expo-haptics';
 import { useSignupBuilder } from '../../context/SignupFlowContext';
+import { useAuth } from '../../context/AuthContext';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import Button from '../../components/common/Button';
-
 
 if (Platform.OS === 'android' && UIManager.setLayoutAnimationEnabledExperimental) {
   UIManager.setLayoutAnimationEnabledExperimental(true);
@@ -44,38 +46,112 @@ const skillLevels = ['Beginner', 'Intermediate', 'Pro'];
  * @description Screen that lets users select instruments and their skill levels as part of their profile setup.
  * @returns {JSX.Element}
  */
-  const InstrumentsScreen = () => {
+const InstrumentsScreen = () => {
   const navigation = useNavigation();
   const isDark = useColorScheme() === 'dark';
   const backgroundColor = isDark ? '#1c1c1e' : '#fff';
   const textColor = isDark ? '#fff' : '#000';
 
   const builder = useSignupBuilder();
+  const { user } = useAuth();
   const [selectedInstruments, setSelectedInstruments] = useState([]);
   const [instrumentLevels, setInstrumentLevels] = useState({});
   const [searchQuery, setSearchQuery] = useState('');
   const [expandedCategories, setExpandedCategories] = useState({});
+
+  // 🚀 NEW: Load user data from AsyncStorage on component mount
+  useEffect(() => {
+    const loadUserFromStorage = async () => {
+      try {
+        const stored = await AsyncStorage.getItem('signupBuilderBackup');
+        console.log('📦 InstrumentsScreen: Attempting to read signupBuilderBackup from AsyncStorage...');
+
+        if (stored) {
+          const parsedUser = JSON.parse(stored);
+          console.log('✅ InstrumentsScreen: Found stored user data:', parsedUser);
+          
+          // Restore all user data to the builder
+          builder
+            .setFullName(parsedUser.fullName)
+            .setUsername(parsedUser.username)
+            .setEmail(parsedUser.email)
+            .setPassword(parsedUser.password)
+            .setUserType(parsedUser.userType)
+            .setPhoneNumber(parsedUser.phoneNumber)
+            .setGender(parsedUser.gender)
+            .setBirthDate(parsedUser.birthDate);
+
+          // If instruments were already selected, restore them
+          if (parsedUser.instruments) {
+            builder.setInstruments(parsedUser.instruments);
+            
+            // Update local state to show previously selected instruments
+            const instrumentNames = Object.keys(parsedUser.instruments);
+            setSelectedInstruments(instrumentNames);
+            setInstrumentLevels(parsedUser.instruments);
+            
+          }
+        } else {
+          console.warn('⚠️ InstrumentsScreen: No stored user data found');
+        }
+      } catch (err) {
+        console.error('❌ InstrumentsScreen: Failed to restore user data from storage:', err);
+      }
+    };
+
+    loadUserFromStorage();
+  }, []);
+
+  const saveUserToStorage = async (updatedInstruments) => {
+    try {
+      // Get the current user data from builder
+      const currentUser = builder.build();
+      
+      // Create updated user object with new instruments
+      const updatedUser = {
+        ...currentUser,
+        instruments: updatedInstruments
+      };
+      
+      // Save to AsyncStorage
+      await AsyncStorage.setItem('signupBuilderBackup', JSON.stringify(updatedUser));
+      
+    } catch (error) {
+      console.error('❌ InstrumentsScreen: Failed to save user data:', error);
+    }
+  };
 
   /**
    * @function toggleInstrument
    * @description Selects or deselects an instrument from the user's profile.
    * @param {string} instrument
    */
-  const toggleInstrument = (instrument) => {
+  const toggleInstrument = async (instrument) => {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
     LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
 
+    let newSelectedInstruments;
+    let newInstrumentLevels;
+
     if (selectedInstruments.includes(instrument)) {
-      setSelectedInstruments((prev) => prev.filter((i) => i !== instrument));
-      setInstrumentLevels((prev) => {
-        const newLevels = { ...prev };
-        delete newLevels[instrument];
-        return newLevels;
-      });
+      // Remove instrument
+      newSelectedInstruments = selectedInstruments.filter((i) => i !== instrument);
+      newInstrumentLevels = { ...instrumentLevels };
+      delete newInstrumentLevels[instrument];
     } else {
-      setSelectedInstruments((prev) => [...prev, instrument]);
-      setInstrumentLevels((prev) => ({ ...prev, [instrument]: 'Intermediate' }));
+      // Add instrument with default level
+      newSelectedInstruments = [...selectedInstruments, instrument];
+      newInstrumentLevels = { ...instrumentLevels, [instrument]: 'Intermediate' };
     }
+
+    // Update local state
+    setSelectedInstruments(newSelectedInstruments);
+    setInstrumentLevels(newInstrumentLevels);
+
+    // Update builder
+    builder.setInstruments(newInstrumentLevels);
+
+    await saveUserToStorage(newInstrumentLevels);
   };
 
   /**
@@ -84,8 +160,16 @@ const skillLevels = ['Beginner', 'Intermediate', 'Pro'];
    * @param {string} instrument
    * @param {string} level
    */
-  const handleLevelChange = (instrument, level) => {
-    setInstrumentLevels((prev) => ({ ...prev, [instrument]: level }));
+  const handleLevelChange = async (instrument, level) => {
+    const newInstrumentLevels = { ...instrumentLevels, [instrument]: level };
+    
+    // Update local state
+    setInstrumentLevels(newInstrumentLevels);
+
+    // Update builder
+    builder.setInstruments(newInstrumentLevels);
+
+    await saveUserToStorage(newInstrumentLevels);
   };
 
   /**
@@ -105,13 +189,18 @@ const skillLevels = ['Beginner', 'Intermediate', 'Pro'];
    * @function handleContinue
    * @description Proceeds to the next screen after selecting instruments.
    */
-  const handleContinue = () => {
-    if (Object.keys(instrumentLevels).length == 0) {
-      Alert.alert('Please select at least one instrument and its level.');
+  const handleContinue = async () => {
+    if (Object.keys(instrumentLevels).length === 0) {
+      Alert.alert('Selection Required', 'Please select at least one instrument and its level.');
       return;
     }
 
+    // Ensure builder has the latest instruments
     builder.setInstruments(instrumentLevels);
+
+    await saveUserToStorage(instrumentLevels);
+
+    // Navigate to next screen
     navigation.navigate('Profile Setup');
   };
 
@@ -148,7 +237,7 @@ const skillLevels = ['Beginner', 'Intermediate', 'Pro'];
         value={searchQuery}
         onChangeText={setSearchQuery}
         style={[styles.searchInput, { color: isDark ? '#000' : textColor }]}
-        />
+      />
 
       <ScrollView contentContainerStyle={styles.scrollContainer}>
         {searchQuery.length > 0 ? (
@@ -389,6 +478,10 @@ const styles = StyleSheet.create({
   },
   selectedItem: {
     fontSize: 15,
+  },
+  selectedLevels: {
+    fontSize: 13,
+    fontStyle: 'italic',
   },
 });
 

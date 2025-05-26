@@ -1,6 +1,6 @@
 /**
  * @module ProfileScreen
- * Enhanced profile screen with cache-first loading for instant navigation
+ * Enhanced profile screen with logout button that clears all user data and cache
  */
 
 import React, { useState, useRef, useEffect } from 'react';
@@ -15,8 +15,9 @@ import {
   useColorScheme,
   ActivityIndicator,
   RefreshControl,
+  Alert,
 } from 'react-native';
-import { Ionicons, FontAwesome, AntDesign } from '@expo/vector-icons';
+import { Ionicons, FontAwesome } from '@expo/vector-icons';
 import { Video } from 'expo-av';
 import BottomNavigation from '../../components/navigationBar/BottomNavigation';
 import { COLORS, SIZES, LAYOUT } from '../../styles/theme';
@@ -26,23 +27,23 @@ import { useNavigation } from '@react-navigation/native';
 import { useAuth } from '../../context/AuthContext';
 import { getCurrentUserEmail } from '../../utils/userUtils';
 import { fetchUserProfile } from '../../services/profileService';
-import { getProfileCache, cacheUserProfile, clearProfileCache } from '../../utils/cacheManager';
-import { signOut } from '../../services/authService';
+import { getProfileCache, cacheUserProfile, clearAllCaches } from '../../utils/cacheManager';
 
 const { width } = Dimensions.get('window');
 
 /**
  * @function ProfileScreen
- * @description Enhanced profile screen with cache-first loading for instant performance
+ * @description Enhanced profile screen with logout functionality that clears all data
  * @returns {JSX.Element}
  */
 const ProfileScreen = () => {
   const navigation = useNavigation();
-  const { user } = useAuth();
+  const { user, signOut } = useAuth();
   const [profile, setProfile] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const [refreshing, setRefreshing] = useState(false);
+  const [loggingOut, setLoggingOut] = useState(false);
   const [loadSource, setLoadSource] = useState(''); // Track cache vs API loading
   
   const [pausedStatus, setPausedStatus] = useState({});
@@ -53,23 +54,71 @@ const ProfileScreen = () => {
   const videoRefs = useRef({});
   const swiperRef = useRef(null);
 
+  /**
+   * Handle logout with complete data cleanup
+   */
   const handleLogout = async () => {
-    console.log('Logout button pressed');
-    try {
-      // Get user email
-      const userEmail = user?.email || await getCurrentUserEmail();
-      if (userEmail) {
-        // Clear profile cache for the current user
-        await clearProfileCache(userEmail);
-        console.log(`✅ Profile cache cleared for user: ${userEmail}`);
-      }
+    Alert.alert(
+      'Sign Out',
+      'Are you sure you want to sign out? This will clear all cached data from your device.',
+      [
+        {
+          text: 'Cancel',
+          style: 'cancel',
+        },
+        {
+          text: 'Sign Out',
+          style: 'destructive',
+          onPress: performLogout,
+        },
+      ]
+    );
+  };
 
-      // Sign out the user
-      await signOut();
-      console.log('✅ User signed out');
+  /**
+   * Perform the actual logout with data cleanup
+   */
+  const performLogout = async () => {
+    setLoggingOut(true);
+    console.log('🚪 ProfileScreen: Starting complete logout process...');
+
+    try {
+      // Step 1: Clear ALL caches (feed, profile, videos, etc.)
+      console.log('🧹 ProfileScreen: Clearing all caches...');
+      await clearAllCaches();
+      
+      // Step 2: Sign out from auth service (this also clears user data from AsyncStorage)
+      console.log('🔐 ProfileScreen: Signing out user...');
+      const result = await signOut();
+      
+      if (result.success) {
+        console.log('✅ ProfileScreen: Complete logout successful');
+        
+        // Step 3: Reset local state
+        setProfile(null);
+        setLoading(false);
+        setError(null);
+        
+        // Step 4: Don't navigate - let AuthContext handle the redirect
+        // Since isSignedIn is now false, AppNavigator will automatically show AuthStack
+        console.log('✅ ProfileScreen: Logout complete, AuthContext will handle navigation');
+      } else {
+        console.error('❌ ProfileScreen: Logout failed:', result.error);
+        Alert.alert(
+          'Logout Failed',
+          result.error || 'Unable to sign out. Please try again.',
+          [{ text: 'OK' }]
+        );
+      }
     } catch (error) {
-      console.error('❌ Error during logout:', error);
-      // Optionally display an error message to the user
+      console.error('❌ ProfileScreen: Error during logout:', error);
+      Alert.alert(
+        'Logout Error',
+        'An error occurred while signing out. Please try again.',
+        [{ text: 'OK' }]
+      );
+    } finally {
+      setLoggingOut(false);
     }
   };
 
@@ -278,14 +327,11 @@ const ProfileScreen = () => {
         <TouchableOpacity onPress={() => navigation.navigate('EditProfile')}>
           <Ionicons name="create-outline" size={SIZES.icon} color={theme.text} />
         </TouchableOpacity>
-        <TouchableOpacity onPress={handleLogout}>
-          <AntDesign name="logout" size={SIZES.icon} color={theme.text} />
-        </TouchableOpacity>
       </View>
 
       {/* Content */}
       <ScrollView 
-        contentContainerStyle={[styles.scrollContent, { paddingBottom: LAYOUT.navHeight + 30 }]}
+        contentContainerStyle={[styles.scrollContent, { paddingBottom: LAYOUT.navHeight + 80 }]} // Extra padding for logout button
         refreshControl={
           <RefreshControl
             refreshing={refreshing}
@@ -392,6 +438,23 @@ const ProfileScreen = () => {
             {profile?.social_links || '@social_link'}
           </Text>
         </View>
+
+        {/* Logout Button at Bottom */}
+        <TouchableOpacity 
+          style={styles.logoutButton} 
+          onPress={handleLogout}
+          disabled={loggingOut}
+          activeOpacity={0.7}
+        >
+          {loggingOut ? (
+            <ActivityIndicator size="small" color="#ff6ec4" style={{ marginRight: 8 }} />
+          ) : (
+            <Ionicons name="log-out-outline" size={20} color="#ff6ec4" style={{ marginRight: 8 }} />
+          )}
+          <Text style={styles.logoutText}>
+            {loggingOut ? 'Signing Out...' : 'Sign Out'}
+          </Text>
+        </TouchableOpacity>
       </ScrollView>
 
       {/* Bottom Nav */}
@@ -537,6 +600,34 @@ const styles = StyleSheet.create({
   infoText: {
     fontSize: SIZES.font.medium,
     marginLeft: 10,
+  },
+  // NEW LOGOUT BUTTON STYLES
+  logoutButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: 'rgba(255, 110, 196, 0.1)',
+    paddingVertical: 16,
+    paddingHorizontal: 24,
+    borderRadius: 30,
+    marginTop: 30,
+    marginBottom: 20,
+    borderWidth: 2,
+    borderColor: '#ff6ec4',
+    shadowColor: '#ff6ec4',
+    shadowOffset: {
+      width: 0,
+      height: 2,
+    },
+    shadowOpacity: 0.2,
+    shadowRadius: 4,
+    elevation: 3,
+  },
+  logoutText: {
+    color: '#ff6ec4',
+    fontSize: 18,
+    fontWeight: 'bold',
+    letterSpacing: 0.5,
   },
   bottomNav: {
     position: 'absolute',
