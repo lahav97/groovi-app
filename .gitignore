@@ -3,23 +3,47 @@ node_modules/
 npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
+lerna-debug.log*
 
-# React Native platform folders
+# React Native platform folders (keep for bare workflow, ignore for managed)
 android/
 ios/
+
+# Expo managed workflow
+.expo/
+.expo-shared/
+expo-env.d.ts
 
 # Build artifacts
 android/app/build/
 android/build/
 ios/build/
 *.apk
+*.aab
 *.ipa
 build/
 dist/
+web-build/
+
+# EAS Build
+eas-build-*.tar.gz
 
 # Keystore and credentials
 *.keystore
 *.jks
+*.p12
+*.mobileprovision
+
+# Environment variables & Secrets
+.env
+.env.*
+!.env.example
+*.secret
+config.json
+
+# AWS & Backend secrets
+awsconfig.js
+aws-exports.js
 
 # Logs
 logs/
@@ -28,6 +52,7 @@ logs/
 *.out
 *.pid
 *.gz
+*.tar.gz
 
 # Editor/IDE configs
 .vscode/
@@ -38,39 +63,106 @@ logs/
 *.njsproj
 *.sln
 *.sw?
+.settings/
+.project
+.classpath
 
 # macOS & Windows system files
 .DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
 Thumbs.db
+desktop.ini
 
-# Environment variables
-.env
-.env.*
+# Metro bundler cache
+.metro-health-check*
+metro-*.log
 
-# Metro / Babel / Jest cache (cache folders, NOT config files)
-.expo/
+# Babel cache
+.babel-cache/
+babel.config.js.cache
+
+# Jest coverage
 coverage/
-*.cache/
-tmp/
-temp/
+.nyc_output/
+
+# TypeScript
+*.tsbuildinfo
 
 # Temporary files
 *.tmp
 *.temp
 *.swp
-*.lock
+*.bak
+*.backup
+*~
 
-# Debugger working directory
-debug/
+# Package manager lock files (choose one)
+yarn.lock
 
-# Android local properties
+# Debug and profiling
+.vscode/launch.json
+flipper-server-state.json
+.flipper/
+
+# Android specific
 android/local.properties
+android/app/google-services.json
+android/.gradle/
+android/captures/
+android/gradle/
+android/gradlew
+android/gradlew.bat
+android/gradle.properties
+
+# iOS specific
+ios/Pods/
+ios/*.xcworkspace/
+ios/*.xcodeproj/
+ios/build/
+ios/DerivedData/
+*.pbxuser
+*.xccheckout
+*.xcscmblueprint
+*.xcuserstate
 
 # Firebase
 google-services.json
+GoogleService-Info.plist
 firebase-debug.log
+firestore-debug.log
 
 # Fastlane
 fastlane/report.xml
 fastlane/Preview.html
 fastlane/screenshots/**/*.png
+fastlane/test_output/
+
+# CocoaPods
+ios/Podfile.lock
+
+# Watchman
+.watchmanconfig
+
+# Xcode
+*.xcuserstate
+*.xcworkspace
+DerivedData/
+
+# React Native Debugger
+.react-native-debugger/
+
+# Detox
+e2e/artifacts/
+
+# Storybook
+storybook-static/
+
+# Misc
+.buckconfig
+.flowconfig
+.watchmanconfig
+buck-out/
