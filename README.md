@@ -27,7 +27,7 @@ GrooviApp is a social music platform that connects musicians worldwide. Share yo
 - 👤 **Rich Profiles**: Showcase your instruments, skills, and musical journey
 - 🔍 **Discovery**: Explore new talent and connect with like-minded musicians
 - 🌍 **Location-Based**: Find musicians in your area or search globally
-- 📱 **Cross-Platform**: Available on iOS and Android
+- 📱 **Android Native**: Full Android development experience
 
 ---
 
@@ -50,7 +50,7 @@ Make sure you have these tools installed on your computer:
 
 1. **Clone the repository**
    ```bash
-   git clone <your-repository-url>
+   git clone https://github.com/lahav97/groovi-app.git
    cd groovi-app
    ```
 
@@ -79,16 +79,16 @@ Make sure you have these tools installed on your computer:
 
 This is the **easiest way** to test the app on your phone:
 
-1. **Download Expo Go** on your phone:
-   - [📱 iOS App Store](https://apps.apple.com/us/app/expo-go/id1397950961)
+1. **Download Expo Go** on your Android phone:
    - [🤖 Google Play Store](https://play.google.com/store/apps/details?id=host.exp.exponent)
 
 2. **Start the development server**
    ```bash
-   npm start
+   npx expo start -c
    ```
+   > The `-c` flag clears the cache for a clean start
 
-3. **Connect your phone**
+3. **Connect your Android phone**
    - A QR code will appear in your terminal
    - Open Expo Go and scan the QR code
    - The app will load on your phone! 🎉
@@ -119,26 +119,12 @@ For a more native experience or if you prefer emulators:
 
 4. **Run the app**:
    ```bash
-   npm run android
+   npx expo run:android
    ```
 
 </details>
 
-### Method 3: iOS Development (Mac only)
 
-<details>
-<summary>🍎 <strong>Click to expand iOS setup instructions</strong></summary>
-
-#### Setup Xcode
-
-1. **Install Xcode** from the Mac App Store
-2. **Install iOS Simulator** (included with Xcode)
-3. **Run the app**:
-   ```bash
-   npm run ios
-   ```
-
-</details>
 
 ---
 
@@ -213,9 +199,8 @@ groovi-app/
 
 | Command | Description |
 |---------|-------------|
-| `npm start` | Start Expo development server |
-| `npm run android` | Run on Android device/emulator |
-| `npm run ios` | Run on iOS device/simulator |
+| `npx expo start -c` | Start Expo development server (with cache clear) |
+| `npx expo run:android` | Run on Android device/emulator |
 | `npm test` | Run test suite |
 | `npm run lint` | Check code style |
 | `npm run format` | Format code with Prettier |
@@ -257,8 +242,8 @@ The app uses AWS Amplify for backend services. The configuration is already set 
 
 **Solution:**
 ```bash
-# Clear Metro cache
-npx react-native start --reset-cache
+# Clear Metro cache and start fresh
+npx expo start -c
 
 # Or clear npm cache
 npm start -- --clear
@@ -276,7 +261,7 @@ npm start -- --clear
    cd android
    ./gradlew clean
    cd ..
-   npm run android
+   npx expo run:android
    ```
 </details>
 
