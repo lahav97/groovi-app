@@ -3,7 +3,7 @@ import { View, Image, Text, TouchableOpacity } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import DraggableFlatList from 'react-native-draggable-flatlist';
 
-const VideoManager = ({
+const VideoEditManager = ({
   videos = [],
   setVideos,
   videoThumbnails = [],
@@ -82,4 +82,4 @@ const VideoManager = ({
   );
 };
 
-export default VideoManager;
+export default VideoEditManager;

@@ -15,7 +15,7 @@ import * as VideoThumbnails from 'expo-video-thumbnails';
 import { manipulateAsync } from 'expo-image-manipulator';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
-import VideoManager from '../../components/profile/VideoManager';
+import VideoEditManager from '../../components/profile/VideoEditManager';
 import Button from '../../components/common/Button';
 
 const predefinedInstruments = ['Guitar', 'Bass', 'Drums', 'Keys', 'Vocals'];
@@ -255,7 +255,7 @@ const EditProfileScreen = ({ navigation }) => {
           <Text style={{ marginLeft: 8, color: isDark ? '#fff' : '#000' }}>Upload Video</Text>
         </TouchableOpacity>
 
-        <VideoManager
+        <VideoEditManager
           videos={videos}
           setVideos={setVideos}
           videoThumbnails={videoThumbnails}
