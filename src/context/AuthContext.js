@@ -73,6 +73,7 @@ export const AuthProvider = ({ children }) => {
     }
   };
 
+  // Sign in
   const signIn = async (email, password) => {
     try {
       console.log('🔐 AuthContext: Signing in:', email);
@@ -165,9 +166,8 @@ export const AuthProvider = ({ children }) => {
     }
   };
 
-  // Confirm sign up (verification code)
+  // Confirm sign up - NO GLOBAL LOADING STATE CHANGES
   const confirmSignUp = async (username, code) => {
-    setIsLoading(true);
     try {
       await Auth.confirmSignUp(username, code);
       console.log('✅ AuthContext: Sign up confirmed');
@@ -179,8 +179,6 @@ export const AuthProvider = ({ children }) => {
         success: false,
         error: error.message || 'Failed to confirm sign up'
       };
-    } finally {
-      setIsLoading(false);
     }
   };
 
@@ -235,9 +233,8 @@ export const AuthProvider = ({ children }) => {
     }
   };
 
-  // Resend confirmation code
+  // Resend confirmation code - NO GLOBAL LOADING STATE CHANGES  
   const resendConfirmationCode = async (username) => {
-    setIsLoading(true);
     try {
       await Auth.resendSignUp(username);
       console.log('✅ AuthContext: Confirmation code resent');
@@ -249,9 +246,8 @@ export const AuthProvider = ({ children }) => {
         success: false,
         error: error.message || 'Failed to resend confirmation code'
       };
-    } finally {
-      setIsLoading(false);
     }
+    // No finally block - don't change global loading state
   };
 
   // Sign out with cleanup
