@@ -33,7 +33,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 
 const FILE_UPLOAD_API_URL = 'https://cy6ikxj5lk.execute-api.us-east-1.amazonaws.com/groovi/file_upload';
 const BUILD_PROFILE_API_URL = 'https://9u6y4sfrn2.execute-api.us-east-1.amazonaws.com/groovi/build_profile';
-const predefinedGenres = ['Pop', 'Rock', 'Jazz', 'Hip Hop', 'Classical', 'Electronic', 'R&B'];
+const predefinedGenres = ['Pop', 'Rock', 'Metal', 'Jazz', 'Hip Hop', 'Classical', 'Electronic', 'R&B'];
 
 /**
  * @function ProfileSetupScreen
@@ -320,20 +320,38 @@ const uploadFileToS3 = async (fileUri, presignedUrl) => {
   // Move video left or right
   const moveVideo = (fromIndex, toIndex) => {
     if (toIndex < 0 || toIndex >= videos.length) return;
+    
     // Move in videos
-    const newVideos = [...videos];
-    const [movedVideo] = newVideos.splice(fromIndex, 1);
-    newVideos.splice(toIndex, 0, movedVideo);
-    setVideos(newVideos);
+    setVideos(prev => {
+      const newVideos = [...prev];
+      const [movedVideo] = newVideos.splice(fromIndex, 1);
+      newVideos.splice(toIndex, 0, movedVideo);
+      return newVideos;
+    });
+    
     // Move in thumbnails
-    const newThumbs = [...videoThumbnails];
-    const [movedThumb] = newThumbs.splice(fromIndex, 1);
-    newThumbs.splice(toIndex, 0, movedThumb);
+    setVideoThumbnails(prev => {
+      const newThumbs = [...prev];
+      const [movedThumb] = newThumbs.splice(fromIndex, 1);
+      newThumbs.splice(toIndex, 0, movedThumb);
+      return newThumbs;
+    });
+    
     // Move in videoUrls (if already uploaded)
-    const newUrls = [...videoUrls];
-    const [movedUrl] = newUrls.splice(fromIndex, 1);
-    newUrls.splice(toIndex, 0, movedUrl);
-    setVideoUrls(newUrls);
+    setVideoUrls(prev => {
+      const newUrls = [...prev];
+      const [movedUrl] = newUrls.splice(fromIndex, 1);
+      newUrls.splice(toIndex, 0, movedUrl);
+      return newUrls;
+    });
+    
+    // Also move upload statuses to keep them in sync
+    setUploadStatuses(prev => {
+      const newStatuses = [...prev];
+      const [movedStatus] = newStatuses.splice(fromIndex, 1);
+      newStatuses.splice(toIndex, 0, movedStatus);
+      return newStatuses;
+    });
   };
 
   /**

@@ -2,15 +2,14 @@
  * @module ConfirmCodeScreen
  * Screen for confirming a user's signup by entering a verification code.
  */
-import React, { useState, useEffect } from 'react';
-import { View, Text, TextInput, StyleSheet, Alert, ActivityIndicator } from 'react-native';
+import React, { useState, useEffect, useCallback, useRef, useMemo } from 'react';
+import { View, Text, TextInput, StyleSheet, ActivityIndicator } from 'react-native';
 import { useNavigation, useRoute } from '@react-navigation/native';
 import { LinearGradient } from 'expo-linear-gradient';
 import Button from '../../components/common/Button';
 import { useAuth } from '../../context/AuthContext';
 import { useSignupBuilder } from '../../context/SignupFlowContext';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-
 
 /**
  * @function ConfirmCodeScreen
@@ -20,25 +19,30 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 const ConfirmCodeScreen = () => {
   const navigation = useNavigation();
   const route = useRoute();
-  const [code, setCode] = useState('');
-  const [isConfirming, setIsConfirming] = useState(false);
-  const [isResending, setIsResending] = useState(false);
-  const [statusMessage, setStatusMessage] = useState(null);
-  const [statusType, setStatusType] = useState(null); // 'success', 'error', 'info'
   const { user } = route.params || {};
   const username = user?.username;
   const password = user?.password;
 
-  console.log('🛬 Received user from SignUpScreen:', user);
+  // Single state object for better performance
+  const [state, setState] = useState({
+    code: '',
+    isConfirming: false,
+    isResending: false,
+    statusMessage: null,
+    statusType: null, // 'success', 'error', 'info'
+  });
 
-  
-  // Use the auth context and signup builder
+  // Use ref to prevent rebuilding user multiple times
+  const hasBuiltUser = useRef(false);
+  const statusTimer = useRef(null);
+
+  // Auth context and signup builder
   const { confirmSignUp, resendConfirmationCode, signIn } = useAuth();
   const signupBuilder = useSignupBuilder();
-  
-  // Store credentials in the builder for later use in ProfileSetupScreen
-  useEffect(() => {
-    if (user && signupBuilder) {
+
+  // Memoized user building - only when dependencies change
+  const buildUserIntoBuilder = useCallback(() => {
+    if (user && signupBuilder && !hasBuiltUser.current) {
       signupBuilder
         .setUsername(user.username)
         .setPassword(user.password)
@@ -48,63 +52,87 @@ const ConfirmCodeScreen = () => {
         .setGender(user.gender)
         .setPhoneNumber(user.phoneNumber)
         .setBirthDate(user.birthDate);
-  
-      console.log('✅ ConfirmCodeScreen restored full user into builder:', signupBuilder.build());
+
+      hasBuiltUser.current = true;
     }
   }, [user, signupBuilder]);
 
-  // Clear status message after a delay
+  // Build user on mount - but optimized
   useEffect(() => {
-    let timer;
-    if (statusMessage) {
-      timer = setTimeout(() => {
-        setStatusMessage(null);
-        setStatusType(null);
-      }, 3000); // Clear after 3 seconds
+    buildUserIntoBuilder();
+  }, [buildUserIntoBuilder]);
+
+  // Optimized status message handler
+  const setStatusMessage = useCallback((message, type) => {
+    setState(prev => ({
+      ...prev,
+      statusMessage: message,
+      statusType: type
+    }));
+
+    // Clear existing timer
+    if (statusTimer.current) {
+      clearTimeout(statusTimer.current);
     }
-    return () => clearTimeout(timer);
-  }, [statusMessage]);
+
+    // Set new timer
+    if (message) {
+      statusTimer.current = setTimeout(() => {
+        setState(prev => ({
+          ...prev,
+          statusMessage: null,
+          statusType: null
+        }));
+      }, 3000);
+    }
+  }, []);
+
+  // Cleanup timer on unmount
+  useEffect(() => {
+    return () => {
+      if (statusTimer.current) {
+        clearTimeout(statusTimer.current);
+      }
+    };
+  }, []);
 
   /**
    * @function handleConfirm
    * @description Confirms the sign-up using the verification code and signs in the user.
    */
-  const handleConfirm = async () => {
+  const handleConfirm = useCallback(async () => {
     if (!username) {
-      setStatusMessage('Something went wrong. Missing username.');
-      setStatusType('error');
+      setStatusMessage('Something went wrong. Missing username.', 'error');
       return;
     }
     
-    if (!code.trim()) {
-      setStatusMessage('Please enter the verification code');
-      setStatusType('error');
+    if (!state.code.trim()) {
+      setStatusMessage('Please enter the verification code', 'error');
       return;
     }
 
-    setIsConfirming(true);
+    setState(prev => ({ ...prev, isConfirming: true }));
+
     try {
-      // First, confirm the signup without signing in
-      console.log(`Confirming signup for user: ${username} with code: ${code}`);
-      const confirmResult = await confirmSignUp(username, code);
+      // First, confirm the signup
+      const confirmResult = await confirmSignUp(username, state.code);
       
       if (!confirmResult.success) {
         console.log('❌ Confirmation failed:', confirmResult.error);
-        setStatusMessage(confirmResult.error || 'Failed to confirm your account');
-        setStatusType('error');
-        setIsConfirming(false);
+        setStatusMessage(confirmResult.error || 'Failed to confirm your account', 'error');
         return;
       }
       
       console.log('✅ Account confirmed successfully!');
-      setStatusMessage('Account confirmed successfully!');
-      setStatusType('success');
+      setStatusMessage('Account confirmed successfully!', 'success');
       
+      // Sign in the user
       const signInResult = await signIn(username, password);
       
       if (signInResult.success) {
         const { userData } = signInResult;
       
+        // Update builder with sign-in data
         signupBuilder
           .setUsername(userData.username)
           .setEmail(userData.email)
@@ -117,53 +145,53 @@ const ConfirmCodeScreen = () => {
       
         const builtUser = signupBuilder.build();
       
-        await AsyncStorage.setItem('signupBuilderBackup', JSON.stringify(builtUser));
-        await new Promise((resolve) => setTimeout(resolve, 300));
-
-      }
-       else {
+        AsyncStorage.setItem('signupBuilderBackup', JSON.stringify(builtUser))
+          .catch(err => console.error('Error saving backup:', err));        
+      } else {
         // Failed to sign in automatically
-        setStatusMessage('Account confirmed, but failed to sign in automatically. Please log in.');
-        setStatusType('error');
-        navigation.navigate('LoginWithEmail');
+        setStatusMessage('Account confirmed, but failed to sign in automatically. Please log in.', 'error');
+        setTimeout(() => {
+          navigation.navigate('LoginWithEmail');
+        }, 2000);
       }
-    
     } catch (error) {
       console.error('❌ Error in confirmation process:', error);
-      setStatusMessage(error.message || 'Failed to complete the confirmation process');
-      setStatusType('error');
+      setStatusMessage(error.message || 'Failed to complete the confirmation process', 'error');
     } finally {
-      setIsConfirming(false);
+      setState(prev => ({ ...prev, isConfirming: false }));
     }
-  };
+  }, [username, state.code, password, confirmSignUp, signIn, signupBuilder, user, setStatusMessage, navigation]);
 
   /**
    * @function handleResendCode
    * @description Resends the confirmation code to the user.
    */
-  const handleResendCode = async () => {
-    setIsResending(true);
+  const handleResendCode = useCallback(async () => {
+    setState(prev => ({ ...prev, isResending: true }));
+    
     try {
-      // Use the method from AuthContext
       const result = await resendConfirmationCode(username);
       
       if (result.success) {
         console.log('✅ Verification code resent successfully');
-        setStatusMessage('Verification code resent');
-        setStatusType('success');
+        setStatusMessage('Verification code resent', 'success');
       } else {
         console.log('❌ Failed to resend code:', result.error);
-        setStatusMessage(result.error || 'Failed to resend verification code');
-        setStatusType('error');
+        setStatusMessage(result.error || 'Failed to resend verification code', 'error');
       }
     } catch (error) {
       console.error('❌ Error resending code:', error);
-      setStatusMessage(error.message || 'Failed to resend code');
-      setStatusType('error');
+      setStatusMessage(error.message || 'Failed to resend code', 'error');
     } finally {
-      setIsResending(false);
+      setState(prev => ({ ...prev, isResending: false }));
     }
-  };
+  }, [username, resendConfirmationCode, setStatusMessage]);
+
+  const handleCodeChange = useCallback((text) => {
+    setState(prev => ({ ...prev, code: text }));
+  }, []);
+
+  const isButtonDisabled = state.isConfirming || state.isResending || !state.code.trim();
 
   return (
     <LinearGradient
@@ -175,14 +203,14 @@ const ConfirmCodeScreen = () => {
       <View style={styles.inner}>
         <Text style={styles.title}>Enter your verification code</Text>
         
-        {statusMessage && (
+        {state.statusMessage && (
           <View style={[
             styles.statusContainer, 
-            statusType === 'success' && styles.successStatus,
-            statusType === 'error' && styles.errorStatus,
-            statusType === 'info' && styles.infoStatus,
+            state.statusType === 'success' && styles.successStatus,
+            state.statusType === 'error' && styles.errorStatus,
+            state.statusType === 'info' && styles.infoStatus,
           ]}>
-            <Text style={styles.statusText}>{statusMessage}</Text>
+            <Text style={styles.statusText}>{state.statusMessage}</Text>
           </View>
         )}
         
@@ -190,20 +218,20 @@ const ConfirmCodeScreen = () => {
           style={styles.input}
           placeholder="Verification code"
           keyboardType="number-pad"
-          onChangeText={setCode}
-          value={code}
+          onChangeText={handleCodeChange}
+          value={state.code}
           placeholderTextColor="#666"
-          editable={!isConfirming && !isResending}
+          editable={!state.isConfirming && !state.isResending}
         />
 
         <Button
-          title={isConfirming ? "CONFIRMING..." : "CONFIRM"}
+          title={state.isConfirming ? "CONFIRMING..." : "CONFIRM"}
           onPress={handleConfirm}
           style={styles.confirmButton}
           textStyle={styles.confirmText}
-          disabled={isConfirming || isResending || !code.trim()}
+          disabled={isButtonDisabled}
         >
-          {isConfirming ? (
+          {state.isConfirming ? (
             <ActivityIndicator color="#000" size="small" />
           ) : (
             <Text style={styles.confirmText}>CONFIRM</Text>
@@ -213,13 +241,13 @@ const ConfirmCodeScreen = () => {
         <View style={styles.resendContainer}>
           <Text style={styles.resendText}>Didn't receive a code?</Text>
           <Button
-            title={isResending ? "SENDING..." : "RESEND CODE"}
+            title={state.isResending ? "SENDING..." : "RESEND CODE"}
             onPress={handleResendCode}
             style={styles.resendButton}
             textStyle={styles.resendButtonText}
-            disabled={isConfirming || isResending}
+            disabled={state.isConfirming || state.isResending}
           >
-            {isResending ? (
+            {state.isResending ? (
               <ActivityIndicator color="#000" size="small" />
             ) : (
               <Text style={styles.resendButtonText}>RESEND CODE</Text>

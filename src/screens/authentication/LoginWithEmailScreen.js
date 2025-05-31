@@ -61,7 +61,7 @@ const handleContinue = async () => {
     return;
   }
   
-  setIsLoading(true);
+  setIsLoading(true); 
   
   try {
     // User exists, proceed with sign in
@@ -76,17 +76,8 @@ const handleContinue = async () => {
       // Save the email to AsyncStorage for later use
       await saveUserEmail(email);
       console.log('Email saved to AsyncStorage:', email);
-      
-      // Force a refresh of the auth context
-      await refreshUser();
-      
-      // IMPORTANT CHANGE: Instead of trying to navigate directly to "Feed",
-      // simply go back to the root navigator and let it handle the change in auth state
-      
-      // Just navigate back to first screen, the AppNavigator will handle the rest
-      // based on isSignedIn and hasCompletedOnboarding state
-      navigation.navigate('Login');
     } else {
+      console.log('❌ Sign in failed:', result.error);
       setAuthError(result.error || 'Failed to sign in. Please try again.');
     }
   } catch (error) {

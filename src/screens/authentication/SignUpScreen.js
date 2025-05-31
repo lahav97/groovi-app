@@ -11,6 +11,7 @@ import {
   StyleSheet,
   ScrollView,
   Alert,
+  ActivityIndicator,
 } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useNavigation } from '@react-navigation/native';
@@ -20,6 +21,7 @@ import { useSignupBuilder } from '../../context/SignupFlowContext';
 import { Auth } from 'aws-amplify';
 import Button from '../../components/common/Button';
 import axios from 'axios';
+
 /**
  * @function SignUpScreen
  * @description Allows users to input their signup information and create an account.
@@ -40,11 +42,17 @@ const SignUpScreen = () => {
   const [month, setMonth] = React.useState('');
   const [year, setYear] = React.useState('');
   const [showPicker, setShowPicker] = React.useState('');
-  const [authError, setAuthError] = React.useState('');
+  
+  // Email validation states
+  const [emailError, setEmailError] = React.useState('');
+  const [isCheckingEmail, setIsCheckingEmail] = React.useState(false);
+  
   const [passwordError, setPasswordError] = React.useState('');
   const [dateError, setDateError] = React.useState('');
 
   const CHECK_EMAIL_API_URL = 'https://9u6y4sfrn2.execute-api.us-east-1.amazonaws.com/groovi/build_profile/check_email?email=';
+  const timeoutRef = React.useRef(null);
+
   /**
    * @function isValidPassword
    * @description Validates if a password has at least one capital letter and one number.
@@ -109,6 +117,63 @@ const SignUpScreen = () => {
    * @returns {boolean}
    */
   const isValidEmail = (email) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
+
+  /**
+   * @function validateEmailInRealTime
+   * @description Validates email format and checks if it exists in real-time
+   * @param {string} emailValue - Email to validate
+   */
+  const validateEmailInRealTime = async (emailValue) => {
+    // Clear previous errors
+    setEmailError('');
+    
+    // Don't validate empty email
+    if (!emailValue.trim()) {
+      return;
+    }
+    
+    // First check format
+    if (!isValidEmail(emailValue)) {
+      setEmailError('Please enter a valid email address');
+      return;
+    }
+    
+    // Then check if email exists
+    setIsCheckingEmail(true);
+    try {
+      const emailExists = await isEmailExists(emailValue);
+      
+      if (emailExists) {
+        setEmailError('This email is already registered');
+      } else {
+        setEmailError(''); // Email is valid and available
+      }
+    } catch (error) {
+      console.error('Error checking email:', error);
+      setEmailError('Unable to verify email. Please try again.');
+    } finally {
+      setIsCheckingEmail(false);
+    }
+  };
+
+  /**
+   * @function handleEmailChange
+   * @description Handles email input change with debounced validation
+   * @param {string} text - Email input text
+   */
+  const handleEmailChange = (text) => {
+    setEmail(text);
+    
+    // Clear previous timeout
+    if (timeoutRef.current) {
+      clearTimeout(timeoutRef.current);
+    }
+    
+    // Set new timeout to validate after user stops typing
+    timeoutRef.current = setTimeout(() => {
+      validateEmailInRealTime(text);
+    }, 500); // Wait 500ms after user stops typing
+  };
   
   /**
    * @function handleDateUpdate
@@ -178,25 +243,21 @@ const SignUpScreen = () => {
   const handleContinue = async () => {
     let valid = true;
 
-    // Validate email
-    if (!isValidEmail(email)) {
-      setAuthError('Enter a valid email address');
+    // Check if email validation is still in progress
+    if (isCheckingEmail) {
+      Alert.alert('Please wait', 'Still checking email availability...');
+      return;
+    }
+
+    // Check if there are any email errors
+    if (emailError) {
       valid = false;
-    } else {
-      try{
-        const emailExists = await isEmailExists(email);
-        
-        if (emailExists) {
-          setAuthError('This email is already registered');
-          valid = false;
-        }
-        else{
-          setAuthError('');
-        }
-      } catch (error) {
-        console.error('Error checking if email exists:', error);
-        setAuthError(''); 
-      }
+    }
+
+    // Re-validate email if it's empty
+    if (!email.trim()) {
+      setEmailError('Please enter your email address');
+      valid = false;
     }
 
     // Validate password
@@ -211,6 +272,21 @@ const SignUpScreen = () => {
     if (!birthdayDate) {
       setDateError('Please select your birthday');
       valid = false;
+    }
+
+    // Validate other required fields
+    if (!fullName.trim()) {
+      Alert.alert('Missing Information', 'Please enter your full name');
+      valid = false;
+    }
+
+    if (!username.trim()) {
+      Alert.alert('Missing Information', 'Please enter a username');
+      valid = false;
+    }
+
+    if (!valid) {
+      return;
     }
 
     builder
@@ -292,16 +368,33 @@ const SignUpScreen = () => {
             placeholderTextColor="#666"
           />
 
-          <TextInput
-            placeholder="Email"
-            value={email}
-            onChangeText={setEmail}
-            style={styles.input}
-            placeholderTextColor="#666"
-            keyboardType="email-address"
-            autoCapitalize="none"
-          />
-          {authError !== '' && <Text style={styles.errorText}>{authError}</Text>}
+          {/* Email Input with real-time validation */}
+          <View style={styles.inputContainer}>
+            <TextInput
+              placeholder="Email"
+              value={email}
+              onChangeText={handleEmailChange}
+              style={[
+                styles.input,
+                emailError ? styles.inputError : null,
+                styles.emailInput
+              ]}
+              placeholderTextColor="#666"
+              keyboardType="email-address"
+              autoCapitalize="none"
+            />
+            {isCheckingEmail && (
+              <View style={styles.checkingContainer}>
+                <ActivityIndicator size="small" color="#666" />
+                <Text style={styles.checkingText}>Checking...</Text>
+              </View>
+            )}
+          </View>
+          
+          {/* Show email error in red under the email input */}
+          {emailError !== '' && (
+            <Text style={styles.errorText}>{emailError}</Text>
+          )}
 
           {/* Birthday Selector */}
           <Text style={[styles.fieldLabel, { alignSelf: 'flex-start' }]}>Birthday</Text>
@@ -469,9 +562,7 @@ const SignUpScreen = () => {
 
           <Button
             title="Continue"
-            onPress={() => {
-              handleContinue();
-            }}
+            onPress={handleContinue}
             style={styles.continueButton}
             textStyle={styles.continueText}
           />
@@ -545,6 +636,30 @@ const styles = StyleSheet.create({
     fontSize: 16,
     width: '100%',
     alignSelf: 'center',
+  },
+  inputContainer: {
+    width: '100%',
+    position: 'relative',
+  },
+  emailInput: {
+    marginBottom: 0, // Remove margin for email input to control spacing better
+  },
+  inputError: {
+    borderWidth: 2,
+    borderColor: 'red',
+  },
+  checkingContainer: {
+    position: 'absolute',
+    right: 16,
+    top: 12,
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  checkingText: {
+    color: '#666',
+    fontSize: 12,
+    fontStyle: 'italic',
+    marginLeft: 4,
   },
   fieldLabel: {
     color: 'white',
@@ -628,6 +743,7 @@ const styles = StyleSheet.create({
     marginLeft: 5,
     fontSize: 13,
     alignSelf: 'flex-start',
+    marginTop: 5, // Add small margin from input
   },
   passwordContainer: {
     flexDirection: 'row',

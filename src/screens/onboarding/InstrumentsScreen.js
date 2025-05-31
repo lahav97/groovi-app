@@ -31,7 +31,7 @@ if (Platform.OS === 'android' && UIManager.setLayoutAnimationEnabledExperimental
 }
 
 const instrumentCategories = {
-  '🎸 Strings 🎸': ['Electric Guitar', 'Acoustic Guitar', 'Bass Guitar', 'Violin', 'Cello', 'Banjo', 'Mandolin'],
+  '🎸 Strings 🎸': ['Electric Guitar', 'Acoustic Guitar', 'Bass Guitar', 'Violin', 'Cello', 'Banjo', 'Mandolin', 'Ukulele'],
   '🥁 Drums 🥁': ['Drums', 'Cajón', 'Bongos', 'Percussion'],
   '🎹 Keys 🎹': ['Keyboard', 'Piano', 'Synthesizer', 'Organ', 'MIDI Controller'],
   '🎤 Vocals 🎤': ['Lead Vocals', 'Backing Vocals', 'Rapper', 'Beatbox'],
