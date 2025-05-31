@@ -14,7 +14,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { useNavigation, CommonActions } from '@react-navigation/native';
 import Button from '../../components/common/Button';
 import { useAuth } from '../../context/AuthContext';
-import { saveUserEmail } from '../../utils/userUtils'; // Add this import
+import { saveUserEmail } from '../../utils/userUtils';
 
 const LoginWithEmailScreen = () => {
   const [email, setEmail] = useState('');

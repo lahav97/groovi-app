@@ -73,7 +73,6 @@ export const AuthProvider = ({ children }) => {
     }
   };
 
-  // Sign in - NO GLOBAL LOADING STATE CHANGES
   const signIn = async (email, password) => {
     try {
       console.log('🔐 AuthContext: Signing in:', email);
@@ -119,13 +118,11 @@ export const AuthProvider = ({ children }) => {
       };
     } catch (error) {
       console.error('❌ AuthContext: Sign in error:', error);
-      // Don't change any auth state on failure - just return error
       return { 
         success: false, 
         error: error.message || 'Failed to sign in' 
       };
     }
-    // No finally block - don't change global loading state
   };
 
   // Sign up with email, password, and other details
