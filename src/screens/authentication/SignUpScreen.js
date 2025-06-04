@@ -62,23 +62,6 @@ const SignUpScreen = () => {
   const isValidPassword = (value) => /[A-Z]/.test(value) && /[0-9]/.test(value);
   
   /**
-   * @function formatBirthday
-   * @description Formats date object as a readable string.
-   * @param {Date} date - Date object to format
-   * @returns {string} Formatted date string
-   */
-  const formatBirthday = (date) => {
-    if (!date) return 'Select Birthday';
-    
-    const months = [
-      'January', 'February', 'March', 'April', 'May', 'June',
-      'July', 'August', 'September', 'October', 'November', 'December'
-    ];
-    
-    return `${months[date.getMonth()]} ${date.getDate()}, ${date.getFullYear()}`;
-  };
-
-  /**
    * @function formatBirthdayForAPI
    * @description Formats date object as YYYY-MM-DD for API.
    * @param {Date} date - Date object to format
@@ -340,26 +323,8 @@ const SignUpScreen = () => {
       <ScrollView contentContainerStyle={styles.scrollContent}>
         <View style={styles.inner}>
           <Text style={styles.title}>Sign Up</Text>
-
-          <View style={styles.toggleContainer}>
-            <TouchableOpacity
-              style={[styles.toggleButton, userType === 'musician' && styles.toggleSelected]}
-              onPress={() => setUserType('musician')}
-            >
-              <Text style={userType === 'musician' ? styles.toggleTextSelected : styles.toggleText}>
-                Musician
-              </Text>
-            </TouchableOpacity>
-            <TouchableOpacity
-              style={[styles.toggleButton, userType === 'business' && styles.toggleSelected]}
-              onPress={() => setUserType('business')}
-            >
-              <Text style={userType === 'business' ? styles.toggleTextSelected : styles.toggleText}>
-                Business
-              </Text>
-            </TouchableOpacity>
-          </View>
-
+          
+          {/* Full Name Input - removed specific marginTop */}
           <TextInput
             placeholder="Full Name"
             value={fullName}
@@ -377,7 +342,6 @@ const SignUpScreen = () => {
               style={[
                 styles.input,
                 emailError ? styles.inputError : null,
-                styles.emailInput
               ]}
               placeholderTextColor="#666"
               keyboardType="email-address"
@@ -613,7 +577,7 @@ const styles = StyleSheet.create({
     fontSize: 48,
     color: 'white',
     fontWeight: '900',
-    marginBottom: 25,
+    marginBottom: 30, // Consistent spacing after title
     alignSelf: 'center',
   },
   toggleContainer: {
@@ -656,7 +620,7 @@ const styles = StyleSheet.create({
     position: 'relative',
   },
   emailInput: {
-    marginBottom: 0, // Remove margin for email input to control spacing better
+    marginBottom: 0,
   },
   inputError: {
     borderWidth: 2,
@@ -779,7 +743,7 @@ const styles = StyleSheet.create({
     marginLeft: 5,
     fontSize: 13,
     alignSelf: 'flex-start',
-    marginTop: 5, // Add small margin from input
+    marginTop: 5,
   },
   passwordContainer: {
     flexDirection: 'row',
