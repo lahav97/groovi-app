@@ -1,4 +1,32 @@
-/**
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <title>JSDoc: Source: screens/onboarding/ProfileSetupScreen.js</title>
+
+    <script src="scripts/prettify/prettify.js"> </script>
+    <script src="scripts/prettify/lang-css.js"> </script>
+    <!--[if lt IE 9]>
+      <script src="//html5shiv.googlecode.com/svn/trunk/html5.js"></script>
+    <![endif]-->
+    <link type="text/css" rel="stylesheet" href="styles/prettify-tomorrow.css">
+    <link type="text/css" rel="stylesheet" href="styles/jsdoc-default.css">
+</head>
+
+<body>
+
+<div id="main">
+
+    <h1 class="page-title">Source: screens/onboarding/ProfileSetupScreen.js</h1>
+
+    
+
+
+
+    
+    <section>
+        <article>
+            <pre class="prettyprint source linenums"><code>/**
  * @module ProfileSetupScreen
  * Screen for users to complete their profile by adding location, bio, video, and favorite genres.
  * Modified to work on Android devices without FFmpeg dependency
@@ -33,7 +61,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 
 const FILE_UPLOAD_API_URL = 'https://cy6ikxj5lk.execute-api.us-east-1.amazonaws.com/groovi/file_upload';
 const BUILD_PROFILE_API_URL = 'https://9u6y4sfrn2.execute-api.us-east-1.amazonaws.com/groovi/build_profile';
-const predefinedGenres = ['Pop', 'Rock', 'Metal', 'Jazz', 'Hip Hop', 'Classical', 'Electronic', 'R&B'];
+const predefinedGenres = ['Pop', 'Rock', 'Metal', 'Jazz', 'Hip Hop', 'Classical', 'Electronic', 'R&amp;B'];
 
 /**
  * @function ProfileSetupScreen
@@ -123,7 +151,7 @@ const ProfileSetupScreen = () => {
         quality: 0.8,
       });
       
-      if (!result.canceled && result.assets && result.assets[0]) {
+      if (!result.canceled &amp;&amp; result.assets &amp;&amp; result.assets[0]) {
         setProfilePictureUri(result.assets[0].uri);
       }
     } catch (error) {
@@ -138,7 +166,7 @@ const ProfileSetupScreen = () => {
  * @param {Object} video - The video object containing uri and other metadata.
  * @param {number} index - The index of the video in the videos array.
  * @param {string} username - The username of the user.
- * @returns {Promise<string>} - A promise that resolves to the final video URL.
+ * @returns {Promise&lt;string>} - A promise that resolves to the final video URL.
  */
 const uploadVideoToLambda = async (video, index, username) => {
   try {
@@ -162,13 +190,13 @@ const uploadVideoToLambda = async (video, index, username) => {
       
       // Set up event handlers for the XHR request to get pre-signed URL
       xhr.onload = () => {
-        if (xhr.status >= 200 && xhr.status < 300) {
+        if (xhr.status >= 200 &amp;&amp; xhr.status &lt; 300) {
           try {
             // Parse the response to get the upload URL and final file URL
             const response = JSON.parse(xhr.responseText);
             console.log("Lambda response:", response);
             
-            if (response.uploadUrl && response.fileUrl) {
+            if (response.uploadUrl &amp;&amp; response.fileUrl) {
               const uploadUrl = response.uploadUrl;
               const fileUrl = response.fileUrl;
               
@@ -223,7 +251,7 @@ const uploadVideoToLambda = async (video, index, username) => {
  * @description Uploads a file to S3 using a pre-signed URL
  * @param {string} fileUri - The local URI of the file to upload
  * @param {string} presignedUrl - The pre-signed S3 URL
- * @returns {Promise<void>}
+ * @returns {Promise&lt;void>}
  */
 const uploadFileToS3 = async (fileUri, presignedUrl) => {
   return new Promise((resolve, reject) => {
@@ -232,7 +260,7 @@ const uploadFileToS3 = async (fileUri, presignedUrl) => {
     xhr.open('PUT', presignedUrl);
     
     xhr.onload = () => {
-      if (xhr.status >= 200 && xhr.status < 300) {
+      if (xhr.status >= 200 &amp;&amp; xhr.status &lt; 300) {
         resolve();
       } else {
         reject(new Error(`S3 upload failed with status ${xhr.status}`));
@@ -261,7 +289,7 @@ const uploadFileToS3 = async (fileUri, presignedUrl) => {
    * @function uploadSingleVideo
    * @description Upload a single video immediately after selection
    * @param {Object} videoObj - The video object to upload
-   * @returns {Promise<string>} - A promise that resolves to the video URL
+   * @returns {Promise&lt;string>} - A promise that resolves to the video URL
    */
   const uploadSingleVideo = async (videoObj, index) => {
     try {
@@ -319,7 +347,7 @@ const uploadFileToS3 = async (fileUri, presignedUrl) => {
 
   // Move video left or right
   const moveVideo = (fromIndex, toIndex) => {
-    if (toIndex < 0 || toIndex >= videos.length) return;
+    if (toIndex &lt; 0 || toIndex >= videos.length) return;
     
     // Move in videos
     setVideos(prev => {
@@ -480,8 +508,8 @@ const uploadFileToS3 = async (fileUri, presignedUrl) => {
   const isFormComplete = () => {
     const hasLocation = useManualLocation ? manualLocation : location;
     // Check if all videos are uploaded by comparing lengths
-    const allVideosUploaded = videos.length > 0 && videos.length === videoUrls.filter(url => !!url).length;
-    return hasLocation && bio.trim() && allVideosUploaded && genres.length > 0 && profilePictureUri;
+    const allVideosUploaded = videos.length > 0 &amp;&amp; videos.length === videoUrls.filter(url => !!url).length;
+    return hasLocation &amp;&amp; bio.trim() &amp;&amp; allVideosUploaded &amp;&amp; genres.length > 0 &amp;&amp; profilePictureUri;
   };
 
   /**
@@ -568,30 +596,30 @@ const uploadFileToS3 = async (fileUri, presignedUrl) => {
   const generateVideoKey = (fileName, size, duration) => `${fileName}_${size}_${duration}`;
 
   return (
-    <KeyboardAvoidingView 
+    &lt;KeyboardAvoidingView 
       style={{ flex: 1 }}
       behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
     >
-      <View style={[styles.container, { backgroundColor: isDark ? '#000' : '#fff' }]}>
-        <View style={styles.headerRow}>
-          <TouchableOpacity style={styles.backButton} onPress={() => navigation.goBack()}>
-            <Ionicons name="arrow-back" size={28} color={isDark ? '#fff' : '#000'} />
-          </TouchableOpacity>
-          <Text style={[styles.title, { color: isDark ? '#fff' : '#000' }]}>
+      &lt;View style={[styles.container, { backgroundColor: isDark ? '#000' : '#fff' }]}>
+        &lt;View style={styles.headerRow}>
+          &lt;TouchableOpacity style={styles.backButton} onPress={() => navigation.goBack()}>
+            &lt;Ionicons name="arrow-back" size={28} color={isDark ? '#fff' : '#000'} />
+          &lt;/TouchableOpacity>
+          &lt;Text style={[styles.title, { color: isDark ? '#fff' : '#000' }]}>
             Set up your profile
-          </Text>
-          <View style={{ width: 28 }} />
-        </View>
+          &lt;/Text>
+          &lt;View style={{ width: 28 }} />
+        &lt;/View>
 
-        <ScrollView 
+        &lt;ScrollView 
           contentContainerStyle={[
             styles.scroll,
             { paddingBottom: 100 }
           ]}
         >
-          <Text style={[styles.sectionTitle, { color: isDark ? '#fff' : '#000' }]}>Location</Text>
+          &lt;Text style={[styles.sectionTitle, { color: isDark ? '#fff' : '#000' }]}>Location&lt;/Text>
           {useManualLocation ? (
-            <TextInput
+            &lt;TextInput
               style={[
                 styles.input,
                 {
@@ -605,46 +633,46 @@ const uploadFileToS3 = async (fileUri, presignedUrl) => {
               onChangeText={setManualLocation}
             />
           ) : (
-            <Text style={[styles.infoText, { color: isDark ? '#aaa' : '#555' }]}>
+            &lt;Text style={[styles.infoText, { color: isDark ? '#aaa' : '#555' }]}>
               {location || 'Detecting location...'}
-            </Text>
+            &lt;/Text>
           )}
 
-          <Text style={[styles.sectionTitle, { color: isDark ? '#fff' : '#000' }]}>
+          &lt;Text style={[styles.sectionTitle, { color: isDark ? '#fff' : '#000' }]}>
             Profile Picture
-          </Text>
+          &lt;/Text>
           
-          <TouchableOpacity 
+          &lt;TouchableOpacity 
             onPress={pickProfilePicture} 
             style={[styles.profilePictureContainer, {
               backgroundColor: isDark ? '#222' : '#eee',
             }]}
           >
             {profilePictureUri ? (
-              <Image 
+              &lt;Image 
                 source={{ uri: profilePictureUri }} 
                 style={styles.profilePicture} 
                 resizeMode="cover"
               />
             ) : (
-              <View style={styles.profilePicturePlaceholder}>
-                <Ionicons name="person-circle-outline" size={60} color={isDark ? '#ccc' : '#555'} />
-                <Text style={{ 
+              &lt;View style={styles.profilePicturePlaceholder}>
+                &lt;Ionicons name="person-circle-outline" size={60} color={isDark ? '#ccc' : '#555'} />
+                &lt;Text style={{ 
                   fontSize: 15, 
                   color: isDark ? '#ccc' : '#333', 
                   marginTop: 10,
                   textAlign: 'center'
                 }}>
                   Upload Profile Picture
-                </Text>
-              </View>
+                &lt;/Text>
+              &lt;/View>
             )}
-          </TouchableOpacity>
+          &lt;/TouchableOpacity>
 
-          <Text style={[styles.sectionTitle, { color: isDark ? '#fff' : '#000' }]}>
+          &lt;Text style={[styles.sectionTitle, { color: isDark ? '#fff' : '#000' }]}>
             Personal Info
-          </Text>
-          <TextInput
+          &lt;/Text>
+          &lt;TextInput
             style={[
               styles.input,
               {
@@ -660,24 +688,24 @@ const uploadFileToS3 = async (fileUri, presignedUrl) => {
             multiline
           />
 
-          <Text style={[styles.sectionTitle, { color: isDark ? '#fff' : '#000' }]}>
+          &lt;Text style={[styles.sectionTitle, { color: isDark ? '#fff' : '#000' }]}>
             Upload Videos
-          </Text>
+          &lt;/Text>
 
-          <TouchableOpacity
+          &lt;TouchableOpacity
             style={[styles.uploadBtn, { backgroundColor: isDark ? '#222' : '#eee' }]}
             onPress={pickVideo}
           >
-            <Text style={{ fontSize: 15, color: isDark ? '#ccc' : '#333', marginLeft: 8 }}>
+            &lt;Text style={{ fontSize: 15, color: isDark ? '#ccc' : '#333', marginLeft: 8 }}>
               Choose videos (max 45s / 20MB)
-            </Text>
-          </TouchableOpacity>
+            &lt;/Text>
+          &lt;/TouchableOpacity>
 
-          {videoThumbnails.length > 0 && (
-            <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 12, marginVertical: 10 }}>
+          {videoThumbnails.length > 0 &amp;&amp; (
+            &lt;View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 12, marginVertical: 10 }}>
               {videoThumbnails.map((thumb, i) => (
-                <View key={i} style={{ position: 'relative', alignItems: 'center' }}>
-                  <Image
+                &lt;View key={i} style={{ position: 'relative', alignItems: 'center' }}>
+                  &lt;Image
                     source={{ uri: thumb }}
                     style={{
                       width: 70,
@@ -686,7 +714,7 @@ const uploadFileToS3 = async (fileUri, presignedUrl) => {
                       backgroundColor: '#000',
                     }}
                   />
-                  <View
+                  &lt;View
                     style={{
                       position: 'absolute',
                       top: 6,
@@ -697,53 +725,53 @@ const uploadFileToS3 = async (fileUri, presignedUrl) => {
                     }}
                   >
                     {uploadStatuses[i]?.uploading ? (
-                      <ActivityIndicator size="small" color="#fff" />
+                      &lt;ActivityIndicator size="small" color="#fff" />
                     ) : (
-                      <Ionicons 
-                        name={i < videoUrls.length && videoUrls[i] ? "checkmark-circle" : "time-outline"} 
+                      &lt;Ionicons 
+                        name={i &lt; videoUrls.length &amp;&amp; videoUrls[i] ? "checkmark-circle" : "time-outline"} 
                         size={16} 
-                        color={i < videoUrls.length && videoUrls[i] ? "#4caf50" : "#ff9800"} 
+                        color={i &lt; videoUrls.length &amp;&amp; videoUrls[i] ? "#4caf50" : "#ff9800"} 
                       />
                     )}
-                  </View>
-                  <View style={{ flexDirection: 'row', marginTop: 4 }}>
-                    <TouchableOpacity
+                  &lt;/View>
+                  &lt;View style={{ flexDirection: 'row', marginTop: 4 }}>
+                    &lt;TouchableOpacity
                       onPress={() => moveVideo(i, i - 1)}
                       disabled={i === 0}
                       style={{ marginHorizontal: 2, opacity: i === 0 ? 0.3 : 1 }}
                     >
-                      <Ionicons name="arrow-back-circle" size={22} color="#888" />
-                    </TouchableOpacity>
-                    <TouchableOpacity
+                      &lt;Ionicons name="arrow-back-circle" size={22} color="#888" />
+                    &lt;/TouchableOpacity>
+                    &lt;TouchableOpacity
                       onPress={() => moveVideo(i, i + 1)}
                       disabled={i === videoThumbnails.length - 1}
                       style={{ marginHorizontal: 2, opacity: i === videoThumbnails.length - 1 ? 0.3 : 1 }}
                     >
-                      <Ionicons name="arrow-forward-circle" size={22} color="#888" />
-                    </TouchableOpacity>
-                    <TouchableOpacity
+                      &lt;Ionicons name="arrow-forward-circle" size={22} color="#888" />
+                    &lt;/TouchableOpacity>
+                    &lt;TouchableOpacity
                       onPress={() => deleteVideo(i)}
                       style={{ marginHorizontal: 2 }}
                     >
-                      <Ionicons name="trash-bin" size={22} color="#888" />
-                    </TouchableOpacity>
-                  </View>
-                </View>
+                      &lt;Ionicons name="trash-bin" size={22} color="#888" />
+                    &lt;/TouchableOpacity>
+                  &lt;/View>
+                &lt;/View>
               ))}
-            </View>
+            &lt;/View>
           )}
 
-          {videoError !== '' && (
-            <Text style={{ color: 'red', fontSize: 13, marginTop: 4 }}>{videoError}</Text>
+          {videoError !== '' &amp;&amp; (
+            &lt;Text style={{ color: 'red', fontSize: 13, marginTop: 4 }}>{videoError}&lt;/Text>
           )}
 
 
-          <Text style={[styles.sectionTitle, { color: isDark ? '#fff' : '#000' }]}>
+          &lt;Text style={[styles.sectionTitle, { color: isDark ? '#fff' : '#000' }]}>
             Favorite Genres
-          </Text>
-          <View style={styles.genreContainer}>
+          &lt;/Text>
+          &lt;View style={styles.genreContainer}>
             {predefinedGenres.map((genre) => (
-              <TouchableOpacity
+              &lt;TouchableOpacity
                 key={genre}
                 style={[
                   styles.genreChip,
@@ -757,7 +785,7 @@ const uploadFileToS3 = async (fileUri, presignedUrl) => {
                 ]}
                 onPress={() => toggleGenre(genre)}
               >
-                <Text
+                &lt;Text
                   style={{
                     fontSize: 14,
                     color: genres.includes(genre) ? '#fff' : isDark ? '#eee' : '#333',
@@ -765,12 +793,12 @@ const uploadFileToS3 = async (fileUri, presignedUrl) => {
                   }}
                 >
                   {genre}
-                </Text>
-              </TouchableOpacity>
+                &lt;/Text>
+              &lt;/TouchableOpacity>
             ))}
-          </View>
+          &lt;/View>
 
-          <TextInput
+          &lt;TextInput
             style={[
               styles.input,
               {
@@ -783,34 +811,34 @@ const uploadFileToS3 = async (fileUri, presignedUrl) => {
             value={customGenre}
             onChangeText={setCustomGenre}
             onSubmitEditing={() => {
-              if (customGenre.trim() && !genres.includes(customGenre.trim())) {
+              if (customGenre.trim() &amp;&amp; !genres.includes(customGenre.trim())) {
                 setGenres([...genres, customGenre.trim()]);
                 setCustomGenre('');
               }
             }}
           />
 
-          <Button
+          &lt;Button
             disabled={!isFormComplete() || isUploading}
             onPress={handleContinue}
-            style={[styles.continueButton, (!isFormComplete() || isUploading) && styles.disabledButton]}
+            style={[styles.continueButton, (!isFormComplete() || isUploading) &amp;&amp; styles.disabledButton]}
           >
-            <LinearGradient
+            &lt;LinearGradient
               colors={['#ff6ec4', '#ffc93c', '#1c92d2']}
               start={{ x: 0, y: 1 }}
               end={{ x: 1, y: 0 }}
               style={styles.gradient}
             >
               {isUploading ? (
-                <ActivityIndicator color="#fff" size="small" />
+                &lt;ActivityIndicator color="#fff" size="small" />
               ) : (
-                <Text style={styles.continueText}>FINISH</Text>
+                &lt;Text style={styles.continueText}>FINISH&lt;/Text>
               )}
-            </LinearGradient>
-          </Button>
-        </ScrollView>
-      </View>
-    </KeyboardAvoidingView>
+            &lt;/LinearGradient>
+          &lt;/Button>
+        &lt;/ScrollView>
+      &lt;/View>
+    &lt;/KeyboardAvoidingView>
   );
 };
 
@@ -935,4 +963,42 @@ const styles = StyleSheet.create({
   },
 });
 
-export default ProfileSetupScreen;
+export default ProfileSetupScreen;</code></pre>
+        </article>
+    </section>
+
+
+
+
+</div>
+
+<nav>
+    <h2><a href="index.html">Home</a></h2><h3>Modules</h3><ul><li><a href="ConfirmCodeScreen%250AScreen%2520for%2520confirming%2520a%2520user_s%2520signup%2520by%2520entering%2520a%2520verification%2520code.module_.html">ConfirmCodeScreen
+Screen for confirming a user's signup by entering a verification code.</a></li><li><a href="InstrumentsScreen%250AScreen%2520where%2520users%2520select%2520their%2520musical%2520instruments%2520and%2520skill%2520levels%2520for%2520their%2520profile.module_.html">InstrumentsScreen
+Screen where users select their musical instruments and skill levels for their profile.</a></li><li><a href="LoginScreen%250ADisplays%2520login%2520options%2520including%2520email_phone%2520signup,%2520Google%2520and%2520Facebook%2520login.module_.html">LoginScreen
+Displays login options including email/phone signup, Google and Facebook login.</a></li><li><a href="ProfileInfo%250AProfile%2520information%2520display%2520component%250AShows%2520user%2520details,%2520rating,%2520bio,%2520instruments,%2520location,%2520and%2520social%2520linksmodule_.html">ProfileInfo
+Profile information display component
+Shows user details, rating, bio, instruments, location, and social links</a></li><li><a href="ProfileScreen%250ALIGHTNING-FAST%2520profile%2520screen%2520-%2520Clean,%2520modular,%2520and%2520maintainable%250AUses%2520custom%2520hooks%2520and%2520components%2520for%2520better%2520organizationmodule_.html">ProfileScreen
+LIGHTNING-FAST profile screen - Clean, modular, and maintainable
+Uses custom hooks and components for better organization</a></li><li><a href="ProfileSetupScreen%250AScreen%2520for%2520users%2520to%2520complete%2520their%2520profile%2520by%2520adding%2520location,%2520bio,%2520video,%2520and%2520favorite%2520genres.%250AModified%2520to%2520work%2520on%2520Android%2520devices%2520without%2520FFmpeg%2520dependencymodule_.html">ProfileSetupScreen
+Screen for users to complete their profile by adding location, bio, video, and favorite genres.
+Modified to work on Android devices without FFmpeg dependency</a></li><li><a href="ProfileVideoSwiper%250AVideo%2520swiper%2520component%2520with%2520smart%2520caching%2520and%2520tiny%2520loading%2520spinners%250AHandles%2520all%2520video%2520rendering,%2520loading%2520states,%2520and%2520user%2520interactionsmodule_.html">ProfileVideoSwiper
+Video swiper component with smart caching and tiny loading spinners
+Handles all video rendering, loading states, and user interactions</a></li><li><a href="SignUpScreen%250AHandles%2520user%2520sign%2520up%2520with%2520full%2520name,%2520username,%2520email,%2520password,%2520birthday,%2520and%2520gender.module_.html">SignUpScreen
+Handles user sign up with full name, username, email, password, birthday, and gender.</a></li><li><a href="useProfileData%250ACustom%2520hook%2520for%2520profile%2520data%2520loading%2520with%2520instant%2520cache%2520and%2520background%2520refresh%250AHandles%2520all%2520profile%2520loading%2520logic,%2520caching,%2520and%2520state%2520managementmodule_.html">useProfileData
+Custom hook for profile data loading with instant cache and background refresh
+Handles all profile loading logic, caching, and state management</a></li><li><a href="useVideoCache%250ACustom%2520hook%2520for%2520video%2520caching%2520and%2520loading%2520state%2520management%250AHandles%2520tiny%2520loading%2520spinners%2520and%2520smart%2520video%2520caching%2520for%2520smooth%2520playbackmodule_.html">useVideoCache
+Custom hook for video caching and loading state management
+Handles tiny loading spinners and smart video caching for smooth playback</a></li></ul><h3>Global</h3><ul><li><a href="global.html#cacheFeedVideos">cacheFeedVideos</a></li><li><a href="global.html#cacheUserProfile">cacheUserProfile</a></li><li><a href="global.html#clearAllCaches">clearAllCaches</a></li><li><a href="global.html#clearFeedCache">clearFeedCache</a></li><li><a href="global.html#clearProfileCache">clearProfileCache</a></li><li><a href="global.html#fetchUserProfile">fetchUserProfile</a></li><li><a href="global.html#fetchVideos">fetchVideos</a></li><li><a href="global.html#getCacheStats">getCacheStats</a></li><li><a href="global.html#getCacheTimestamp">getCacheTimestamp</a></li><li><a href="global.html#getCurrentTimestamp">getCurrentTimestamp</a></li><li><a href="global.html#getFeedCache">getFeedCache</a></li><li><a href="global.html#getFeedMetadata">getFeedMetadata</a></li><li><a href="global.html#getPaginationStats">getPaginationStats</a></li><li><a href="global.html#getProfileCache">getProfileCache</a></li><li><a href="global.html#handleContinue">handleContinue</a></li><li><a href="global.html#hasMoreVideos">hasMoreVideos</a></li><li><a href="global.html#isCacheExpired">isCacheExpired</a></li><li><a href="global.html#logCacheSeparation">logCacheSeparation</a></li><li><a href="global.html#manageCacheSize">manageCacheSize</a></li><li><a href="global.html#resetVideoState">resetVideoState</a></li><li><a href="global.html#searchUsers">searchUsers</a></li><li><a href="global.html#setCacheTimestamp">setCacheTimestamp</a></li><li><a href="global.html#userProfileManager">userProfileManager</a></li><li><a href="global.html#validateForm">validateForm</a></li></ul>
+</nav>
+
+<br class="clear">
+
+<footer>
+    Documentation generated by <a href="https://github.com/jsdoc/jsdoc">JSDoc 4.0.4</a> on Sat May 31 2025 15:53:39 GMT+0300 (Israel Daylight Time)
+</footer>
+
+<script> prettyPrint(); </script>
+<script src="scripts/linenumber.js"> </script>
+</body>
+</html>

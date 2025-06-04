@@ -14,7 +14,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { useNavigation, CommonActions } from '@react-navigation/native';
 import Button from '../../components/common/Button';
 import { useAuth } from '../../context/AuthContext';
-import { saveUserEmail } from '../../utils/userUtils'; // Add this import
+import { saveUserEmail } from '../../utils/userUtils';
 
 const LoginWithEmailScreen = () => {
   const [email, setEmail] = useState('');
@@ -61,7 +61,7 @@ const handleContinue = async () => {
     return;
   }
   
-  setIsLoading(true);
+  setIsLoading(true); 
   
   try {
     // User exists, proceed with sign in
@@ -76,17 +76,8 @@ const handleContinue = async () => {
       // Save the email to AsyncStorage for later use
       await saveUserEmail(email);
       console.log('Email saved to AsyncStorage:', email);
-      
-      // Force a refresh of the auth context
-      await refreshUser();
-      
-      // IMPORTANT CHANGE: Instead of trying to navigate directly to "Feed",
-      // simply go back to the root navigator and let it handle the change in auth state
-      
-      // Just navigate back to first screen, the AppNavigator will handle the rest
-      // based on isSignedIn and hasCompletedOnboarding state
-      navigation.navigate('Login');
     } else {
+      console.log('❌ Sign in failed:', result.error);
       setAuthError(result.error || 'Failed to sign in. Please try again.');
     }
   } catch (error) {
@@ -210,14 +201,12 @@ const styles = StyleSheet.create({
     alignSelf: 'center',
   },
   errorText: {
-    color: 'white',
-    backgroundColor: 'rgba(220, 50, 50, 0.7)',
-    paddingVertical: 8,
-    paddingHorizontal: 12,
-    borderRadius: 8,
-    marginBottom: 20,
-    fontSize: 14,
-    textAlign: 'center',
+    color: 'red',
+    marginBottom: 12,
+    marginLeft: 5,
+    fontSize: 13,
+    alignSelf: 'flex-start',
+    marginTop: 5,
   },
   continueButton: {
     backgroundColor: 'white',

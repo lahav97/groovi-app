@@ -4,7 +4,7 @@
  * Handles tiny loading spinners and smart video caching for smooth playback
  */
 
-import { useState, useRef, useEffect } from 'react';
+import { useState, useRef, useEffect, useCallback, useMemo } from 'react';
 import { useIsFocused } from '@react-navigation/native';
 
 /**
@@ -27,48 +27,50 @@ export const useVideoCache = (videos = []) => {
   /**
    * Generate unique video ID for consistent caching
    */
-  const generateVideoId = (videoUrl, index) => {
+  const generateVideoId = useCallback((videoUrl, index) => {
     const urlHash = videoUrl.split('/').pop() || videoUrl.substring(videoUrl.length - 10);
     return `profile-video-${index}-${urlHash}`;
-  };
+  }, []);
 
   /**
    * Set video loading state with tiny spinner
    */
-  const setVideoLoadingState = (videoId, state) => {
-    setVideoStates(prev => ({
-      ...prev,
-      [videoId]: state
-    }));
-  };
+  const setVideoLoadingState = useCallback((videoId, state) => {
+    setVideoStates(prev => {
+      // Prevent unnecessary state updates
+      if (prev[videoId] === state) return prev;
+      return {
+        ...prev,
+        [videoId]: state
+      };
+    });
+  }, []);
 
   /**
    * Check if video is currently loading (for spinner display)
    */
-  const isVideoLoading = (videoId) => {
+  const isVideoLoading = useCallback((videoId) => {
     return videoStates[videoId] === 'loading';
-  };
+  }, [videoStates]);
 
   /**
    * Check if video is loaded and cached
    */
-  const isVideoLoaded = (videoId) => {
+  const isVideoLoaded = useCallback((videoId) => {
     return videoStates[videoId] === 'loaded';
-  };
+  }, [videoStates]);
 
   /**
    * Handle video load start - show tiny spinner
    */
-  const handleVideoLoadStart = (videoId) => {
-    console.log(`🎬 useVideoCache: Loading video: ${videoId}`);
+  const handleVideoLoadStart = useCallback((videoId) => {
     setVideoLoadingState(videoId, 'loading');
-  };
+  }, [setVideoLoadingState]);
 
   /**
    * Handle video ready for display - hide spinner, cache ref
    */
-  const handleVideoReadyForDisplay = (videoId, videoRef) => {
-    console.log(`✅ useVideoCache: Video ready: ${videoId}`);
+  const handleVideoReadyForDisplay = useCallback((videoId, videoRef) => {
     setVideoLoadingState(videoId, 'loaded');
     
     // CACHE the video ref to prevent re-loading when swiping back
@@ -79,27 +81,27 @@ export const useVideoCache = (videos = []) => {
         loaded: true
       });
     }
-  };
+  }, [setVideoLoadingState]);
 
   /**
    * Handle video load error - show error state
    */
-  const handleVideoLoadError = (videoId, error) => {
+  const handleVideoLoadError = useCallback((videoId, error) => {
     console.error(`❌ useVideoCache: Video load error: ${videoId}`, error);
     setVideoLoadingState(videoId, 'error');
-  };
+  }, [setVideoLoadingState]);
 
   /**
    * Check if video is cached (already loaded before)
    */
-  const isVideoCached = (videoId) => {
+  const isVideoCached = useCallback((videoId) => {
     return videoCache.current.has(videoId);
-  };
+  }, []);
 
   /**
    * Convert profile videos (array of URL strings) to video objects with caching info
    */
-  const getVideoObjects = () => {
+  const videoObjects = useMemo(() => {
     if (!videos || !Array.isArray(videos)) {
       return [];
     }
@@ -115,19 +117,19 @@ export const useVideoCache = (videos = []) => {
         isLoaded: isVideoLoaded(videoId)
       };
     });
-  };
+  }, [videos, generateVideoId, isVideoCached, isVideoLoading, isVideoLoaded]);
 
   /**
    * Toggle video pause/play
    */
-  const togglePause = (id) => {
+  const togglePause = useCallback((id) => {
     setPausedStatus(prev => ({ ...prev, [id]: !prev[id] }));
-  };
+  }, []);
 
   /**
    * Handle video swiper index change with smart caching
    */
-  const onIndexChanged = (index, videoObjects) => {
+  const onIndexChanged = useCallback((index) => {
     setCurrentIndex(index);
     
     // Pause all videos except current one
@@ -147,56 +149,61 @@ export const useVideoCache = (videos = []) => {
     if (nextIndex < videoObjects.length) {
       const nextVideo = videoObjects[nextIndex];
       if (!nextVideo.isCached && !nextVideo.isLoading) {
-        console.log(`🔄 useVideoCache: Preloading next video: ${nextVideo.id}`);
-        // The video will start loading when rendered by Swiper
       }
     }
-  };
+  }, [videoObjects, pausedStatus]);
 
   /**
    * Set video ref in cache
    */
-  const setVideoRef = (videoId, ref) => {
+  const setVideoRef = useCallback((videoId, ref) => {
     videoRefs.current[videoId] = ref;
     
     // CACHE VIDEO REF when it's ready
     if (ref && !isVideoCached(videoId)) {
       handleVideoReadyForDisplay(videoId, ref);
     }
-  };
+  }, [isVideoCached, handleVideoReadyForDisplay]);
 
   /**
    * Get video ref from cache
    */
-  const getVideoRef = (videoId) => {
+  const getVideoRef = useCallback((videoId) => {
     return videoRefs.current[videoId];
-  };
+  }, []);
 
   /**
    * Check if video should play
    */
-  const shouldVideoPlay = (videoId, index) => {
-    const videoObjects = getVideoObjects();
+  const shouldVideoPlay = useCallback((videoId, index) => {
     const video = videoObjects.find(v => v.id === videoId);
     
     return (
       !pausedStatus[videoId] && 
       isFocused && 
       currentIndex === index &&
-      !video?.isLoading // Don't play while loading
+      !video?.isLoading
     );
-  };
+  }, [videoObjects, pausedStatus, isFocused, currentIndex]);
 
   /**
-   * Clear video cache (for logout)
+   * Clear video cache
    */
-  const clearVideoCache = () => {
+  const clearVideoCache = useCallback(() => {
+    // Pause all videos first
+    Object.values(videoRefs.current).forEach(ref => {
+      if (ref?.pauseAsync) {
+        ref.pauseAsync();
+      }
+    });
+    
+    // Clear all caches and states
     videoCache.current.clear();
     setVideoStates({});
     setPausedStatus({});
     setCurrentIndex(0);
     videoRefs.current = {};
-  };
+  }, []);
 
   // Pause videos when screen loses focus
   useEffect(() => {
@@ -210,8 +217,8 @@ export const useVideoCache = (videos = []) => {
   }, [isFocused]);
 
   return {
-    // Video objects with cache info
-    videoObjects: getVideoObjects(),
+    // Video objects with cache info (MEMOIZED)
+    videoObjects,
     
     // State
     videoStates,

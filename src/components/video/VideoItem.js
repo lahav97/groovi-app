@@ -18,7 +18,7 @@ import * as FileSystem from 'expo-file-system';
 
 const { width, height: SCREEN_HEIGHT } = Dimensions.get('window');
 
-const VideoItem = ({ item, isVisible, height }) => {
+const VideoItem = ({ item, isVisible, height, shouldCache = false }) => {
   const videoRef = useRef(null);
   const isFocused = useIsFocused();
   const [paused, setPaused] = useState(false);
@@ -27,21 +27,21 @@ const VideoItem = ({ item, isVisible, height }) => {
   const [hasError, setHasError] = useState(false);
   const [localVideoUri, setLocalVideoUri] = useState(null);
   const [isPlaying, setIsPlaying] = useState(false);
-  const currentPositionRef = useRef(0); // Use ref instead of state for position tracking
-  const initialLoadRef = useRef(true);
   const retryCountRef = useRef(0);
   const colorScheme = useColorScheme();
   const COLOR = colorScheme === 'dark' ? COLORS.dark : COLORS.light;
-  const positionUpdateIntervalRef = useRef(null);
+  const cacheAttemptedRef = useRef(false);
   
-  // Function to download and cache the video locally
+  // Smart video caching - only for priority videos
   const cacheVideo = async (videoUrl) => {
+    if (!shouldCache || cacheAttemptedRef.current) return null;
+    cacheAttemptedRef.current = true;
+    
     try {
-      // Create a unique filename based on the video URL
-      const filename = videoUrl.split('/').pop();
+      const filename = videoUrl.split('/').pop() || `video_${Date.now()}.mp4`;
       const localUri = `${FileSystem.cacheDirectory}videos/${filename}`;
       
-      // Check if directory exists, if not create it
+      // Check if directory exists, create if not
       const dirInfo = await FileSystem.getInfoAsync(`${FileSystem.cacheDirectory}videos`);
       if (!dirInfo.exists) {
         await FileSystem.makeDirectoryAsync(`${FileSystem.cacheDirectory}videos`, { intermediates: true });
@@ -51,56 +51,45 @@ const VideoItem = ({ item, isVisible, height }) => {
       const fileInfo = await FileSystem.getInfoAsync(localUri);
       if (fileInfo.exists) {
         setLocalVideoUri(localUri);
+        console.log('⚡ VideoItem: Using cached video');
         return localUri;
       }
       
-      // Download the file
-      const downloadResult = await FileSystem.downloadAsync(videoUrl, localUri);
-      
-      if (downloadResult.status === 200) {
-        console.log('Video successfully cached');
-        setLocalVideoUri(localUri);
-        return localUri;
-      } else {
-        console.error('Error caching video:', downloadResult);
-        setLocalVideoUri(null);
-        return null;
+      // Download only for priority videos (first 3)
+      if (shouldCache) {
+        console.log('📥 VideoItem: Caching priority video...');
+        const downloadResult = await FileSystem.downloadAsync(videoUrl, localUri);
+        
+        if (downloadResult.status === 200) {
+          setLocalVideoUri(localUri);
+          console.log('✅ VideoItem: Video cached successfully');
+          return localUri;
+        }
       }
+      
+      return null;
     } catch (error) {
-      console.error('Error in cacheVideo:', error);
-      setLocalVideoUri(null);
+      console.error('❌ VideoItem: Cache error:', error);
       return null;
     }
   };
 
-  // Load and cache the video when the component mounts or video URL changes
+  // Load and cache only when needed
   useEffect(() => {
-    if (item.videoUrl) {
+    if (item.videoUrl && shouldCache) {
       cacheVideo(item.videoUrl);
     }
-    
-    // Reset position when item changes
-    currentPositionRef.current = 0;
-  }, [item.videoUrl]);
+  }, [item.videoUrl, shouldCache]);
 
-  // Cleanup intervals on unmount
+  // Simplified show play icon logic
   useEffect(() => {
-    return () => {
-      if (positionUpdateIntervalRef.current) {
-        clearInterval(positionUpdateIntervalRef.current);
-      }
-    };
-  }, []);
-
-  useEffect(() => {
-    let timeout;
     if (showPlayIcon) {
-      timeout = setTimeout(() => setShowPlayIcon(false), 1000);
+      const timeout = setTimeout(() => setShowPlayIcon(false), 1000);
+      return () => clearTimeout(timeout);
     }
-    return () => clearTimeout(timeout);
   }, [showPlayIcon]);
 
-  // Handle video visibility state changes without position manipulation
+  // Simplified visibility handling
   useEffect(() => {
     if ((!isVisible || !isFocused) && videoRef.current) {
       videoRef.current.pauseAsync();
@@ -109,18 +98,15 @@ const VideoItem = ({ item, isVisible, height }) => {
     }
   }, [isVisible, isFocused, paused]);
 
-  // Set initial loading to false after 5 seconds at most
+  // Simplified loading timeout
   useEffect(() => {
-    const timer = setTimeout(() => {
-      if (isLoading && isPlaying) {
-        setIsLoading(false);
-      }
-    }, 5000);
-    
-    return () => clearTimeout(timer);
+    if (isLoading && isPlaying) {
+      const timer = setTimeout(() => setIsLoading(false), 3000);
+      return () => clearTimeout(timer);
+    }
   }, [isLoading, isPlaying]);
 
-  // Clear error state if successfully playing
+  // Clear error when playing
   useEffect(() => {
     if (isPlaying && hasError) {
       setHasError(false);
@@ -140,39 +126,18 @@ const VideoItem = ({ item, isVisible, height }) => {
         setShowPlayIcon(true);
       }
     } catch (error) {
-      console.error('Error toggling playback:', error);
+      console.error('❌ VideoItem: Playback toggle error:', error);
     }
   };
 
   const handleVideoLoad = () => {
-    setTimeout(() => {
-      setIsLoading(false);
-    }, 300);
+    setTimeout(() => setIsLoading(false), 200);
     setHasError(false);
-    initialLoadRef.current = false;
-    retryCountRef.current = 0; // Reset retry count on successful load
-    
-    // Start position tracking interval when video loads
-    if (positionUpdateIntervalRef.current) {
-      clearInterval(positionUpdateIntervalRef.current);
-    }
-    
-    positionUpdateIntervalRef.current = setInterval(async () => {
-      if (videoRef.current && !paused && isVisible && isFocused) {
-        try {
-          const status = await videoRef.current.getStatusAsync();
-          if (status.isLoaded && status.isPlaying) {
-            currentPositionRef.current = status.positionMillis;
-          }
-        } catch (e) {
-          // Silently ignore errors during position tracking
-        }
-      }
-    }, 1000); // Update position only once per second for better performance
+    retryCountRef.current = 0;
   };
 
   const handleVideoError = (error) => {
-    console.error('Video error:', error);
+    console.error('❌ VideoItem: Video error:', error);
     setHasError(true);
     setIsLoading(false);
     setIsPlaying(false);
@@ -180,115 +145,66 @@ const VideoItem = ({ item, isVisible, height }) => {
   };
 
   const handlePlaybackStatusUpdate = (status) => {
-    // Only show loading indicator on initial load or if truly stalled
     if (status.isLoaded) {
-      // Update playing state
       setIsPlaying(status.isPlaying && !status.isPaused);
       
-      if (status.isPlaying && !initialLoadRef.current) {
-        // Once it starts playing, hide loading indicator quickly
+      if (status.isPlaying) {
         setIsLoading(false);
-        setHasError(false); // Clear any error once playback starts
+        setHasError(false);
       }
       
-      // Auto-repeat if video ends (as a backup to isLooping prop)
+      // Auto-repeat when video ends
       if (status.didJustFinish && !status.isLooping) {
         videoRef.current?.replayAsync();
-        currentPositionRef.current = 0; // Reset position when video loops
       }
     }
   };
 
   const retryLoadVideo = async () => {
-    setIsLoading(true);
-    
-    // Increment retry counter
     retryCountRef.current += 1;
-    const maxRetries = 5;
+    const maxRetries = 3; // Reduced retry attempts
     
-    // If we've tried too many times, show error state but don't retry again automatically
     if (retryCountRef.current > maxRetries) {
-      console.log(`Exceeded maximum retries (${maxRetries})`);
+      console.log('❌ VideoItem: Max retries exceeded');
       setHasError(true);
       setIsLoading(false);
       return;
     }
     
+    setIsLoading(true);
+    
     try {
-      // Try to reload from cache first
-      if (item.videoUrl) {
-        console.log(`Retry attempt ${retryCountRef.current} for video ${item.id}`);
+      console.log(`🔄 VideoItem: Retry attempt ${retryCountRef.current}`);
+      
+      if (videoRef.current) {
+        await videoRef.current.unloadAsync();
         
-        // Try local URI first if available
-        if (localVideoUri) {
-          try {
-            if (videoRef.current) {
-              await videoRef.current.unloadAsync();
-              await videoRef.current.loadAsync(
-                { uri: localVideoUri },
-                { positionMillis: currentPositionRef.current }, // Use position in load options
-                false
-              );
-              await videoRef.current.playAsync();
-            }
-            return;
-          } catch (cacheError) {
-            console.error('Error loading from cache, trying original URL:', cacheError);
-          }
-        }
-        
-        // If no local URI or it failed, try downloading again
-        const cachedUri = await cacheVideo(item.videoUrl);
-        if (cachedUri) {
-          // If we have the video locally, use it
-          if (videoRef.current) {
-            await videoRef.current.unloadAsync();
-            await videoRef.current.loadAsync(
-              { uri: cachedUri },
-              { positionMillis: currentPositionRef.current }, // Use position in load options
-              false
-            );
-            await videoRef.current.playAsync();
-          }
-        } else {
-          // Fall back to original URL
-          if (videoRef.current) {
-            await videoRef.current.unloadAsync();
-            await videoRef.current.loadAsync(
-              { uri: item.videoUrl },
-              { positionMillis: currentPositionRef.current }, // Use position in load options
-              false
-            );
-            await videoRef.current.playAsync();
-          }
-        }
+        // Try cached version first, then original URL
+        const videoSource = localVideoUri || item.videoUrl;
+        await videoRef.current.loadAsync({ uri: videoSource }, {}, false);
+        await videoRef.current.playAsync();
       }
     } catch (e) {
-      console.error('Error retrying video load:', e);
+      console.error('❌ VideoItem: Retry failed:', e);
       setHasError(true);
       setIsLoading(false);
       
-      // If we still have retries left, try again after a short delay
       if (retryCountRef.current < maxRetries) {
-        setTimeout(() => {
-          retryLoadVideo();
-        }, 1000); // 1 second delay between retries
+        setTimeout(() => retryLoadVideo(), 1000);
       }
     }
   };
 
-  // Hide the error message after a few seconds
+  // Auto-clear error after delay
   useEffect(() => {
-    let errorTimeout;
     if (hasError) {
-      errorTimeout = setTimeout(() => {
-        // Only clear the error visually if we're not still attempting to retry
-        if (retryCountRef.current >= 5) {
+      const errorTimeout = setTimeout(() => {
+        if (retryCountRef.current >= 3) {
           setHasError(false);
         }
-      }, 3000);
+      }, 2000);
+      return () => clearTimeout(errorTimeout);
     }
-    return () => clearTimeout(errorTimeout);
   }, [hasError]);
 
   return (
@@ -305,16 +221,15 @@ const VideoItem = ({ item, isVisible, height }) => {
           onLoad={handleVideoLoad}
           onError={handleVideoError}
           onPlaybackStatusUpdate={handlePlaybackStatusUpdate}
-          progressUpdateIntervalMillis={1000} // Lower frequency updates for better performance
-          // Don't set positionMillis prop here - it causes glitches when constantly updated
+          progressUpdateIntervalMillis={2000}
           rate={1.0}
           volume={1.0}
-          // Increased buffer size for smoother playback
+          // buffer config for smoother playback
           bufferConfig={{
-            minBufferMs: 15000,
-            maxBufferMs: 50000,
-            bufferForPlaybackMs: 2500,
-            bufferForPlaybackAfterRebufferMs: 5000
+            minBufferMs: 10000,
+            maxBufferMs: 30000,
+            bufferForPlaybackMs: 2000,
+            bufferForPlaybackAfterRebufferMs: 3000
           }}
         />
 
@@ -329,17 +244,17 @@ const VideoItem = ({ item, isVisible, height }) => {
           </View>
         )}
 
-        {/* Only show loading indicator during initial load or genuine errors */}
+        {/* Show loading only when truly needed */}
         {isLoading && !isPlaying && !showPlayIcon && (
           <View style={styles.centerOverlay}>
             <ActivityIndicator size="large" color="white" />
           </View>
         )}
 
-        {/* Auto-retry button that triggers automatically, but can be pressed manually too */}
-        {hasError && retryCountRef.current >= 5 && (
+        {/* Manual retry button for failed videos */}
+        {hasError && retryCountRef.current >= 3 && (
           <TouchableOpacity style={styles.retryButton} onPress={() => {
-            retryCountRef.current = 0; // Reset retry counter on manual retry
+            retryCountRef.current = 0;
             retryLoadVideo();
           }}>
             <Text style={styles.retryText}>Retry</Text>
@@ -353,7 +268,6 @@ const VideoItem = ({ item, isVisible, height }) => {
 };
 
 const styles = StyleSheet.create({
-  // Your existing styles
   videoContainer: {
     width: width,
     justifyContent: 'center',
@@ -375,20 +289,6 @@ const styles = StyleSheet.create({
     bottom: 40,
     left: 18,
   },
-  interactionButtons: {
-    position: 'absolute',
-    right: 20,
-    bottom: 180,
-    alignItems: 'center',
-  },
-  iconWrapper: {
-    alignItems: 'center',
-    marginBottom: 15,
-  },
-  iconText: {
-    fontSize: 12,
-    marginTop: 5,
-  },
   playIcon: {
     alignSelf: 'center',
   },
@@ -398,6 +298,8 @@ const styles = StyleSheet.create({
     paddingHorizontal: 20,
     paddingVertical: 10,
     borderRadius: 20,
+    top: '50%',
+    alignSelf: 'center',
   },
   retryText: {
     color: 'white',
