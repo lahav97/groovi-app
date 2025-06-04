@@ -22,7 +22,7 @@ const FEED_CONFIG = {
   CACHE_PRIORITY_COUNT: 3,
 };
 
-const FeedScreen = () => {
+const DiscoverScreen = () => {
   const [feedVideos, setFeedVideos] = useState([]);
   const [currentVisibleIndex, setCurrentVisibleIndex] = useState(0);
   const [currentPage, setCurrentPage] = useState(0);
@@ -51,7 +51,7 @@ const FeedScreen = () => {
   const loadInitialFeedVideos = useCallback(async () => {
     if (isLoadingRef.current) return;
     
-    console.log('🚀 FeedScreen: Starting optimized initial load...');
+    console.log('🚀 DiscoverScreen: Starting optimized initial load...');
     setIsInitialLoading(true);
     setError(null);
     isLoadingRef.current = true;
@@ -106,12 +106,12 @@ const FeedScreen = () => {
         await cacheFeedVideos(initialFeedVideos);
         setTimeout(() => startSmartCaching(initialFeedVideos), 500);
       } else {
-        console.log('❌ FeedScreen: No videos received');
+        console.log('❌ DiscoverScreen: No videos received');
         setError('No videos available');
         setHasMoreVideos(false);
       }
     } catch (err) {
-      console.error('❌ FeedScreen: Failed to load videos:', err);
+      console.error('❌ DiscoverScreen: Failed to load videos:', err);
       if (mountedRef.current) {
         setError('Failed to load videos. Please try again.');
       }
@@ -213,12 +213,12 @@ const FeedScreen = () => {
         if (loadAttempts.current < 3) {
           // Retry logic
         } else {
-          console.log('🏁 FeedScreen: No more videos available');
+          console.log('🏁 DiscoverScreen: No more videos available');
           setHasMoreVideos(false);
         }
       }
     } catch (err) {
-      console.error('❌ FeedScreen: Failed to load more videos:', err);
+      console.error('❌ DiscoverScreen: Failed to load more videos:', err);
       
       if (loadAttempts.current < 3) {
         // Retry logic
@@ -343,7 +343,7 @@ const FeedScreen = () => {
   }, []);
 
   useEffect(() => {
-    console.log('🚀 FeedScreen: Component mounted');
+    console.log('🚀 DiscoverScreen: Component mounted');
     loadInitialFeedVideos();
   }, [loadInitialFeedVideos]);
 
@@ -375,7 +375,7 @@ const FeedScreen = () => {
   // ============================================================================
 
   const handleRetry = useCallback(() => {
-    console.log('🔄 FeedScreen: Retrying...');
+    console.log('🔄 DiscoverScreen: Retrying...');
     setError(null);
     setHasMoreVideos(true);
     setCurrentPage(0);
@@ -569,4 +569,4 @@ const styles = StyleSheet.create({
   },
 });
 
-export default FeedScreen;
+export default DiscoverScreen;

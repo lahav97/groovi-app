@@ -4,15 +4,16 @@ import { NavigationContainer } from '@react-navigation/native';
 import { useAuth } from '../context/AuthContext';
 import { ActivityIndicator, View, LogBox } from 'react-native';
 import LoginScreen from '../screens/authentication/LoginScreen';
-import FeedScreen from '../screens/main/FeedScreen';
+import DiscoverScreen from '../screens/feed/DiscoverScreen';
 import LoginWithEmailScreen from '../screens/authentication/LoginWithEmailScreen';
-import ProfileScreen from '../screens/main/ProfileScreen';
+import ProfileScreen from '../screens/profile/ProfileScreen';
 import SignupNavigator from './SignupNavigator';
-import FilterScreen from '../screens/main/FilterScreen';
-import EditProfileScreen from '../screens/main/EditProfileScreen';
+import FilterScreen from '../screens/feed/FilterScreen';
+import EditProfileScreen from '../screens/profile/EditProfileScreen';
 import { SignupFlowProvider } from '../context/SignupFlowContext';
 import InstrumentsScreen from '../screens/onboarding/InstrumentsScreen';
 import ProfileSetupScreen from '../screens/onboarding/ProfileSetupScreen';
+import VideoUploadScreen from '../screens/feed/VideoUploadScreen';
 
 // Ignore specific harmless warnings
 LogBox.ignoreLogs([
@@ -45,10 +46,11 @@ const OnboardingStack = () => (
 // Main app screens
 const MainStack = () => (
   <Stack.Navigator screenOptions={{ headerShown: false }}>
-    <Stack.Screen name="Feed" component={FeedScreen} />
+    <Stack.Screen name="Feed" component={DiscoverScreen} />
     <Stack.Screen name="Profile" component={ProfileScreen} />
     <Stack.Screen name="Filter" component={FilterScreen} /> 
     <Stack.Screen name="EditProfile" component={EditProfileScreen} />
+    <Stack.Screen name="VideoUpload" component={VideoUploadScreen} />
   </Stack.Navigator>
 );
 

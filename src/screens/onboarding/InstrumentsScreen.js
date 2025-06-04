@@ -227,7 +227,7 @@ const InstrumentsScreen = () => {
         <TouchableOpacity onPress={() => navigation.goBack()} style={styles.backIcon}>
           <Ionicons name="arrow-back" size={28} color={textColor} />
         </TouchableOpacity>
-        <Text style={[styles.title, { color: textColor }]}>Instruments</Text>
+        <Text style={[styles.title, { color: textColor }]}>Pick Your Instruments</Text>
         <View style={{ width: 28 }} />
       </View>
 

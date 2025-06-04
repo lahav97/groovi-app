@@ -17,11 +17,11 @@ export const COLORS = {
     text: '#ffffff',
     buttonBackground: '#ffffff',
     buttonText: '#000000',
-    primaryGradient: ['#ff6ec4', '#ffc93c', '#1c92d2'],
+    primaryGradient: ['#d981c3', '#6233b4'],
   },
   accent: 'red',
   icon: '#888',
-  primaryGradient: ['#ff6ec4', '#ffc93c', '#1c92d2'],
+  primaryGradient: ['#d981c3', '#6233b4'],
 };
 
 export const SIZES = {

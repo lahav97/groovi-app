@@ -15,6 +15,7 @@ import { useNavigation, CommonActions } from '@react-navigation/native';
 import Button from '../../components/common/Button';
 import { useAuth } from '../../context/AuthContext';
 import { saveUserEmail } from '../../utils/userUtils';
+import { COLORS } from '../../styles/theme';
 
 const LoginWithEmailScreen = () => {
   const [email, setEmail] = useState('');
@@ -97,9 +98,9 @@ const handleContinue = async () => {
 
   return (
     <LinearGradient
-      colors={['#ff6ec4', '#ffc93c', '#1c92d2']}
-      start={{ x: 0, y: 1 }}
-      end={{ x: 0, y: 0 }}
+      colors={COLORS.static.primaryGradient} 
+      start={{ x: 1, y: 0 }}
+      end={{ x: 0, y: 1 }}
       style={styles.container}
     >
       <TouchableOpacity 

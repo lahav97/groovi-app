@@ -10,7 +10,6 @@
     "test": "jest",
     "docs": "jsdoc src/ -d docs/ -r",
     "docs:open": "jsdoc src/ -d docs/ -r && open docs/index.html"
-
   },
   "dependencies": {
     "@aws-amplify/api-graphql": "^4.7.14",
@@ -24,7 +23,7 @@
     "@react-native-async-storage/async-storage": "1.23.1",
     "@react-native-community/datetimepicker": "^8.3.0",
     "@react-native-community/netinfo": "11.4.1",
-    "@react-native-community/slider": "4.5.5",
+    "@react-native-community/slider": "^4.5.5",
     "@react-native-picker/picker": "^2.11.0",
     "@react-navigation/native": "^7.1.4",
     "@react-navigation/native-stack": "^7.3.8",

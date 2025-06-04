@@ -21,6 +21,7 @@ import { useSignupBuilder } from '../../context/SignupFlowContext';
 import { Auth } from 'aws-amplify';
 import Button from '../../components/common/Button';
 import axios from 'axios';
+import { COLORS } from '../../styles/theme';
 
 /**
  * @function SignUpScreen
@@ -311,9 +312,9 @@ const SignUpScreen = () => {
 
   return (
     <LinearGradient
-      colors={['#ff6ec4', '#ffc93c', '#1c92d2']}
-      start={{ x: 0, y: 1 }}
-      end={{ x: 0, y: 0 }}
+      colors={COLORS.static.primaryGradient}
+      start={{ x: 1, y: 0 }}
+      end={{ x: 0, y: 1 }}
       style={styles.container}
     >
       <TouchableOpacity style={styles.backButton} onPress={() => navigation.goBack()}>
