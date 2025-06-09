@@ -1,7 +1,7 @@
 /**
  * @module ProfileSetupScreen
  * Screen for users to complete their profile by adding location, bio, video, and favorite genres.
- * Enhanced with detailed address input functionality.
+ * Enhanced with upload service integration.
  */
 import React, { useState, useEffect } from 'react';
 import {
@@ -19,7 +19,6 @@ import {
   Platform,
 } from 'react-native';
 import * as ImagePicker from 'expo-image-picker';
-import * as FileSystem from 'expo-file-system';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
 import { useNavigation } from '@react-navigation/native';
@@ -29,8 +28,14 @@ import Button from '../../components/common/Button';
 import AddressInput from '../../components/common/AddressInput';
 import { useAuth } from '../../context/AuthContext';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import { getUploadService } from '../../services/uploadFileService';
+import { 
+  processBatchVideos, 
+  createVideoManager, 
+  deleteVideoFromS3 
+} from '../../services/videoService';
+import { COLORS } from '../../styles/theme';
 
-const FILE_UPLOAD_API_URL = 'https://cy6ikxj5lk.execute-api.us-east-1.amazonaws.com/groovi/file_upload';
 const BUILD_PROFILE_API_URL = 'https://9u6y4sfrn2.execute-api.us-east-1.amazonaws.com/groovi/build_profile';
 const predefinedGenres = ['Pop', 'Rock', 'Metal', 'Jazz', 'Hip Hop', 'Classical', 'Electronic', 'R&B'];
 
@@ -44,6 +49,7 @@ const ProfileSetupScreen = () => {
   const isDark = useColorScheme() === 'dark';
   const builder = useSignupBuilder();
   const { signIn, user, completeOnboarding } = useAuth();
+  const uploadService = getUploadService(user);
   
   // Address state - now using detailed address object
   const [address, setAddress] = useState({
@@ -67,9 +73,12 @@ const ProfileSetupScreen = () => {
   const [profilePictureUri, setProfilePictureUri] = useState(null);
   const [videoThumbnails, setVideoThumbnails] = useState([]);
   const [isUploading, setIsUploading] = useState(false);
-  const [videoCounter, setVideoCounter] = useState(0);
   const [uploadStatuses, setUploadStatuses] = useState([]);
   const [videoKeys, setVideoKeys] = useState(new Set());
+  const [uploadProgress, setUploadProgress] = useState({});
+
+  // Create video manager instance
+  const videoManager = createVideoManager(videos, videoThumbnails, videoUrls, uploadStatuses);
 
   useEffect(() => {
     const loadUserFromStorage = async () => {
@@ -109,7 +118,7 @@ const ProfileSetupScreen = () => {
 
   /**
    * @function pickProfilePicture
-   * @description Opens the device library to pick and crop a profile picture
+   * @description Opens the device library to pick and crop a profile picture using upload service
    */
   const pickProfilePicture = async () => {
     try {
@@ -127,7 +136,24 @@ const ProfileSetupScreen = () => {
       });
       
       if (!result.canceled && result.assets && result.assets[0]) {
-        setProfilePictureUri(result.assets[0].uri);
+        const selectedAsset = result.assets[0];
+        
+        // Upload using the service
+        const uploadResult = await uploadService.uploadImage(
+          selectedAsset,
+          'profile',
+          (progress) => {
+            console.log('Profile picture upload progress:', progress);
+          }
+        );
+
+        if (uploadResult.success) {
+          setProfilePictureUri(uploadResult.imageUrl);
+        } else {
+          Alert.alert('Upload Error', uploadResult.error);
+          // Still show local image for preview
+          setProfilePictureUri(selectedAsset.uri);
+        }
       }
     } catch (error) {
       console.error('Error picking profile picture:', error);
@@ -136,153 +162,166 @@ const ProfileSetupScreen = () => {
   };
 
   /**
-   * @function uploadVideoToLambda
-   * @description Gets a pre-signed URL from Lambda and uploads a video to S3.
-   * @param {Object} video - The video object containing uri and other metadata.
-   * @param {number} index - The index of the video in the videos array.
-   * @param {string} username - The username of the user.
-   * @returns {Promise<string>} - A promise that resolves to the final video URL.
+   * @function pickVideos
+   * @description Opens the device library to pick multiple videos using video service
    */
-  const uploadVideoToLambda = async (video, index, username) => {
-    try {
-      console.log(`Uploading video ${index + 1} for user ${username}`, video);
+  const pickVideos = async () => {
+    const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
+    if (status !== 'granted') {
+      Alert.alert('Permission required', 'Please allow access to media library.');
+      return;
+    }
 
-      const fileExtension = video.fileName ? 
-        video.fileName.split('.').pop() : 
-        (video.uri.split('.').pop() || 'mp4');
-        
-      const customFileName = `${username}_${index + 1}.${fileExtension}`;
-      
-      return new Promise((resolve, reject) => {
-        const xhr = new XMLHttpRequest();
-        
-        xhr.open('PUT', FILE_UPLOAD_API_URL);
-        xhr.setRequestHeader('file-name', customFileName);
-        xhr.setRequestHeader('Content-Type', 'application/json');
-        
-        xhr.onload = () => {
-          if (xhr.status >= 200 && xhr.status < 300) {
-            try {
-              const response = JSON.parse(xhr.responseText);
-              console.log("Lambda response:", response);
-              
-              if (response.uploadUrl && response.fileUrl) {
-                const uploadUrl = response.uploadUrl;
-                const fileUrl = response.fileUrl;
-                
-                console.log(`Got pre-signed URL for video ${index + 1}`);
-                
-                uploadFileToS3(video.uri, uploadUrl)
-                  .then(() => {
-                    console.log(`Video ${index + 1} uploaded successfully to S3!`);
-                    resolve(fileUrl);
-                  })
-                  .catch(error => {
-                    console.error(`Error uploading to S3:`, error);
-                    reject(error);
-                  });
-              } else {
-                console.error('Invalid response from Lambda, missing uploadUrl or fileUrl:', response);
-                const fallbackUrl = `https://groovi-videos.s3.amazonaws.com/${customFileName}`;
-                console.log(`Using fallback URL: ${fallbackUrl}`);
-                resolve(fallbackUrl);
-              }
-            } catch (error) {
-              console.error('Error parsing Lambda response:', error);
-              const fallbackUrl = `https://groovi-videos.s3.amazonaws.com/${customFileName}`;
-              console.log(`Using fallback URL: ${fallbackUrl}`);
-              resolve(fallbackUrl);
-            }
-          } else {
-            console.error(`Failed to get pre-signed URL: ${xhr.status}: ${xhr.responseText}`);
-            reject(new Error(`Failed to get pre-signed URL: ${xhr.status}`));
-          }
-        };
-        
-        xhr.onerror = () => {
-          console.error('Network error occurred getting pre-signed URL');
-          reject(new Error('Network error getting pre-signed URL'));
-        };
-        
-        xhr.send(JSON.stringify({}));
+    try {
+      const result = await ImagePicker.launchImageLibraryAsync({
+        mediaTypes: ImagePicker.MediaTypeOptions.Videos,
+        allowsMultipleSelection: true,
+        quality: 1,
       });
+
+      if (result.canceled || !result.assets || result.assets.length === 0) return;
+
+      console.log(`Processing ${result.assets.length} selected videos...`);
+
+      // Process videos using the video service with profile setup limits
+      const processingOptions = {
+        maxSizeMB: 4,  // Profile setup has stricter limits
+        maxDurationSec: 30
+      };
+
+      const batchResult = await processBatchVideos(
+        result.assets, 
+        videoKeys, 
+        processingOptions,
+        (progress) => {
+          console.log(`Processing video ${progress.current}/${progress.total}`);
+        }
+      );
+
+      if (batchResult.success) {
+        // Update state with processed videos
+        batchResult.processedVideos.forEach((videoData) => {
+          const newArrays = videoManager.addVideo(
+            videoData,
+            videoData.thumbnail,
+            null, // No URL yet
+            { uploading: true, uploaded: false, error: null }
+          );
+          
+          setVideos(newArrays.videos);
+          setVideoThumbnails(newArrays.thumbnails);
+          setVideoUrls(newArrays.urls);
+          setUploadStatuses(newArrays.statuses);
+        });
+
+        // Update video keys
+        setVideoKeys(batchResult.videoKeys);
+
+        // Start uploading each video
+        batchResult.processedVideos.forEach((videoData, index) => {
+          const actualIndex = videos.length + index;
+          uploadSingleVideo(videoData, actualIndex);
+        });
+
+        // Show errors if any
+        if (batchResult.errors.length > 0) {
+          const errorMessages = batchResult.errors.map(e => e.error).join('\n');
+          Alert.alert('Some videos could not be processed', errorMessages);
+        }
+
+        console.log(`✅ Processed ${batchResult.processedVideos.length} videos successfully`);
+        setVideoError('');
+      } else {
+        Alert.alert('Error', batchResult.error || 'Failed to process videos');
+        setVideoError(batchResult.error || 'Failed to process videos');
+      }
+
     } catch (err) {
-      console.error('Video upload process failed:', err);
-      throw err;
+      console.error('Failed to pick videos:', err);
+      setVideoError('Could not access videos.');
     }
   };
 
   /**
-   * @function uploadFileToS3
-   * @description Uploads a file to S3 using a pre-signed URL
-   * @param {string} fileUri - The local URI of the file to upload
-   * @param {string} presignedUrl - The pre-signed S3 URL
-   * @returns {Promise<void>}
-   */
-  const uploadFileToS3 = async (fileUri, presignedUrl) => {
-    return new Promise((resolve, reject) => {
-      const xhr = new XMLHttpRequest();
-      
-      xhr.open('PUT', presignedUrl);
-      
-      xhr.onload = () => {
-        if (xhr.status >= 200 && xhr.status < 300) {
-          resolve();
-        } else {
-          reject(new Error(`S3 upload failed with status ${xhr.status}`));
-        }
-      };
-      
-      xhr.onerror = () => {
-        reject(new Error('Network error during S3 upload'));
-      };
-      
-      fetch(fileUri)
-        .then(res => res.blob())
-        .then(blob => {
-          xhr.setRequestHeader('Content-Type', blob.type || 'video/mp4');
-          xhr.send(blob);
-        })
-        .catch(error => {
-          console.error('Error converting file URI to blob:', error);
-          reject(error);
-        });
-    });
-  };
-
-  /**
    * @function uploadSingleVideo
-   * @description Upload a single video immediately after selection
-   * @param {Object} videoObj - The video object to upload
-   * @returns {Promise<string>} - A promise that resolves to the video URL
+   * @description Upload a single video using the upload service
    */
-  const uploadSingleVideo = async (videoObj, index) => {
+  const uploadSingleVideo = async (videoData, index) => {
     try {
-      const username = user?.username || user?.email || `user_${Date.now()}`;
-      console.log('Using username for video upload:', username);
-      
-      const videoUrl = await uploadVideoToLambda(videoObj, index, username);
-      
-      setVideoUrls((prevUrls) => {
-        const newUrls = [...prevUrls];
-        newUrls[index] = videoUrl;
-        return newUrls;
-      });
-      
-      setVideoCounter((prevCounter) => prevCounter + 1);
-      
-      return videoUrl;
+      console.log(`🚀 Starting upload for video ${index + 1}: ${videoData.fileName}`);
+
+      // Upload using the service with progress tracking
+      const uploadResult = await uploadService.uploadVideo(
+        {
+          uri: videoData.uri,
+          fileName: videoData.fileName,
+          mimeType: videoData.mimeType,
+          duration: videoData.duration,
+          assetId: videoData.id
+        },
+        videoKeys,
+        index,
+        (progress) => {
+          console.log(`Video ${index + 1} upload progress:`, progress);
+          setUploadProgress(prev => ({
+            ...prev,
+            [index]: progress.progress || 0
+          }));
+        },
+        {
+          maxSizeMB: 4,
+          maxDurationSec: 30
+        }
+      );
+
+      if (uploadResult.success) {
+        // Update video with upload results using video manager
+        const newArrays = videoManager.updateVideo(index, {
+          videoData: uploadResult.videoData,
+          url: uploadResult.videoUrl,
+          status: { uploading: false, uploaded: true, error: null }
+        });
+
+        setVideos(newArrays.videos);
+        setVideoUrls(newArrays.urls);
+        setUploadStatuses(newArrays.statuses);
+
+        // Update thumbnail if we got a better one
+        if (uploadResult.videoData.thumbnail !== videoData.thumbnail) {
+          const updatedThumbnails = videoManager.updateVideo(index, {
+            thumbnail: uploadResult.videoData.thumbnail
+          });
+          setVideoThumbnails(updatedThumbnails.thumbnails);
+        }
+
+        console.log(`✅ Video ${index + 1} uploaded successfully: ${uploadResult.videoUrl}`);
+        setVideoError('');
+      } else {
+        // Update status to error using video manager
+        const newArrays = videoManager.updateVideo(index, {
+          status: { uploading: false, uploaded: false, error: uploadResult.error }
+        });
+        setUploadStatuses(newArrays.statuses);
+        
+        setVideoError(`Failed to upload ${videoData.fileName}: ${uploadResult.error}`);
+        console.error(`❌ Video ${index + 1} upload failed:`, uploadResult.error);
+      }
     } catch (error) {
-      console.error(`Error uploading video ${index + 1}:`, error);
-      Alert.alert('Upload Error', 'Failed to upload video. Please try again.');
-      throw error;
+      console.error(`Failed to upload video ${index + 1}:`, error);
+      
+      // Update status to error using video manager
+      const newArrays = videoManager.updateVideo(index, {
+        status: { uploading: false, uploaded: false, error: error.message }
+      });
+      setUploadStatuses(newArrays.statuses);
+      
+      setVideoError(`Failed to upload video: ${error.message}`);
     }
   };
 
   /**
    * @function deleteVideo
-   * @description Deletes a video from the local state
-   * @param {number} index - The index of the video to delete.
+   * @description Deletes a video from S3 and local state using services
    */
   const deleteVideo = async (index) => {
     const videoToDelete = videos[index];
@@ -291,144 +330,93 @@ const ProfileSetupScreen = () => {
       return;
     }
 
-    try {
-      setVideos((prev) => prev.filter((_, i) => i !== index));
-      setVideoThumbnails((prev) => prev.filter((_, i) => i !== index));
-      setVideoUrls((prev) => prev.filter((_, i) => i !== index));
-      
-      console.log(`Video at index ${index} removed`);
-    } catch (error) {
-      console.error(`Error deleting video:`, error);
-      Alert.alert('Error', 'Failed to delete video. Please try again.');
-    }
-  };
+    Alert.alert(
+      'Delete Video',
+      'Are you sure you want to delete this video? This action cannot be undone.',
+      [
+        {
+          text: 'Cancel',
+          style: 'cancel',
+        },
+        {
+          text: 'Delete',
+          style: 'destructive',
+          onPress: async () => {
+            try {
+              // If video has been uploaded, delete from S3 using video service
+              if (uploadStatuses[index]?.uploaded && videoToDelete.fileName) {
+                console.log(`🗑️ Deleting video from S3: ${videoToDelete.fileName}`);
+                
+                const deleteResult = await deleteVideoFromS3(videoToDelete.fileName);
+                
+                if (!deleteResult.success) {
+                  console.warn(`⚠️ S3 deletion failed: ${deleteResult.error}`);
+                  Alert.alert(
+                    'Warning', 
+                    'Video was removed locally but may still exist on server. Please contact support if needed.'
+                  );
+                }
+              }
 
-  const moveVideo = (fromIndex, toIndex) => {
-    if (toIndex < 0 || toIndex >= videos.length) return;
-    
-    setVideos(prev => {
-      const newVideos = [...prev];
-      const [movedVideo] = newVideos.splice(fromIndex, 1);
-      newVideos.splice(toIndex, 0, movedVideo);
-      return newVideos;
-    });
-    
-    setVideoThumbnails(prev => {
-      const newThumbs = [...prev];
-      const [movedThumb] = newThumbs.splice(fromIndex, 1);
-      newThumbs.splice(toIndex, 0, movedThumb);
-      return newThumbs;
-    });
-    
-    setVideoUrls(prev => {
-      const newUrls = [...prev];
-      const [movedUrl] = newUrls.splice(fromIndex, 1);
-      newUrls.splice(toIndex, 0, movedUrl);
-      return newUrls;
-    });
-    
-    setUploadStatuses(prev => {
-      const newStatuses = [...prev];
-      const [movedStatus] = newStatuses.splice(fromIndex, 1);
-      newStatuses.splice(toIndex, 0, movedStatus);
-      return newStatuses;
-    });
+              // Remove from videoKeys set using upload service method
+              const videoKey = uploadService.createVideoKey(
+                videoToDelete.fileName || '',
+                videoToDelete.size,
+                videoToDelete.duration
+              );
+              setVideoKeys(prev => {
+                const newKeys = new Set(prev);
+                newKeys.delete(videoKey);
+                return newKeys;
+              });
+
+              // Remove from arrays using video manager
+              const newArrays = videoManager.removeVideo(index);
+              setVideos(newArrays.videos);
+              setVideoThumbnails(newArrays.thumbnails);
+              setVideoUrls(newArrays.urls);
+              setUploadStatuses(newArrays.statuses);
+              
+              // Clean up progress tracking
+              setUploadProgress(prev => {
+                const newProgress = {};
+                Object.keys(prev).forEach(key => {
+                  const keyIndex = parseInt(key);
+                  if (keyIndex < index) {
+                    newProgress[keyIndex] = prev[key];
+                  } else if (keyIndex > index) {
+                    newProgress[keyIndex - 1] = prev[key];
+                  }
+                });
+                return newProgress;
+              });
+              
+              console.log(`✅ Video at index ${index} removed from local state`);
+              
+            } catch (error) {
+              console.error(`❌ Error deleting video:`, error);
+              Alert.alert('Error', 'Failed to delete video. Please try again.');
+            }
+          },
+        },
+      ]
+    );
   };
 
   /**
-   * @function pickVideo
-   * @description Opens the device library to pick a video, validate it, and upload it immediately
+   * @function moveVideo
+   * @description Move video position using video manager
    */
-  const pickVideo = async () => {
-    const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
-    if (status !== 'granted') {
-      Alert.alert('Permission required', 'Please allow access to media library.');
-      return;
-    }
-  
-    try {
-      const result = await ImagePicker.launchImageLibraryAsync({
-        mediaTypes: ImagePicker.MediaTypeOptions.Videos,
-        allowsMultipleSelection: false,
-        quality: 1,
-      });
-  
-      if (result.canceled || !result.assets || result.assets.length === 0) return;
-  
-      const selectedAsset = result.assets[0];
-  
-      const fileInfo = await FileSystem.getInfoAsync(selectedAsset.uri, { size: true });
-      const sizeBytes = fileInfo?.size || 0;
-      const sizeMB = sizeBytes / (1024 * 1024);
-  
-      let durationSec = selectedAsset?.duration || 0;
-      
-      if (durationSec > 100) {
-        durationSec = durationSec / 1000;
-      }
-  
-      console.log(`Video details - Size: ${sizeMB.toFixed(2)}MB, Duration: ${durationSec.toFixed(1)}s`);
-  
-      if (sizeMB > 20) {
-        Alert.alert(
-          'Video too large',
-          `Video must be under 20MB. Your video is ${sizeMB.toFixed(2)}MB.`
-        );
-        return;
-      }
-  
-      if (durationSec > 45) {
-        Alert.alert(
-          'Video too long',
-          `Video must be under 45 seconds. Your video is ${durationSec.toFixed(1)} seconds.`
-        );
-        return;
-      }
-      
-      const thumbUri = selectedAsset.uri + "#t=0.1";
-  
-      const videoObj = {
-        id: selectedAsset.assetId || Date.now().toString(),
-        uri: selectedAsset.uri,
-        fileName: selectedAsset.fileName || `video_${Date.now()}.mp4`,
-        mimeType: selectedAsset.mimeType || 'video/mp4',
-        duration: durationSec,
-        size: sizeBytes,
-        thumbnail: thumbUri,
-      };
-      
-      const fileName = selectedAsset.fileName || '';
-      const videoKey = generateVideoKey(fileName, sizeBytes, durationSec);
+  const moveVideo = (fromIndex, toIndex) => {
+    if (toIndex < 0 || toIndex >= videos.length) return;
+    
+    const newArrays = videoManager.moveVideo(fromIndex, toIndex);
+    setVideos(newArrays.videos);
+    setVideoThumbnails(newArrays.thumbnails);
+    setVideoUrls(newArrays.urls);
+    setUploadStatuses(newArrays.statuses);
 
-      if (videoKeys.has(videoKey)) {
-        Alert.alert('Duplicate Video', 'You have already added this video.');
-        return;
-      }
-      
-      setVideos(prev => [...prev, videoObj]);
-      setVideoThumbnails(prev => [...prev, thumbUri]);
-      setUploadStatuses(prev => [...prev, { uploading: true, error: null }]);
-      setVideoKeys(prev => new Set(prev).add(videoKey));
-
-      uploadSingleVideo(videoObj, videos.length)
-        .then(() => {
-          setUploadStatuses(prev => {
-            const newStatuses = [...prev];
-            newStatuses[videos.length] = { uploading: false, error: null };
-            return newStatuses;
-          });
-        })
-        .catch(error => {
-          setUploadStatuses(prev => {
-            const newStatuses = [...prev];
-            newStatuses[videos.length] = { uploading: false, error: error.message };
-            return newStatuses;
-          });
-        });
-    } catch (err) {
-      console.error('Failed to pick video:', err);
-      setVideoError('Could not access videos.');
-    }
+    console.log(`🔄 Moved video from position ${fromIndex} to ${toIndex}`);
   };
  
   /**
@@ -449,8 +437,11 @@ const ProfileSetupScreen = () => {
    */
   const isFormComplete = () => {
     const hasLocation = address.city && address.city.trim() !== '';
-    const allVideosUploaded = videos.length > 0 && videos.length === videoUrls.filter(url => !!url).length;
-    return hasLocation && bio.trim() && allVideosUploaded && genres.length > 0 && profilePictureUri;
+    const validVideos = videos.filter(video => video !== null);
+    const validVideoUrls = videoUrls.filter(url => !!url);
+    const allVideosUploaded = validVideos.length > 0 && validVideos.length === validVideoUrls.length;
+    const noUploading = !uploadStatuses.some(status => status && status.uploading);
+    return hasLocation && bio.trim() && allVideosUploaded && genres.length > 0 && profilePictureUri && noUploading;
   };
 
   /**
@@ -459,10 +450,12 @@ const ProfileSetupScreen = () => {
    */
   const handleContinue = async () => {
     if (!isFormComplete()) {
-      if (videos.length > videoUrls.length) {
-        Alert.alert('Not all videos uploaded', 'Please wait for all videos to finish uploading.');
+      if (uploadStatuses.some(status => status && status.uploading)) {
+        Alert.alert('Upload in Progress', 'Please wait for all videos to finish uploading.');
       } else if (!address.city || address.city.trim() === '') {
         Alert.alert('Location Required', 'Please enter your location.');
+      } else if (videos.filter(v => v !== null).length === 0) {
+        Alert.alert('Videos Required', 'Please upload at least one video.');
       }
       return;
     }
@@ -494,9 +487,9 @@ const ProfileSetupScreen = () => {
         genres: completeUser.genres,
         gender: completeUser.gender,
         instruments: completeUser.instruments || {},
-        videoUrls: videoUrls,
-        // Store detailed address data for future use
+        videoUrls: videoUrls.filter(url => !!url),
         addressDetails: address,
+        profile_pic: completeUser.profilePicture || null,
       };
 
       console.log('Username being sent:', requestBody.username);
@@ -529,8 +522,36 @@ const ProfileSetupScreen = () => {
       setIsUploading(false);
     }
   };
-  
-  const generateVideoKey = (fileName, size, duration) => `${fileName}_${size}_${duration}`;
+
+  /**
+   * Get current upload progress for display
+   */
+  const getOverallProgress = () => {
+    const activeUploads = uploadStatuses.filter((status, index) => 
+      status && status.uploading && videos[index] && videos[index] !== null
+    );
+    
+    if (activeUploads.length === 0) return 0;
+    
+    let totalProgress = 0;
+    let validProgressCount = 0;
+    
+    uploadStatuses.forEach((status, index) => {
+      if (status && status.uploading && videos[index] && videos[index] !== null && uploadProgress[index] !== undefined) {
+        totalProgress += uploadProgress[index];
+        validProgressCount++;
+      }
+    });
+    
+    return validProgressCount > 0 ? Math.round(totalProgress / validProgressCount) : 0;
+  };
+
+  // Helper function to safely get video thumbnails that are not null
+  const getValidVideoThumbnails = () => {
+    return videoThumbnails
+      .map((thumb, index) => ({ thumb, index, video: videos[index], status: uploadStatuses[index] }))
+      .filter(item => item.thumb !== null && item.video !== null);
+  };
 
   return (
     <KeyboardAvoidingView 
@@ -550,18 +571,7 @@ const ProfileSetupScreen = () => {
 
         <ScrollView 
           contentContainerStyle={[styles.scroll, { paddingBottom: 100 }]}
-        >
-          {/* Enhanced Address Input */}
-          <AddressInput
-            address={address}
-            onAddressChange={handleAddressChange}
-            autoDetectInitial={true}
-          />
-
-          <Text style={[styles.sectionTitle, { color: isDark ? '#fff' : '#000' }]}>
-            Profile Picture
-          </Text>
-          
+        >          
           <TouchableOpacity 
             onPress={pickProfilePicture} 
             style={[styles.profilePictureContainer, {
@@ -569,22 +579,22 @@ const ProfileSetupScreen = () => {
             }]}
           >
             {profilePictureUri ? (
-              <Image 
-                source={{ uri: profilePictureUri }} 
-                style={styles.profilePicture} 
-                resizeMode="cover"
-              />
+              <>
+                <Image 
+                  source={{ uri: profilePictureUri }} 
+                  style={styles.profilePicture} 
+                  resizeMode="cover"
+                />
+                <View style={styles.cameraIconContainer}>
+                  <Ionicons name="camera" size={20} color="#fff" />
+                </View>
+              </>
             ) : (
               <View style={styles.profilePicturePlaceholder}>
-                <Ionicons name="person-circle-outline" size={60} color={isDark ? '#ccc' : '#555'} />
-                <Text style={{ 
-                  fontSize: 15, 
-                  color: isDark ? '#ccc' : '#333', 
-                  marginTop: 10,
-                  textAlign: 'center'
-                }}>
-                  Upload Profile Picture
-                </Text>
+                <Ionicons name="person-circle-outline" size={80} color={isDark ? '#ccc' : '#555'} />
+                <View style={styles.cameraIconContainer}>
+                  <Ionicons name="camera" size={20} color={isDark ? '#fff' : 'white'} />
+                </View>
               </View>
             )}
           </TouchableOpacity>
@@ -614,17 +624,22 @@ const ProfileSetupScreen = () => {
 
           <TouchableOpacity
             style={[styles.uploadBtn, { backgroundColor: isDark ? '#222' : '#eee' }]}
-            onPress={pickVideo}
+            onPress={pickVideos}
+            disabled={uploadStatuses.some(status => status && status.uploading)}
           >
+            <Ionicons name="cloud-upload-outline" size={24} color={isDark ? '#ccc' : '#555'} />
             <Text style={{ fontSize: 15, color: isDark ? '#ccc' : '#333', marginLeft: 8 }}>
-              Choose videos (max 45s / 20MB)
+              {uploadStatuses.some(status => status && status.uploading) 
+                ? 'Uploading...' 
+                : 'Choose videos (max 30s / 4MB each)'
+              }
             </Text>
           </TouchableOpacity>
 
-          {videoThumbnails.length > 0 && (
+          {getValidVideoThumbnails().length > 0 && (
             <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 12, marginVertical: 10 }}>
-              {videoThumbnails.map((thumb, i) => (
-                <View key={i} style={{ position: 'relative', alignItems: 'center' }}>
+              {getValidVideoThumbnails().map(({ thumb, index, video, status }) => (
+                <View key={index} style={{ position: 'relative', alignItems: 'center' }}>
                   <Image
                     source={{ uri: thumb }}
                     style={{
@@ -642,36 +657,55 @@ const ProfileSetupScreen = () => {
                       backgroundColor: 'rgba(0,0,0,0.7)',
                       borderRadius: 12,
                       padding: 3,
+                      minWidth: 24,
+                      alignItems: 'center',
                     }}
                   >
-                    {uploadStatuses[i]?.uploading ? (
-                      <ActivityIndicator size="small" color="#fff" />
+                    {status?.uploading ? (
+                      <View style={{ alignItems: 'center' }}>
+                        <ActivityIndicator size="small" color="#fff" />
+                        <Text style={{ color: '#fff', fontSize: 8, marginTop: 2 }}>
+                          {uploadProgress[index] || 0}%
+                        </Text>
+                      </View>
+                    ) : status?.uploaded ? (
+                      <Ionicons name="checkmark-circle" size={16} color="#4caf50" />
+                    ) : status?.error ? (
+                      <Ionicons name="close-circle" size={16} color="#f44336" />
                     ) : (
-                      <Ionicons 
-                        name={i < videoUrls.length && videoUrls[i] ? "checkmark-circle" : "time-outline"} 
-                        size={16} 
-                        color={i < videoUrls.length && videoUrls[i] ? "#4caf50" : "#ff9800"} 
-                      />
+                      <Ionicons name="time-outline" size={16} color="#ff9800" />
                     )}
                   </View>
+
+                  <Text style={{ fontSize: 10, color: '#666', textAlign: 'center', marginTop: 2 }}>
+                    {video?.duration?.toFixed(1)}s • {(video?.size / (1024 * 1024))?.toFixed(1)}MB
+                  </Text>
+
+                  {status?.error && (
+                    <Text style={{ fontSize: 8, color: '#f44336', textAlign: 'center', marginTop: 2, width: 70 }}>
+                      {status.error}
+                    </Text>
+                  )}
+
                   <View style={{ flexDirection: 'row', marginTop: 4 }}>
                     <TouchableOpacity
-                      onPress={() => moveVideo(i, i - 1)}
-                      disabled={i === 0}
-                      style={{ marginHorizontal: 2, opacity: i === 0 ? 0.3 : 1 }}
+                      onPress={() => moveVideo(index, index - 1)}
+                      disabled={index === 0 || uploadStatuses.some(status => status && status.uploading)}
+                      style={{ marginHorizontal: 2, opacity: (index === 0 || uploadStatuses.some(status => status && status.uploading)) ? 0.3 : 1 }}
                     >
                       <Ionicons name="arrow-back-circle" size={22} color="#888" />
                     </TouchableOpacity>
                     <TouchableOpacity
-                      onPress={() => moveVideo(i, i + 1)}
-                      disabled={i === videoThumbnails.length - 1}
-                      style={{ marginHorizontal: 2, opacity: i === videoThumbnails.length - 1 ? 0.3 : 1 }}
+                      onPress={() => moveVideo(index, index + 1)}
+                      disabled={index === getValidVideoThumbnails().length - 1 || uploadStatuses.some(status => status && status.uploading)}
+                      style={{ marginHorizontal: 2, opacity: (index === getValidVideoThumbnails().length - 1 || uploadStatuses.some(status => status && status.uploading)) ? 0.3 : 1 }}
                     >
                       <Ionicons name="arrow-forward-circle" size={22} color="#888" />
                     </TouchableOpacity>
                     <TouchableOpacity
-                      onPress={() => deleteVideo(i)}
-                      style={{ marginHorizontal: 2 }}
+                      onPress={() => deleteVideo(index)}
+                      disabled={uploadStatuses.some(status => status && status.uploading)}
+                      style={{ marginHorizontal: 2, opacity: uploadStatuses.some(status => status && status.uploading) ? 0.3 : 1 }}
                     >
                       <Ionicons name="trash-bin" size={22} color="#888" />
                     </TouchableOpacity>
@@ -681,9 +715,30 @@ const ProfileSetupScreen = () => {
             </View>
           )}
 
+          {/* Upload Progress */}
+          {uploadStatuses.some(status => status && status.uploading) && (
+            <View style={styles.progressSection}>
+              <Text style={[styles.progressText, { color: isDark ? '#fff' : '#000' }]}>
+                Uploading {uploadStatuses.filter(status => status && status.uploading).length} of {videos.filter(v => v !== null).length} videos... {getOverallProgress()}%
+              </Text>
+              <View style={styles.progressBar}>
+                <View 
+                  style={[styles.progressFill, { width: `${getOverallProgress()}%` }]} 
+                />
+              </View>
+            </View>
+          )}
+
           {videoError !== '' && (
             <Text style={{ color: 'red', fontSize: 13, marginTop: 4 }}>{videoError}</Text>
           )}
+
+          {/* Location */}
+          <AddressInput
+            address={address}
+            onAddressChange={handleAddressChange}
+            autoDetectInitial={true}
+          />
 
           <Text style={[styles.sectionTitle, { color: isDark ? '#fff' : '#000' }]}>
             Favorite Genres
@@ -696,7 +751,7 @@ const ProfileSetupScreen = () => {
                   styles.genreChip,
                   {
                     backgroundColor: genres.includes(genre)
-                      ? '#ff6ec4'
+                      ? COLORS.ui?.accent || '#ff6ec4'
                       : isDark
                       ? '#444'
                       : '#ddd',
@@ -743,7 +798,7 @@ const ProfileSetupScreen = () => {
             style={[styles.continueButton, (!isFormComplete() || isUploading) && styles.disabledButton]}
           >
             <LinearGradient
-              colors={['#ff6ec4', '#ffc93c', '#1c92d2']}
+              colors={COLORS.static.primaryGradient}
               start={{ x: 0, y: 1 }}
               end={{ x: 1, y: 0 }}
               style={styles.gradient}
@@ -802,10 +857,31 @@ const styles = StyleSheet.create({
   uploadBtn: {
     flexDirection: 'row',
     alignItems: 'center',
+    justifyContent: 'center',
     gap: 8,
     padding: 12,
     borderRadius: 10,
     marginBottom: 10,
+  },
+  progressSection: {
+    marginBottom: 20,
+  },
+  progressText: {
+    textAlign: 'center',
+    fontSize: 14,
+    fontWeight: '600',
+    marginBottom: 8,
+  },
+  progressBar: {
+    height: 6,
+    backgroundColor: '#e0e0e0',
+    borderRadius: 3,
+    overflow: 'hidden',
+  },
+  progressFill: {
+    height: '100%',
+    backgroundColor: COLORS.static?.primaryGradient?.[0] || '#ff6ec4',
+    borderRadius: 3,
   },
   genreContainer: {
     flexDirection: 'row',
@@ -851,19 +927,41 @@ const styles = StyleSheet.create({
     borderRadius: 60,
     alignSelf: 'center',
     marginVertical: 15,
-    overflow: 'hidden',
+    overflow: 'visible',
     justifyContent: 'center',
     alignItems: 'center',
+    position: 'relative',
   },
   profilePicture: {
     width: '100%',
     height: '100%',
+    borderRadius: 60,
   },
   profilePicturePlaceholder: {
     alignItems: 'center',
     justifyContent: 'center',
     width: '100%',
-    padding: 5,
+    height: '100%',
+    position: 'relative',
+    backgroundColor: '#f0f0f0',
+  },
+  cameraIconContainer: {
+    position: 'absolute',
+    bottom: -5,
+    right: -5,
+    backgroundColor: '#555',
+    borderRadius: 20,
+    width: 40,
+    height: 40,
+    justifyContent: 'center',
+    alignItems: 'center',
+    borderWidth: 3,
+    borderColor: '#fff',
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.25,
+    shadowRadius: 4,
+    elevation: 5,
   },
 });
 

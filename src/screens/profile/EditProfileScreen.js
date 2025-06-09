@@ -9,16 +9,16 @@ import {
   Alert,
   Image,
   useColorScheme,
+  ActivityIndicator,
 } from 'react-native';
 import * as ImagePicker from 'expo-image-picker';
-import * as VideoThumbnails from 'expo-video-thumbnails';
-import { manipulateAsync } from 'expo-image-manipulator';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
-import VideoEditManager from '../../components/profile/VideoEditManager';
 import Button from '../../components/common/Button';
 import { COLORS } from '../../styles/theme';
-
+import { getUploadService } from '../../services/uploadFileService';
+import { useAuth } from '../../context/AuthContext';
+import axios from 'axios';
 
 const predefinedInstruments = {
   Strings: ['Guitar', 'Bass', 'Violin', 'Cello'],
@@ -69,13 +69,24 @@ const ProfileCard = ({ title, icon, children, style = {} }) => {
 
 const EditProfileScreen = ({ navigation }) => {
   const isDark = useColorScheme() === 'dark';
+  const { user } = useAuth();
+  const uploadService = getUploadService(user);
 
-  // Simplified address state - just city and country
+  // Address fields that will be combined into a single address string
   const [city, setCity] = useState('Tel Aviv');
   const [country, setCountry] = useState('Israel');
 
   const [bio, setBio] = useState('');
   const [profilePictureUri, setProfilePictureUri] = useState(null);
+
+  // Social links state
+  const [socialLinks, setSocialLinks] = useState({
+    instagram: '',
+    youtube: '',
+    spotify: '',
+    soundcloud: '',
+    website: ''
+  });
 
   const [selectedInstruments, setSelectedInstruments] = useState([]);
   const [selectedGenres, setSelectedGenres] = useState([]);
@@ -85,12 +96,25 @@ const EditProfileScreen = ({ navigation }) => {
   const [videos, setVideos] = useState([]);
   const [videoThumbnails, setVideoThumbnails] = useState([]);
   const [videoUrls, setVideoUrls] = useState([]);
+  const [uploadStatuses, setUploadStatuses] = useState([]);
+  const [videoKeys, setVideoKeys] = useState(new Set());
+  const [uploadProgress, setUploadProgress] = useState({});
+
+  // Save loading state
+  const [isSaving, setIsSaving] = useState(false);
 
   useEffect(() => {
     // Initialize with example data
     setBio('Percussionist. Music lover.');
     setSelectedInstruments(['Drums']);
     setSelectedGenres(['Rock']);
+    setSocialLinks({
+      instagram: '@musician',
+      youtube: '',
+      spotify: '',
+      soundcloud: '',
+      website: ''
+    });
   }, []);
 
   const toggleSelection = (item, list, setList) => {
@@ -105,6 +129,21 @@ const EditProfileScreen = ({ navigation }) => {
     }
   };
 
+  /**
+   * @function updateSocialLink
+   * @description Update a specific social link
+   */
+  const updateSocialLink = (platform, value) => {
+    setSocialLinks(prev => ({
+      ...prev,
+      [platform]: value
+    }));
+  };
+
+  /**
+   * @function pickProfilePicture
+   * @description Pick and upload profile picture using upload service
+   */
   const pickProfilePicture = async () => {
     const permission = await ImagePicker.requestMediaLibraryPermissionsAsync();
     if (permission.status !== 'granted') {
@@ -120,55 +159,266 @@ const EditProfileScreen = ({ navigation }) => {
     });
 
     if (!result.canceled && result.assets[0]) {
-      const compressed = await manipulateAsync(result.assets[0].uri, [{ resize: { width: 500 } }], {
-        compress: 0.7,
-        format: 'jpeg',
-      });
-      setProfilePictureUri(compressed.uri);
+      const selectedAsset = result.assets[0];
+      
+      try {
+        // Upload using the service
+        const uploadResult = await uploadService.uploadImage(
+          selectedAsset,
+          'profile',
+          (progress) => {
+            console.log('Profile picture upload progress:', progress);
+          }
+        );
+
+        if (uploadResult.success) {
+          setProfilePictureUri(uploadResult.imageUrl);
+        } else {
+          Alert.alert('Upload Error', uploadResult.error);
+          // Still show local image for preview
+          setProfilePictureUri(selectedAsset.uri);
+        }
+      } catch (error) {
+        console.error('Error uploading profile picture:', error);
+        Alert.alert('Error', 'Failed to upload profile picture.');
+        // Still show local image for preview
+        setProfilePictureUri(selectedAsset.uri);
+      }
     }
   };
 
-  const pickVideo = async () => {
+  /**
+   * @function processSelectedVideo
+   * @description Process a single selected video using upload service
+   */
+  const processSelectedVideo = async (selectedAsset, index) => {
+    try {
+      // Check for duplicates using the upload service
+      const duplicateCheck = await uploadService.checkVideoDuplicate(selectedAsset, videoKeys);
+      
+      if (duplicateCheck.error) {
+        Alert.alert('Error', duplicateCheck.error);
+        return false;
+      }
+
+      if (duplicateCheck.isDuplicate) {
+        Alert.alert('Duplicate Video', `Video "${selectedAsset.fileName || 'Unknown'}" has already been added.`);
+        return false;
+      }
+
+      // Validate video using the service (now with 45s / 20MB limits)
+      const validation = await uploadService.validateVideoFile(selectedAsset);
+      
+      if (!validation.success) {
+        Alert.alert('Invalid Video', `${selectedAsset.fileName || 'Video'}: ${validation.error}`);
+        return false;
+      }
+
+      // Create temporary video object
+      const videoData = {
+        id: selectedAsset.assetId || Date.now().toString() + Math.random(),
+        uri: selectedAsset.uri,
+        fileName: selectedAsset.fileName || `video_${Date.now()}.mp4`,
+        mimeType: selectedAsset.mimeType || 'video/mp4',
+        duration: validation.fileInfo.durationSec,
+        size: validation.fileInfo.sizeBytes,
+        thumbnail: selectedAsset.uri + "#t=0.1", // Temporary thumbnail
+      };
+
+      // Add to state
+      const currentIndex = videos.length + index;
+      setVideos(prev => [...prev, videoData]);
+      setVideoThumbnails(prev => [...prev, videoData.thumbnail]);
+      setUploadStatuses(prev => [...prev, { uploading: true, uploaded: false, error: null }]);
+      setVideoKeys(prev => new Set(prev).add(duplicateCheck.videoKey));
+
+      // Start upload immediately
+      uploadSingleVideo(videoData, currentIndex);
+      
+      return true;
+    } catch (error) {
+      console.error('Error processing video:', error);
+      Alert.alert('Error', `Failed to process video: ${selectedAsset.fileName || 'Unknown'}`);
+      return false;
+    }
+  };
+
+  /**
+   * @function uploadSingleVideo
+   * @description Upload a single video using the upload service
+   */
+  const uploadSingleVideo = async (videoData, index) => {
+    try {
+      // Upload using the service with progress tracking
+      const uploadResult = await uploadService.uploadVideo(
+        {
+          uri: videoData.uri,
+          fileName: videoData.fileName,
+          mimeType: videoData.mimeType,
+          duration: videoData.duration,
+          assetId: videoData.id
+        },
+        index,
+        (progress) => {
+          console.log(`Video ${index + 1} upload progress:`, progress);
+          setUploadProgress(prev => ({
+            ...prev,
+            [index]: progress.progress || 0
+          }));
+        }
+      );
+
+      if (uploadResult.success) {
+        // Update video with upload results
+        setVideos(prev => {
+          const newVideos = [...prev];
+          if (newVideos[index]) {
+            newVideos[index] = uploadResult.videoObject;
+          }
+          return newVideos;
+        });
+
+        // Update thumbnail if we got a better one
+        if (uploadResult.thumbnailUri !== videoData.thumbnail) {
+          setVideoThumbnails(prev => {
+            const newThumbs = [...prev];
+            if (newThumbs[index]) {
+              newThumbs[index] = uploadResult.thumbnailUri;
+            }
+            return newThumbs;
+          });
+        }
+
+        // Add URL to videoUrls array
+        setVideoUrls(prev => {
+          const newUrls = [...prev];
+          newUrls[index] = uploadResult.videoUrl;
+          return newUrls;
+        });
+
+        // Update status to uploaded
+        setUploadStatuses(prev => {
+          const newStatuses = [...prev];
+          if (newStatuses[index]) {
+            newStatuses[index] = { uploading: false, uploaded: true, error: null };
+          }
+          return newStatuses;
+        });
+      } else {
+        // Update status to error
+        setUploadStatuses(prev => {
+          const newStatuses = [...prev];
+          if (newStatuses[index]) {
+            newStatuses[index] = { uploading: false, uploaded: false, error: uploadResult.error };
+          }
+          return newStatuses;
+        });
+      }
+    } catch (error) {
+      console.error(`Failed to upload video ${index + 1}:`, error);
+      
+      // Update status to error
+      setUploadStatuses(prev => {
+        const newStatuses = [...prev];
+        if (newStatuses[index]) {
+          newStatuses[index] = { uploading: false, uploaded: false, error: error.message };
+        }
+        return newStatuses;
+      });
+    }
+  };
+
+  /**
+   * @function pickVideos
+   * @description Pick multiple videos from device library
+   */
+  const pickVideos = async () => {
     const permission = await ImagePicker.requestMediaLibraryPermissionsAsync();
     if (permission.status !== 'granted') {
-      Alert.alert('Permission required', 'Allow media access to choose a video.');
+      Alert.alert('Permission required', 'Allow media access to choose videos.');
       return;
     }
 
-    const result = await ImagePicker.launchImageLibraryAsync({
-      mediaTypes: ImagePicker.MediaTypeOptions.Videos,
-      quality: 1,
-    });
+    try {
+      const result = await ImagePicker.launchImageLibraryAsync({
+        mediaTypes: ImagePicker.MediaTypeOptions.Videos,
+        allowsMultipleSelection: true,
+        quality: 1,
+      });
 
-    if (!result.canceled && result.assets[0]) {
-      const { uri, duration, fileSize } = result.assets[0];
+      if (result.canceled || !result.assets || result.assets.length === 0) return;
 
-      if (videoUrls.includes(uri)) {
-        Alert.alert('Duplicate video', 'This video is already added.');
-        return;
+      console.log(`Processing ${result.assets.length} selected videos...`);
+
+      // Process each selected video
+      let successCount = 0;
+      for (let i = 0; i < result.assets.length; i++) {
+        const success = await processSelectedVideo(result.assets[i], i);
+        if (success) successCount++;
       }
 
-      if ((duration || 0) > 30000) {
-        Alert.alert('Too long', 'Max 30 seconds allowed.');
-        return;
+      if (successCount > 0) {
+        console.log(`Successfully added ${successCount} videos for upload`);
       }
-
-      if (fileSize > 4 * 1024 * 1024) {
-        Alert.alert('Too big', 'Max 4MB allowed.');
-        return;
-      }
-
-      const thumb = await VideoThumbnails.getThumbnailAsync(uri, { time: 1000 });
-      setVideos((prev) => [...prev, { uri, id: Date.now().toString(), thumbnail: thumb.uri }]);
-      setVideoThumbnails((prev) => [...prev, thumb.uri]);
-      setVideoUrls((prev) => [...prev, uri]);
+    } catch (error) {
+      console.error('Error picking videos:', error);
+      Alert.alert('Error', 'Failed to select videos. Please try again.');
     }
   };
 
-  const deleteVideo = (index) => {
-    setVideos((prev) => prev.filter((_, i) => i !== index));
-    setVideoThumbnails((prev) => prev.filter((_, i) => i !== index));
-    setVideoUrls((prev) => prev.filter((_, i) => i !== index));
+  /**
+   * @function deleteVideo
+   * @description Enhanced with service integration
+   */
+  const deleteVideo = async (index) => {
+    const videoToDelete = videos[index];
+    if (!videoToDelete) {
+      Alert.alert('Error', 'Invalid video selected for deletion.');
+      return;
+    }
+
+    try {
+      // Remove video key from set
+      const videoKey = uploadService.createVideoKey(
+        videoToDelete.fileName || '',
+        videoToDelete.size,
+        videoToDelete.duration
+      );
+      setVideoKeys(prev => {
+        const newKeys = new Set(prev);
+        newKeys.delete(videoKey);
+        return newKeys;
+      });
+
+      // Optionally delete from server using the service
+      if (videoToDelete.fileName && uploadStatuses[index]?.uploaded) {
+        await uploadService.deleteFile(videoToDelete.fileName);
+      }
+
+      // Remove from local state
+      setVideos(prev => prev.filter((_, i) => i !== index));
+      setVideoThumbnails(prev => prev.filter((_, i) => i !== index));
+      setVideoUrls(prev => prev.filter((_, i) => i !== index));
+      setUploadStatuses(prev => prev.filter((_, i) => i !== index));
+      
+      // Clean up progress tracking
+      setUploadProgress(prev => {
+        const newProgress = { ...prev };
+        delete newProgress[index];
+        return newProgress;
+      });
+      
+      console.log(`Video at index ${index} deleted successfully`);
+    } catch (error) {
+      console.error(`Error deleting video:`, error);
+      Alert.alert('Error', 'Failed to delete video completely, but removed from local list.');
+      
+      // Still remove from local state even if server deletion fails
+      setVideos(prev => prev.filter((_, i) => i !== index));
+      setVideoThumbnails(prev => prev.filter((_, i) => i !== index));
+      setVideoUrls(prev => prev.filter((_, i) => i !== index));
+      setUploadStatuses(prev => prev.filter((_, i) => i !== index));
+    }
   };
 
   const moveVideo = (from, to) => {
@@ -182,32 +432,163 @@ const EditProfileScreen = ({ navigation }) => {
     setVideos(move);
     setVideoThumbnails(move);
     setVideoUrls(move);
+    setUploadStatuses(move);
   };
 
   const isFormValid = () => {
-    return city.trim() && country.trim() && bio && profilePictureUri && videos.length && selectedInstruments.length && selectedGenres.length;
+    return city.trim() || country.trim() || bio || profilePictureUri || videos.length || selectedInstruments.length || selectedGenres.length || Object.values(socialLinks).some(link => link.trim());
   };
 
-  const handleSave = () => {
+  /**
+   * @function handleSave
+   * @description Save profile data to Lambda function with proper field mapping
+   */
+  const handleSave = async () => {
     if (!isFormValid()) {
-      Alert.alert('Incomplete', 'Fill in all fields and upload at least one video.');
+      Alert.alert('No changes', 'Please fill out at least one field before saving.');
       return;
     }
+
+    if (uploadStatuses.some(status => status.uploading)) {
+      Alert.alert('Upload in Progress', 'Please wait for all videos to finish uploading before saving.');
+      return;
+    }
+
+    setIsSaving(true);
+
+    try {
+      // Prepare data with correct field names for Lambda
+      const updateData = {};
+
+      // Address (combine city and country)
+      if (city.trim() || country.trim()) {
+        const addressParts = [city.trim(), country.trim()].filter(Boolean);
+        updateData.address = addressParts.join(', ');
+      }
+
+      // Profile picture (use snake_case as expected by Lambda)
+      if (profilePictureUri) {
+        updateData.profile_picture = profilePictureUri;
+      }
+
+      // Bio
+      if (bio.trim()) {
+        updateData.bio = bio.trim();
+      }
+
+      // Social links (filter out empty links)
+      const validSocialLinks = Object.entries(socialLinks)
+        .filter(([_, value]) => value.trim())
+        .reduce((acc, [key, value]) => {
+          acc[key] = value.trim();
+          return acc;
+        }, {});
+      
+      if (Object.keys(validSocialLinks).length > 0) {
+        updateData.social_links = validSocialLinks;
+      }
+
+      // Instruments
+      if (selectedInstruments.length > 0) {
+        updateData.instruments = selectedInstruments;
+      }
+
+      // Genres
+      if (selectedGenres.length > 0) {
+        updateData.genres = selectedGenres;
+      }
+
+      // Videos (only include successfully uploaded videos)
+      const uploadedVideoUrls = videoUrls.filter((url, index) => 
+        url && uploadStatuses[index]?.uploaded
+      );
+      if (uploadedVideoUrls.length > 0) {
+        updateData.videos = uploadedVideoUrls;
+      }
+
+      console.log('Sending update data to Lambda:', updateData);
+
+      // Check if there's actually data to update
+      if (Object.keys(updateData).length === 0) {
+        Alert.alert('No changes', 'No valid changes detected to save.');
+        setIsSaving(false);
+        return;
+      }
+
+      // Make API call to Lambda function
+      const response = await axios.put(
+        'https://9u6y4sfrn2.execute-api.us-east-1.amazonaws.com/groovi/build_profile/edit',
+        updateData,
+        {
+          headers: {
+            'Content-Type': 'application/json',
+            // Add any authentication headers here if needed
+            // 'Authorization': `Bearer ${user?.token}` // example
+          },
+          timeout: 30000, // 30 second timeout
+        }
+      );
+
+      console.log('Lambda response:', response.data);
+
+      if (response.status === 200) {
+        Alert.alert(
+          'Success', 
+          'Your profile has been updated successfully!',
+          [
+            {
+              text: 'OK',
+              onPress: () => navigation.goBack()
+            }
+          ]
+        );
+      } else {
+        throw new Error(response.data?.message || 'Unexpected response from server');
+      }
+
+    } catch (error) {
+      console.error('Error saving profile:', error);
+      
+      let errorMessage = 'Failed to save profile. Please try again.';
+      
+      if (error.response) {
+        // Server responded with error status
+        const status = error.response.status;
+        const data = error.response.data;
+        
+        if (status === 400) {
+          errorMessage = data?.message || 'Invalid data provided. Please check your inputs.';
+        } else if (status === 401) {
+          errorMessage = 'Authentication failed. Please log in again.';
+        } else if (status === 403) {
+          errorMessage = 'Permission denied. You cannot edit this profile.';
+        } else if (status === 404) {
+          errorMessage = 'Profile not found.';
+        } else if (status === 500) {
+          errorMessage = 'Server error. Please try again later.';
+        } else {
+          errorMessage = data?.message || `Server error (${status}). Please try again.`;
+        }
+      } else if (error.request) {
+        // Network error
+        errorMessage = 'Network error. Please check your connection and try again.';
+      }
+      
+      Alert.alert('Error', errorMessage);
+    } finally {
+      setIsSaving(false);
+    }
+  };
+
+  /**
+   * Get overall upload progress
+   */
+  const getOverallProgress = () => {
+    const uploadingVideos = uploadStatuses.filter(status => status.uploading);
+    if (uploadingVideos.length === 0) return 0;
     
-    const profileData = {
-      bio,
-      profilePicture: profilePictureUri,
-      instruments: selectedInstruments,
-      genres: selectedGenres,
-      videos: videoUrls,
-      location: `${city}, ${country}`,
-      city,
-      country,
-    };
-    
-    console.log('Saving profile data:', profileData);
-    Alert.alert('Saved', 'Your profile has been updated.');
-    navigation.goBack();
+    const totalProgress = Object.values(uploadProgress).reduce((sum, progress) => sum + progress, 0);
+    return Math.round(totalProgress / uploadingVideos.length);
   };
 
   return (
@@ -225,8 +606,8 @@ const EditProfileScreen = ({ navigation }) => {
         contentContainerStyle={styles.scroll}
         showsVerticalScrollIndicator={false}
       >
-        {/* Location Card */}
-        <ProfileCard title="Location" icon="location-outline">
+        {/* Address Card */}
+        <ProfileCard title="Address" icon="location-outline">
           <View style={styles.rowContainer}>
             <TextInput
               style={[styles.input, styles.halfInput, { 
@@ -249,6 +630,9 @@ const EditProfileScreen = ({ navigation }) => {
               onChangeText={setCountry}
             />
           </View>
+          <Text style={[styles.helpText, { color: isDark ? '#aaa' : '#666' }]}>
+            Will be saved as: {city.trim() && country.trim() ? `${city}, ${country}` : city.trim() || country.trim() || 'Address not set'}
+          </Text>
         </ProfileCard>
 
         {/* Profile Picture Card */}
@@ -280,6 +664,32 @@ const EditProfileScreen = ({ navigation }) => {
               color: isDark ? '#fff' : '#000'
             }]}
           />
+        </ProfileCard>
+
+        {/* Social Links Card */}
+        <ProfileCard title="Social Links" icon="link-outline">
+          {Object.entries(socialLinks).map(([platform, value]) => (
+            <View key={platform} style={styles.socialLinkRow}>
+              <Ionicons 
+                name={platform === 'website' ? 'globe-outline' : 'logo-' + platform} 
+                size={20} 
+                color={COLORS.static.primaryGradient[0]} 
+                style={styles.socialIcon}
+              />
+              <TextInput
+                style={[styles.input, styles.socialInput, { 
+                  backgroundColor: isDark ? '#3c3c3e' : '#F5F5F5',
+                  color: isDark ? '#fff' : '#000'
+                }]}
+                placeholder={`${platform.charAt(0).toUpperCase() + platform.slice(1)} ${platform === 'website' ? 'URL' : 'username'}`}
+                placeholderTextColor="#9E9E9E"
+                value={value}
+                onChangeText={(text) => updateSocialLink(platform, text)}
+                autoCapitalize="none"
+                keyboardType={platform === 'website' ? 'url' : 'default'}
+              />
+            </View>
+          ))}
         </ProfileCard>
 
         {/* Instruments Card */}
@@ -321,6 +731,25 @@ const EditProfileScreen = ({ navigation }) => {
               <Ionicons name="add" size={20} color="#fff" />
             </TouchableOpacity>
           </View>
+
+          {selectedInstruments.length > 0 && (
+            <View style={styles.selectedContainer}>
+              <Text style={[styles.selectedTitle, { color: isDark ? '#fff' : '#000' }]}>Selected:</Text>
+              <View style={styles.selectedChips}>
+                {selectedInstruments.map(instrument => (
+                  <View key={instrument} style={styles.selectedChip}>
+                    <Text style={styles.selectedChipText}>{instrument}</Text>
+                    <TouchableOpacity
+                      onPress={() => setSelectedInstruments(selectedInstruments.filter(i => i !== instrument))}
+                      hitSlop={{ top: 10, right: 10, bottom: 10, left: 10 }}
+                    >
+                      <Ionicons name="close-circle" size={16} color={COLORS.static.primaryGradient[0]} />
+                    </TouchableOpacity>
+                  </View>
+                ))}
+              </View>
+            </View>
+          )}
         </ProfileCard>
 
         {/* Genres Card */}
@@ -380,32 +809,139 @@ const EditProfileScreen = ({ navigation }) => {
 
         {/* Videos Card */}
         <ProfileCard title="Videos" icon="videocam-outline">
-          <TouchableOpacity onPress={pickVideo} style={styles.uploadBtn}>
+          <TouchableOpacity 
+            onPress={pickVideos} 
+            style={styles.uploadBtn}
+            disabled={uploadStatuses.some(status => status.uploading)}
+          >
             <Ionicons name="cloud-upload-outline" size={22} color={COLORS.static.primaryGradient[0]} />
-            <Text style={[styles.uploadText, { color: isDark ? '#fff' : '#000' }]}>Upload Video</Text>
+            <Text style={[styles.uploadText, { color: isDark ? '#fff' : '#000' }]}>
+              {uploadStatuses.some(status => status.uploading) 
+                ? 'Uploading...' 
+                : 'Upload Videos (max 45s / 20MB each)'
+              }
+            </Text>
           </TouchableOpacity>
 
-          <VideoEditManager
-            videos={videos}
-            setVideos={setVideos}
-            videoThumbnails={videoThumbnails}
-            setVideoThumbnails={setVideoThumbnails}
-            videoUrls={videoUrls}
-            setVideoUrls={setVideoUrls}
-            onDelete={deleteVideo}
-            onMove={moveVideo}
-          />
+          {/* Video Grid */}
+          {videoThumbnails.length > 0 && (
+            <View style={styles.videoGrid}>
+              {videoThumbnails.map((thumb, index) => (
+                <View key={index} style={styles.videoCard}>
+                  <Image
+                    source={{ uri: thumb }}
+                    style={styles.videoThumbnail}
+                  />
+                  
+                  {/* Status Indicator */}
+                  <View style={styles.statusIndicator}>
+                    {uploadStatuses[index]?.uploading ? (
+                      <View style={styles.progressIndicator}>
+                        <ActivityIndicator size="small" color="#fff" />
+                        <Text style={styles.progressText}>
+                          {uploadProgress[index] || 0}%
+                        </Text>
+                      </View>
+                    ) : uploadStatuses[index]?.uploaded ? (
+                      <Ionicons name="checkmark-circle" size={20} color="#4caf50" />
+                    ) : uploadStatuses[index]?.error ? (
+                      <Ionicons name="close-circle" size={20} color="#f44336" />
+                    ) : (
+                      <Ionicons name="time-outline" size={20} color="#ff9800" />
+                    )}
+                  </View>
+
+                  {/* Video Info */}
+                  <Text style={styles.videoInfo}>
+                    {videos[index]?.duration?.toFixed(1)}s • {(videos[index]?.size / (1024 * 1024))?.toFixed(1)}MB
+                  </Text>
+
+                  {/* Error Message */}
+                  {uploadStatuses[index]?.error && (
+                    <Text style={styles.errorText} numberOfLines={2}>
+                      {uploadStatuses[index].error}
+                    </Text>
+                  )}
+
+                  {/* Controls */}
+                  <View style={styles.videoControls}>
+                    <TouchableOpacity
+                      onPress={() => moveVideo(index, index - 1)}
+                      disabled={index === 0 || uploadStatuses.some(status => status.uploading)}
+                      style={[styles.controlButton, { opacity: (index === 0 || uploadStatuses.some(status => status.uploading)) ? 0.3 : 1 }]}
+                    >
+                      <Ionicons name="arrow-back" size={16} color="#666" />
+                    </TouchableOpacity>
+                    
+                    <TouchableOpacity
+                      onPress={() => deleteVideo(index)}
+                      disabled={uploadStatuses.some(status => status.uploading)}
+                      style={[styles.controlButton, { opacity: uploadStatuses.some(status => status.uploading) ? 0.3 : 1 }]}
+                    >
+                      <Ionicons name="trash" size={16} color="#f44336" />
+                    </TouchableOpacity>
+                    
+                    <TouchableOpacity
+                      onPress={() => moveVideo(index, index + 1)}
+                      disabled={index === videos.length - 1 || uploadStatuses.some(status => status.uploading)}
+                      style={[styles.controlButton, { opacity: (index === videos.length - 1 || uploadStatuses.some(status => status.uploading)) ? 0.3 : 1 }]}
+                    >
+                      <Ionicons name="arrow-forward" size={16} color="#666" />
+                    </TouchableOpacity>
+                  </View>
+                </View>
+              ))}
+            </View>
+          )}
+
+          {/* Upload Progress */}
+          {uploadStatuses.some(status => status.uploading) && (
+            <View style={styles.progressSection}>
+              <Text style={[styles.progressSectionText, { color: isDark ? '#fff' : '#000' }]}>
+                Uploading {uploadStatuses.filter(status => status.uploading).length} of {videos.length} videos... {getOverallProgress()}%
+              </Text>
+              <View style={styles.progressBar}>
+                <View 
+                  style={[styles.progressFill, { width: `${getOverallProgress()}%` }]} 
+                />
+              </View>
+            </View>
+          )}
         </ProfileCard>
 
         {/* Save Button - Part of ScrollView Content */}
-        <TouchableOpacity onPress={handleSave} style={styles.saveButton} activeOpacity={0.8}>
+        <TouchableOpacity 
+          onPress={handleSave} 
+          style={[
+            styles.saveButton, 
+            (uploadStatuses.some(status => status.uploading) || isSaving) && styles.saveButtonDisabled
+          ]} 
+          activeOpacity={0.8}
+          disabled={uploadStatuses.some(status => status.uploading) || isSaving}
+        >
           <LinearGradient 
-            colors={COLORS.static.primaryGradient} 
+            colors={
+              uploadStatuses.some(status => status.uploading) || isSaving 
+                ? ['#888', '#888'] 
+                : COLORS.static.primaryGradient
+            } 
             start={{ x: 0, y: 0 }} 
             end={{ x: 1, y: 1 }} 
             style={styles.gradient}
           >
-            <Text style={styles.saveText}>Save Changes</Text>
+            {uploadStatuses.some(status => status.uploading) ? (
+              <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+                <ActivityIndicator size="small" color="#fff" style={{ marginRight: 8 }} />
+                <Text style={styles.saveText}>Uploading Videos...</Text>
+              </View>
+            ) : isSaving ? (
+              <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+                <ActivityIndicator size="small" color="#fff" style={{ marginRight: 8 }} />
+                <Text style={styles.saveText}>Saving Profile...</Text>
+              </View>
+            ) : (
+              <Text style={styles.saveText}>Save Changes</Text>
+            )}
           </LinearGradient>
         </TouchableOpacity>
       </ScrollView>
@@ -438,7 +974,7 @@ const styles = StyleSheet.create({
   scroll: { 
     padding: 20,
     paddingTop: 0,
-    paddingBottom: 40, // Reduced padding since button is now in content
+    paddingBottom: 40,
   },
   card: {
     borderRadius: 16,
@@ -459,6 +995,11 @@ const styles = StyleSheet.create({
     fontSize: 20,
     fontWeight: '600',
     marginLeft: 12,
+  },
+  helpText: {
+    fontSize: 12,
+    fontStyle: 'italic',
+    marginTop: 8,
   },
   rowContainer: {
     flexDirection: 'row',
@@ -506,6 +1047,18 @@ const styles = StyleSheet.create({
     fontSize: 14,
     marginTop: 8,
     textAlign: 'center',
+  },
+  socialLinkRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 12,
+  },
+  socialIcon: {
+    marginRight: 12,
+    width: 24,
+  },
+  socialInput: {
+    flex: 1,
   },
   categoryLabel: {
     fontSize: 16,
@@ -614,6 +1167,82 @@ const styles = StyleSheet.create({
     fontSize: 16,
     fontWeight: '500',
   },
+  videoGrid: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 12,
+  },
+  videoCard: {
+    width: 100,
+    alignItems: 'center',
+  },
+  videoThumbnail: {
+    width: 80,
+    height: 120,
+    borderRadius: 12,
+    backgroundColor: '#000',
+  },
+  statusIndicator: {
+    position: 'absolute',
+    top: 8,
+    right: 8,
+    backgroundColor: 'rgba(0,0,0,0.8)',
+    borderRadius: 12,
+    padding: 4,
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.3)',
+    minWidth: 24,
+    alignItems: 'center',
+  },
+  progressIndicator: {
+    alignItems: 'center',
+  },
+  progressText: {
+    color: '#fff',
+    fontSize: 8,
+    marginTop: 2,
+  },
+  videoInfo: {
+    fontSize: 10,
+    color: '#666',
+    textAlign: 'center',
+    marginTop: 4,
+  },
+  errorText: {
+    fontSize: 8,
+    color: '#f44336',
+    textAlign: 'center',
+    marginTop: 2,
+    width: 80,
+  },
+  videoControls: {
+    flexDirection: 'row',
+    marginTop: 8,
+    gap: 4,
+  },
+  controlButton: {
+    padding: 4,
+  },
+  progressSection: {
+    marginTop: 16,
+  },
+  progressSectionText: {
+    textAlign: 'center',
+    fontSize: 14,
+    fontWeight: '600',
+    marginBottom: 8,
+  },
+  progressBar: {
+    height: 6,
+    backgroundColor: '#e0e0e0',
+    borderRadius: 3,
+    overflow: 'hidden',
+  },
+  progressFill: {
+    height: '100%',
+    backgroundColor: COLORS.static.primaryGradient[0],
+    borderRadius: 3,
+  },
   // Save button as part of content
   saveButton: {
     borderRadius: 30,
@@ -625,6 +1254,9 @@ const styles = StyleSheet.create({
     shadowOffset: { width: 0, height: 2 },
     shadowOpacity: 0.25,
     shadowRadius: 4,
+  },
+  saveButtonDisabled: {
+    opacity: 0.7,
   },
   gradient: {
     paddingVertical: 16,

@@ -7,33 +7,39 @@ import {
   Alert,
   ActivityIndicator,
   useColorScheme,
-  TextInput,
   ScrollView,
   Image,
 } from 'react-native';
-import { Video } from 'expo-av';
 import * as ImagePicker from 'expo-image-picker';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
 import { useNavigation } from '@react-navigation/native';
 import { COLORS } from '../../styles/theme';
 import { getUploadService } from '../../services/uploadFileService';
-import { useAuth } from '../../context/AuthContext'; // Assuming you have auth context
+import { 
+  processBatchVideos, 
+  createVideoManager, 
+  deleteVideoFromS3 
+} from '../../services/videoService';
+import { useAuth } from '../../context/AuthContext';
 
 const VideoUploadScreen = () => {
   const navigation = useNavigation();
   const isDark = useColorScheme() === 'dark';
-  const { user } = useAuth(); // Get current user
+  const { user } = useAuth();
   const uploadService = getUploadService(user);
   
   const [videos, setVideos] = useState([]);
   const [videoThumbnails, setVideoThumbnails] = useState([]);
   const [videoUrls, setVideoUrls] = useState([]);
-  const [isUploading, setIsUploading] = useState(false);
   const [uploadStatuses, setUploadStatuses] = useState([]);
+  const [isUploading, setIsUploading] = useState(false);
   const [currentUploadingIndex, setCurrentUploadingIndex] = useState(null);
   const [videoKeys, setVideoKeys] = useState(new Set());
-  const [uploadProgress, setUploadProgress] = useState({}); // Track progress per video
+  const [uploadProgress, setUploadProgress] = useState({});
+
+  // Create video manager instance
+  const videoManager = createVideoManager(videos, videoThumbnails, videoUrls, uploadStatuses);
 
   /**
    * Pick multiple videos from device library
@@ -58,158 +64,61 @@ const VideoUploadScreen = () => {
         return;
       }
 
-      // Process each selected video
-      for (const selectedAsset of result.assets) {
-        await processSelectedVideo(selectedAsset);
+      console.log(`📱 Processing ${result.assets.length} selected videos...`);
+
+      // Process videos using the video service with upload screen limits
+      const processingOptions = {
+        maxSizeMB: 20,  // Upload screen allows larger files
+        maxDurationSec: 45  // Upload screen allows longer videos
+      };
+
+      const batchResult = await processBatchVideos(
+        result.assets, 
+        videoKeys, 
+        processingOptions,
+        (progress) => {
+          console.log(`Processing video ${progress.current}/${progress.total}`);
+        }
+      );
+
+      if (batchResult.success) {
+        // Update state with processed videos
+        batchResult.processedVideos.forEach((videoData) => {
+          const newArrays = videoManager.addVideo(
+            videoData,
+            videoData.thumbnail,
+            null, // No URL yet
+            { uploading: false, uploaded: false, error: null }
+          );
+          
+          setVideos(newArrays.videos);
+          setVideoThumbnails(newArrays.thumbnails);
+          setVideoUrls(newArrays.urls);
+          setUploadStatuses(newArrays.statuses);
+        });
+
+        // Update video keys
+        setVideoKeys(batchResult.videoKeys);
+
+        // Show errors if any
+        if (batchResult.errors.length > 0) {
+          const errorMessages = batchResult.errors.map(e => e.error).join('\n');
+          Alert.alert('Some videos could not be processed', errorMessages);
+        }
+
+        console.log(`✅ Processed ${batchResult.processedVideos.length} videos successfully`);
+      } else {
+        Alert.alert('Error', batchResult.error || 'Failed to process videos');
       }
 
     } catch (error) {
-      console.error('Error picking videos:', error);
+      console.error('❌ Error picking videos:', error);
       Alert.alert('Error', 'Failed to select videos. Please try again.');
     }
   };
 
   /**
-   * Process a single selected video using the upload service
-   */
-  const processSelectedVideo = async (selectedAsset) => {
-    try {
-      // Check for duplicates using the upload service
-      const duplicateCheck = await uploadService.checkVideoDuplicate(selectedAsset, videoKeys);
-      
-      if (duplicateCheck.error) {
-        Alert.alert('Error', duplicateCheck.error);
-        return;
-      }
-
-      if (duplicateCheck.isDuplicate) {
-        Alert.alert('Duplicate Video', 'You have already added this video.');
-        return;
-      }
-
-      // Validate video using the service
-      const validation = await uploadService.validateVideoFile(selectedAsset);
-      
-      if (!validation.success) {
-        Alert.alert('Invalid Video', validation.error);
-        return;
-      }
-
-      // Create temporary video object
-      const videoData = {
-        id: selectedAsset.assetId || Date.now().toString() + Math.random(),
-        uri: selectedAsset.uri,
-        fileName: selectedAsset.fileName || `video_${Date.now()}.mp4`,
-        mimeType: selectedAsset.mimeType || 'video/mp4',
-        duration: validation.fileInfo.durationSec,
-        size: validation.fileInfo.sizeBytes,
-        thumbnail: selectedAsset.uri + "#t=0.1", // Temporary thumbnail
-      };
-
-      // Add to state
-      setVideos(prev => [...prev, videoData]);
-      setVideoThumbnails(prev => [...prev, videoData.thumbnail]);
-      setUploadStatuses(prev => [...prev, { uploading: false, uploaded: false, error: null }]);
-      setVideoKeys(prev => new Set(prev).add(duplicateCheck.videoKey));
-
-    } catch (error) {
-      console.error('Error processing video:', error);
-      Alert.alert('Error', 'Failed to process video.');
-    }
-  };
-
-  /**
-   * Upload a single video using the upload service
-   */
-  const uploadSingleVideo = async (videoData, index) => {
-    try {
-      setCurrentUploadingIndex(index);
-      
-      // Update status to uploading
-      setUploadStatuses(prev => {
-        const newStatuses = [...prev];
-        newStatuses[index] = { uploading: true, uploaded: false, error: null };
-        return newStatuses;
-      });
-
-      // Upload using the service with progress tracking
-      const uploadResult = await uploadService.uploadVideo(
-        {
-          uri: videoData.uri,
-          fileName: videoData.fileName,
-          mimeType: videoData.mimeType,
-          duration: videoData.duration,
-          assetId: videoData.id
-        },
-        index,
-        (progress) => {
-          console.log(`Video ${index + 1} upload progress:`, progress);
-          setUploadProgress(prev => ({
-            ...prev,
-            [index]: progress.progress || 0
-          }));
-        }
-      );
-
-      if (uploadResult.success) {
-        // Update video with upload results
-        setVideos(prev => {
-          const newVideos = [...prev];
-          newVideos[index] = uploadResult.videoObject;
-          return newVideos;
-        });
-
-        // Update thumbnail if we got a better one
-        if (uploadResult.thumbnailUri !== videoData.thumbnail) {
-          setVideoThumbnails(prev => {
-            const newThumbs = [...prev];
-            newThumbs[index] = uploadResult.thumbnailUri;
-            return newThumbs;
-          });
-        }
-
-        // Add URL to videoUrls array
-        setVideoUrls(prev => {
-          const newUrls = [...prev];
-          newUrls[index] = uploadResult.videoUrl;
-          return newUrls;
-        });
-
-        // Update status to uploaded
-        setUploadStatuses(prev => {
-          const newStatuses = [...prev];
-          newStatuses[index] = { uploading: false, uploaded: true, error: null };
-          return newStatuses;
-        });
-
-        return { success: true, videoUrl: uploadResult.videoUrl };
-      } else {
-        // Update status to error
-        setUploadStatuses(prev => {
-          const newStatuses = [...prev];
-          newStatuses[index] = { uploading: false, uploaded: false, error: uploadResult.error };
-          return newStatuses;
-        });
-
-        return { success: false, error: uploadResult.error };
-      }
-
-    } catch (error) {
-      console.error(`Failed to upload video ${index + 1}:`, error);
-      
-      // Update status to error
-      setUploadStatuses(prev => {
-        const newStatuses = [...prev];
-        newStatuses[index] = { uploading: false, uploaded: false, error: error.message };
-        return newStatuses;
-      });
-
-      return { success: false, error: error.message };
-    }
-  };
-
-  /**
-   * Upload all selected videos
+   * Upload all selected videos using the upload service
    */
   const handleUploadAll = async () => {
     if (videos.length === 0) {
@@ -220,31 +129,74 @@ const VideoUploadScreen = () => {
     setIsUploading(true);
     
     try {
-      const uploadedUrls = [];
-      let successCount = 0;
+      console.log(`🚀 Starting upload of ${videos.length} videos...`);
 
-      // Upload videos one by one
-      for (let i = 0; i < videos.length; i++) {
-        const video = videos[i];
-        
-        const result = await uploadSingleVideo(video, i);
-        
-        if (result.success) {
-          uploadedUrls.push(result.videoUrl);
-          successCount++;
-        } else {
-          uploadedUrls.push(null); // Placeholder for failed upload
-        }
+      // Filter out already uploaded videos
+      const videosToUpload = videos.filter((_, index) => !uploadStatuses[index]?.uploaded);
+      
+      if (videosToUpload.length === 0) {
+        Alert.alert('All videos uploaded', 'All selected videos have already been uploaded.');
+        setIsUploading(false);
+        return;
       }
+
+      const uploadResult = await uploadService.uploadMultipleVideos(
+        videosToUpload,
+        // Progress callback for overall batch progress
+        (progressData) => {
+          setCurrentUploadingIndex(progressData.videoIndex);
+          setUploadProgress(prev => ({
+            ...prev,
+            [progressData.videoIndex]: progressData.currentProgress
+          }));
+          
+          console.log(`📈 Upload progress: Video ${progressData.videoIndex + 1}/${progressData.totalVideos} - ${progressData.currentProgress}% (${progressData.stage})`);
+        },
+        // Single video complete callback
+        (index, result) => {
+          const actualIndex = videos.findIndex(v => v === videosToUpload[index]);
+          
+          if (result.success) {
+            // Update arrays with successful upload
+            const newArrays = videoManager.updateVideo(actualIndex, {
+              videoData: result.videoObject,
+              url: result.videoUrl,
+              status: { uploading: false, uploaded: true, error: null }
+            });
+            
+            setVideos(newArrays.videos);
+            setVideoUrls(newArrays.urls);
+            setUploadStatuses(newArrays.statuses);
+            
+            console.log(`✅ Video ${index + 1} uploaded successfully: ${result.videoUrl}`);
+          } else {
+            // Update status with error
+            const newArrays = videoManager.updateVideo(actualIndex, {
+              status: { uploading: false, uploaded: false, error: result.error }
+            });
+            
+            setUploadStatuses(newArrays.statuses);
+            console.log(`❌ Video ${index + 1} upload failed: ${result.error}`);
+          }
+        },
+        // Upload options
+        {
+          maxSizeMB: 20,
+          maxDurationSec: 45,
+          maxRetries: 3
+        }
+      );
+
+      console.log(`🏁 Upload complete!`, uploadResult.stats);
 
       Alert.alert(
         'Upload Complete!', 
-        `${successCount} of ${videos.length} videos uploaded successfully.`,
+        `${uploadResult.stats.successful} of ${uploadResult.stats.total} videos uploaded successfully.`,
         [
           {
             text: 'OK',
             onPress: () => {
-              if (successCount > 0) {
+              if (uploadResult.stats.successful > 0) {
                 navigation.navigate('Feed');
               }
             }
@@ -253,7 +205,7 @@ const VideoUploadScreen = () => {
       );
 
     } catch (error) {
-      console.error('Upload process failed:', error);
+      console.error('💥 Upload process failed:', error);
       Alert.alert('Upload Failed', 'Failed to upload videos. Please try again.');
     } finally {
       setIsUploading(false);
@@ -263,54 +215,101 @@ const VideoUploadScreen = () => {
   };
 
   /**
-   * Remove a video from the list
+   * Remove a video from the list with S3 deletion
    */
   const removeVideo = (index) => {
     const videoToRemove = videos[index];
-    if (videoToRemove) {
-      // Remove from videoKeys set using the service method
-      const videoKey = uploadService.createVideoKey(
-        videoToRemove.fileName || '',
-        videoToRemove.size,
-        videoToRemove.duration
-      );
-      setVideoKeys(prev => {
-        const newKeys = new Set(prev);
-        newKeys.delete(videoKey);
-        return newKeys;
-      });
+    if (!videoToRemove) {
+      Alert.alert('Error', 'Invalid video selected for deletion.');
+      return;
     }
 
-    setVideos(prev => prev.filter((_, i) => i !== index));
-    setVideoThumbnails(prev => prev.filter((_, i) => i !== index));
-    setUploadStatuses(prev => prev.filter((_, i) => i !== index));
-    setVideoUrls(prev => prev.filter((_, i) => i !== index));
-    
-    // Clean up progress tracking
-    setUploadProgress(prev => {
-      const newProgress = { ...prev };
-      delete newProgress[index];
-      return newProgress;
-    });
+    Alert.alert(
+      'Delete Video',
+      'Are you sure you want to delete this video? This action cannot be undone.',
+      [
+        {
+          text: 'Cancel',
+          style: 'cancel',
+        },
+        {
+          text: 'Delete',
+          style: 'destructive',
+          onPress: async () => {
+            try {
+              // If video has been uploaded, delete from S3
+              if (uploadStatuses[index]?.uploaded && videoToRemove.fileName) {
+                console.log(`🗑️ Deleting video from S3: ${videoToRemove.fileName}`);
+                
+                const deleteResult = await deleteVideoFromS3(videoToRemove.fileName);
+                
+                if (!deleteResult.success) {
+                  console.warn(`⚠️ S3 deletion failed: ${deleteResult.error}`);
+                  Alert.alert(
+                    'Warning', 
+                    'Video was removed locally but may still exist on server. Please contact support if needed.'
+                  );
+                }
+              }
+
+              // Remove from videoKeys set
+              const videoKey = uploadService.createVideoKey(
+                videoToRemove.fileName || '',
+                videoToRemove.size,
+                videoToRemove.duration
+              );
+              setVideoKeys(prev => {
+                const newKeys = new Set(prev);
+                newKeys.delete(videoKey);
+                return newKeys;
+              });
+
+              // Remove from arrays using video manager
+              const newArrays = videoManager.removeVideo(index);
+              setVideos(newArrays.videos);
+              setVideoThumbnails(newArrays.thumbnails);
+              setUploadStatuses(newArrays.statuses);
+              setVideoUrls(newArrays.urls);
+              
+              // Clean up progress tracking
+              setUploadProgress(prev => {
+                const newProgress = {};
+                Object.keys(prev).forEach(key => {
+                  const keyIndex = parseInt(key);
+                  if (keyIndex < index) {
+                    newProgress[keyIndex] = prev[key];
+                  } else if (keyIndex > index) {
+                    newProgress[keyIndex - 1] = prev[key];
+                  }
+                });
+                return newProgress;
+              });
+              
+              console.log(`✅ Video at index ${index} removed`);
+              
+            } catch (error) {
+              console.error(`❌ Error deleting video:`, error);
+              Alert.alert('Error', 'Failed to delete video. Please try again.');
+            }
+          },
+        },
+      ]
+    );
   };
 
   /**
-   * Move video position
+   * Move video position using video manager
    */
   const moveVideo = (fromIndex, toIndex) => {
     if (toIndex < 0 || toIndex >= videos.length) return;
     
-    const moveArray = (arr) => {
-      const newArr = [...arr];
-      const [movedItem] = newArr.splice(fromIndex, 1);
-      newArr.splice(toIndex, 0, movedItem);
-      return newArr;
-    };
+    const newArrays = videoManager.moveVideo(fromIndex, toIndex);
+    setVideos(newArrays.videos);
+    setVideoThumbnails(newArrays.thumbnails);
+    setUploadStatuses(newArrays.statuses);
+    setVideoUrls(newArrays.urls);
 
-    setVideos(moveArray);
-    setVideoThumbnails(moveArray);
-    setUploadStatuses(moveArray);
-    setVideoUrls(moveArray);
+    console.log(`🔄 Moved video from position ${fromIndex} to ${toIndex}`);
   };
 
   /**

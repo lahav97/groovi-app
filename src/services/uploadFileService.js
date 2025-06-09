@@ -1,11 +1,18 @@
 /**
  * @module uploadFileService
- * Centralized service for handling file uploads to AWS S3 via Lambda functions
+ * Simplified service for handling file uploads to AWS S3 via Lambda functions
+ * Uses videoService for video processing and validation
  */
 
 import * as FileSystem from 'expo-file-system';
-import * as VideoThumbnails from 'expo-video-thumbnails';
-import { Alert } from 'react-native';
+import axios from 'axios';
+import { 
+  validateVideoFile, 
+  processVideoAsset, 
+  processBatchVideos, 
+  generateVideoThumbnail,
+  createVideoKey 
+} from './videoService';
 
 /**
  * Configuration for upload endpoints
@@ -14,25 +21,25 @@ const UPLOAD_CONFIG = {
   VIDEO_UPLOAD_URL: 'https://cy6ikxj5lk.execute-api.us-east-1.amazonaws.com/groovi/file_upload',
   VIDEO_DELETE_URL: 'https://9u6y4sfrn2.execute-api.us-east-1.amazonaws.com/groovi/build_profile/delete',
   S3_BUCKET_BASE_URL: 'https://groovi-videos.s3.amazonaws.com/',
-  MAX_VIDEO_SIZE_MB: 20,
-  MAX_VIDEO_DURATION_SEC: 45,
   MAX_IMAGE_SIZE_MB: 5,
+  MAX_RETRIES: 3,
+  RETRY_DELAY_MS: 1000
 };
 
 /**
  * @class UploadFileService
- * Service class for handling file uploads with user context
+ * Handles file uploads with user context and progress tracking
  */
 class UploadFileService {
   constructor(user) {
     this.user = user;
     this.uploadCounter = 0;
+    this.isUploading = false;
   }
 
   /**
    * @method setUser
    * @description Updates the user context for uploads
-   * @param {Object} user - User object containing username, email, etc.
    */
   setUser(user) {
     this.user = user;
@@ -41,71 +48,14 @@ class UploadFileService {
   /**
    * @method getUserIdentifier
    * @description Gets a unique identifier for the user
-   * @returns {string} Username, email, or fallback identifier
    */
   getUserIdentifier() {
     return this.user?.username || this.user?.email || `user_${Date.now()}`;
   }
 
   /**
-   * @method validateVideoFile
-   * @description Validates a video file before upload
-   * @param {Object} videoAsset - Video asset from ImagePicker
-   * @returns {Promise<Object>} Validation result with success/error info
-   */
-  async validateVideoFile(videoAsset) {
-    try {
-      // Get file info to check size
-      const fileInfo = await FileSystem.getInfoAsync(videoAsset.uri, { size: true });
-      const sizeBytes = fileInfo?.size || 0;
-      const sizeMB = sizeBytes / (1024 * 1024);
-
-      // Handle duration calculation - convert to seconds if needed
-      let durationSec = videoAsset?.duration || 0;
-      if (durationSec > 100) {
-        durationSec = durationSec / 1000;
-      }
-
-      console.log(`Video validation - Size: ${sizeMB.toFixed(2)}MB, Duration: ${durationSec.toFixed(1)}s`);
-
-      // Validate size
-      if (sizeMB > UPLOAD_CONFIG.MAX_VIDEO_SIZE_MB) {
-        return {
-          success: false,
-          error: `Video too large. Maximum size is ${UPLOAD_CONFIG.MAX_VIDEO_SIZE_MB}MB. Your video is ${sizeMB.toFixed(2)}MB.`
-        };
-      }
-
-      // Validate duration
-      if (durationSec > UPLOAD_CONFIG.MAX_VIDEO_DURATION_SEC) {
-        return {
-          success: false,
-          error: `Video too long. Maximum duration is ${UPLOAD_CONFIG.MAX_VIDEO_DURATION_SEC} seconds. Your video is ${durationSec.toFixed(1)} seconds.`
-        };
-      }
-
-      return {
-        success: true,
-        fileInfo: {
-          sizeBytes,
-          sizeMB,
-          durationSec
-        }
-      };
-    } catch (error) {
-      console.error('Error validating video file:', error);
-      return {
-        success: false,
-        error: 'Failed to validate video file.'
-      };
-    }
-  }
-
-  /**
    * @method validateImageFile
    * @description Validates an image file before upload
-   * @param {Object} imageAsset - Image asset from ImagePicker
-   * @returns {Promise<Object>} Validation result with success/error info
    */
   async validateImageFile(imageAsset) {
     try {
@@ -122,13 +72,10 @@ class UploadFileService {
 
       return {
         success: true,
-        fileInfo: {
-          sizeBytes,
-          sizeMB
-        }
+        fileInfo: { sizeBytes, sizeMB }
       };
     } catch (error) {
-      console.error('Error validating image file:', error);
+      console.error('❌ Error validating image file:', error);
       return {
         success: false,
         error: 'Failed to validate image file.'
@@ -139,10 +86,6 @@ class UploadFileService {
   /**
    * @method generateFileName
    * @description Generates a unique filename for upload
-   * @param {string} originalFileName - Original file name
-   * @param {string} fileType - Type of file ('video' or 'image')
-   * @param {number} index - Optional index for multiple files
-   * @returns {string} Generated filename
    */
   generateFileName(originalFileName, fileType = 'video', index = null) {
     const userIdentifier = this.getUserIdentifier();
@@ -155,195 +98,295 @@ class UploadFileService {
   }
 
   /**
-   * @method getPreSignedUploadUrl
-   * @description Gets a pre-signed URL from Lambda for file upload
-   * @param {string} fileName - Name of the file to upload
-   * @returns {Promise<Object>} Object containing uploadUrl and fileUrl
+   * @method sleep
+   * @description Helper method for retry delays
    */
-  async getPreSignedUploadUrl(fileName) {
-    return new Promise((resolve, reject) => {
-      const xhr = new XMLHttpRequest();
-      
-      xhr.open('PUT', UPLOAD_CONFIG.VIDEO_UPLOAD_URL);
-      xhr.setRequestHeader('file-name', fileName);
-      xhr.setRequestHeader('Content-Type', 'application/json');
-      
-      xhr.onload = () => {
-        if (xhr.status >= 200 && xhr.status < 300) {
-          try {
-            const response = JSON.parse(xhr.responseText);
-            console.log("Lambda response for pre-signed URL:", response);
-            
-            if (response.uploadUrl && response.fileUrl) {
-              resolve({
-                uploadUrl: response.uploadUrl,
-                fileUrl: response.fileUrl
-              });
-            } else {
-              console.error('Invalid response from Lambda, missing uploadUrl or fileUrl:', response);
-              // Fallback URL
-              const fallbackUrl = `${UPLOAD_CONFIG.S3_BUCKET_BASE_URL}${fileName}`;
-              resolve({
-                uploadUrl: null,
-                fileUrl: fallbackUrl
-              });
-            }
-          } catch (error) {
-            console.error('Error parsing Lambda response:', error);
-            const fallbackUrl = `${UPLOAD_CONFIG.S3_BUCKET_BASE_URL}${fileName}`;
-            resolve({
-              uploadUrl: null,
-              fileUrl: fallbackUrl
-            });
-          }
-        } else {
-          console.error(`Failed to get pre-signed URL: ${xhr.status}: ${xhr.responseText}`);
-          reject(new Error(`Failed to get pre-signed URL: ${xhr.status}`));
-        }
-      };
-      
-      xhr.onerror = () => {
-        console.error('Network error occurred getting pre-signed URL');
-        reject(new Error('Network error getting pre-signed URL'));
-      };
-      
-      xhr.send(JSON.stringify({}));
-    });
+  async sleep(ms) {
+    return new Promise(resolve => setTimeout(resolve, ms));
   }
 
   /**
-   * @method uploadFileToS3
-   * @description Uploads a file to S3 using a pre-signed URL
-   * @param {string} fileUri - The local URI of the file to upload
-   * @param {string} presignedUrl - The pre-signed S3 URL
-   * @param {string} mimeType - MIME type of the file
-   * @returns {Promise<void>}
+   * @method uploadToLambda
+   * @description Core upload method using XHR with progress tracking and retry logic
    */
-  async uploadFileToS3(fileUri, presignedUrl, mimeType = 'video/mp4') {
-    return new Promise((resolve, reject) => {
-      const xhr = new XMLHttpRequest();
-      
-      xhr.open('PUT', presignedUrl);
-      
-      xhr.onload = () => {
-        if (xhr.status >= 200 && xhr.status < 300) {
-          console.log('File uploaded successfully to S3');
-          resolve();
-        } else {
-          console.error(`S3 upload failed with status ${xhr.status}`);
-          reject(new Error(`S3 upload failed with status ${xhr.status}`));
-        }
-      };
-      
-      xhr.onerror = () => {
-        console.error('Network error during S3 upload');
-        reject(new Error('Network error during S3 upload'));
-      };
-      
-      // Convert file URI to blob and upload
-      fetch(fileUri)
-        .then(res => res.blob())
-        .then(blob => {
-          xhr.setRequestHeader('Content-Type', blob.type || mimeType);
-          xhr.send(blob);
-        })
-        .catch(error => {
-          console.error('Error converting file URI to blob:', error);
-          reject(error);
+  async uploadToLambda(fileData, index, onProgress = null, options = {}) {
+    const { maxRetries = UPLOAD_CONFIG.MAX_RETRIES, retryDelay = UPLOAD_CONFIG.RETRY_DELAY_MS } = options;
+    
+    for (let attempt = 1; attempt <= maxRetries; attempt++) {
+      try {
+        console.log(`🚀 Upload attempt ${attempt}/${maxRetries} for file ${index + 1}`);
+
+        const customFileName = this.generateFileName(fileData.fileName, 'video', index);
+        console.log(`📁 Using filename: ${customFileName}`);
+
+        // Create the upload promise
+        const uploadResult = await new Promise((resolve, reject) => {
+          const xhr = new XMLHttpRequest();
+          
+          xhr.open('PUT', UPLOAD_CONFIG.VIDEO_UPLOAD_URL);
+          xhr.setRequestHeader('file-name', customFileName);
+          xhr.setRequestHeader('Content-Type', fileData.mimeType || 'video/mp4');
+          
+          // Track upload progress
+          xhr.upload.onprogress = (event) => {
+            if (event.lengthComputable && onProgress) {
+              const progress = Math.round((event.loaded / event.total) * 100);
+              onProgress({ 
+                progress, 
+                loaded: event.loaded, 
+                total: event.total,
+                stage: 'uploading',
+                attempt,
+                index
+              });
+            }
+          };
+          
+          xhr.onload = () => {
+            if (xhr.status >= 200 && xhr.status < 300) {
+              console.log(`✅ File ${index + 1} uploaded successfully on attempt ${attempt}!`);
+              
+              try {
+                const response = JSON.parse(xhr.responseText);
+                const fileUrl = response.url || `${UPLOAD_CONFIG.S3_BUCKET_BASE_URL}${customFileName}`;
+                
+                resolve({
+                  success: true,
+                  url: fileUrl,
+                  fileName: customFileName,
+                  originalData: fileData
+                });
+              } catch (error) {
+                const fallbackUrl = `${UPLOAD_CONFIG.S3_BUCKET_BASE_URL}${customFileName}`;
+                resolve({
+                  success: true,
+                  url: fallbackUrl,
+                  fileName: customFileName,
+                  originalData: fileData
+                });
+              }
+            } else {
+              reject(new Error(`Upload failed with status ${xhr.status}`));
+            }
+          };
+          
+          xhr.onerror = () => {
+            reject(new Error('Network error during upload'));
+          };
+          
+          // Get the blob from the URI and send it
+          fetch(fileData.uri)
+            .then(res => res.blob())
+            .then(blob => xhr.send(blob))
+            .catch(error => reject(error));
         });
-    });
+
+        return uploadResult;
+
+      } catch (error) {
+        console.error(`❌ Upload attempt ${attempt} failed:`, error);
+        
+        if (attempt === maxRetries) {
+          return {
+            success: false,
+            error: error.message || 'Upload failed after all retry attempts'
+          };
+        }
+        
+        if (attempt < maxRetries) {
+          await this.sleep(retryDelay * attempt);
+        }
+      }
+    }
   }
 
   /**
    * @method uploadVideo
-   * @description Complete video upload process with validation and thumbnail generation
-   * @param {Object} videoAsset - Video asset from ImagePicker
-   * @param {number} index - Optional index for multiple videos
-   * @param {Function} onProgress - Optional progress callback
-   * @returns {Promise<Object>} Upload result with video URL and metadata
+   * @description Upload a single video with processing and validation
    */
-  async uploadVideo(videoAsset, index = null, onProgress = null) {
+  async uploadVideo(videoAsset, existingKeys = new Set(), index = null, onProgress = null, options = {}) {
     try {
-      if (onProgress) onProgress({ stage: 'validating', progress: 0 });
-
-      // Validate video file
-      const validation = await this.validateVideoFile(videoAsset);
-      if (!validation.success) {
-        throw new Error(validation.error);
-      }
-
-      if (onProgress) onProgress({ stage: 'generating_thumbnail', progress: 20 });
-
-      // Generate thumbnail
-      let thumbnailUri;
-      try {
-        const { uri: thumbUri } = await VideoThumbnails.getThumbnailAsync(
-          videoAsset.uri,
-          { time: 1000 }
-        );
-        thumbnailUri = thumbUri;
-      } catch (thumbError) {
-        console.warn('Failed to generate thumbnail, using fallback:', thumbError);
-        thumbnailUri = videoAsset.uri + "#t=0.1";
-      }
-
-      if (onProgress) onProgress({ stage: 'preparing_upload', progress: 40 });
-
-      // Generate filename and get pre-signed URL
-      const fileName = this.generateFileName(videoAsset.fileName, 'video', index);
-      console.log(`Uploading video with filename: ${fileName}`);
-
-      const { uploadUrl, fileUrl } = await this.getPreSignedUploadUrl(fileName);
-
-      if (onProgress) onProgress({ stage: 'uploading', progress: 60 });
-
-      // Upload to S3 if we have a pre-signed URL
-      if (uploadUrl) {
-        await this.uploadFileToS3(videoAsset.uri, uploadUrl, videoAsset.mimeType || 'video/mp4');
-      }
-
-      if (onProgress) onProgress({ stage: 'complete', progress: 100 });
-
-      // Create video object with all metadata
-      const videoObj = {
-        id: videoAsset.assetId || Date.now().toString(),
-        uri: videoAsset.uri,
-        fileName: fileName,
-        mimeType: videoAsset.mimeType || 'video/mp4',
-        duration: validation.fileInfo.durationSec,
-        size: validation.fileInfo.sizeBytes,
-        thumbnail: thumbnailUri,
-        uploadedUrl: fileUrl
-      };
-
-      console.log(`Video uploaded successfully! URL: ${fileUrl}`);
+      this.isUploading = true;
       
-      return {
-        success: true,
-        videoUrl: fileUrl,
-        videoObject: videoObj,
-        thumbnailUri: thumbnailUri
-      };
+      if (onProgress) onProgress({ stage: 'processing', progress: 0, index });
+
+      // Process video using videoService
+      const processResult = await processVideoAsset(videoAsset, existingKeys, options);
+      
+      if (!processResult.success) {
+        throw new Error(processResult.error);
+      }
+
+      if (onProgress) onProgress({ stage: 'uploading', progress: 30, index });
+
+      // Upload the processed video
+      const uploadResult = await this.uploadToLambda(
+        processResult.videoData, 
+        index || 0, 
+        (uploadProgress) => {
+          if (onProgress) {
+            const scaledProgress = 30 + (uploadProgress.progress * 0.7);
+            onProgress({ 
+              stage: 'uploading', 
+              progress: Math.round(scaledProgress), 
+              index
+            });
+          }
+        }, 
+        options
+      );
+
+      if (uploadResult.success) {
+        if (onProgress) onProgress({ stage: 'complete', progress: 100, index });
+        
+        return {
+          success: true,
+          videoUrl: uploadResult.url,
+          videoData: processResult.videoData,
+          videoKey: processResult.videoKey,
+          fileName: uploadResult.fileName
+        };
+      } else {
+        throw new Error(uploadResult.error);
+      }
 
     } catch (error) {
-      console.error(`Error uploading video:`, error);
+      console.error(`❌ Error uploading video:`, error);
+      if (onProgress) onProgress({ stage: 'error', progress: 0, index, error: error.message });
       return {
         success: false,
         error: error.message || 'Failed to upload video'
       };
+    } finally {
+      this.isUploading = false;
+    }
+  }
+
+  /**
+   * @method uploadMultipleVideos
+   * @description Upload multiple videos with batch processing
+   */
+  async uploadMultipleVideos(videoAssets, existingKeys = new Set(), onProgress = null, onSingleComplete = null, options = {}) {
+    try {
+      console.log(`🚀 Starting batch upload of ${videoAssets.length} videos...`);
+      this.isUploading = true;
+
+      // First, process all videos using videoService
+      const batchProcessResult = await processBatchVideos(
+        videoAssets, 
+        existingKeys, 
+        options,
+        (progressData) => {
+          if (onProgress) {
+            onProgress({
+              stage: 'processing',
+              videoIndex: progressData.current - 1,
+              totalVideos: videoAssets.length,
+              currentProgress: Math.round((progressData.current / progressData.total) * 30)
+            });
+          }
+        }
+      );
+
+      if (!batchProcessResult.success) {
+        throw new Error('Failed to process videos');
+      }
+
+      const { processedVideos, videoKeys, errors } = batchProcessResult;
+      const uploadResults = [];
+      const uploadedUrls = [];
+      let successCount = 0;
+
+      // Upload each processed video
+      for (let i = 0; i < processedVideos.length; i++) {
+        const videoData = processedVideos[i];
+        
+        if (onProgress) {
+          onProgress({
+            stage: 'uploading',
+            videoIndex: i,
+            totalVideos: processedVideos.length,
+            currentProgress: 30 + Math.round((i / processedVideos.length) * 70)
+          });
+        }
+
+        const uploadResult = await this.uploadToLambda(
+          videoData, 
+          i, 
+          (uploadProgress) => {
+            if (onProgress) {
+              const baseProgress = 30 + Math.round((i / processedVideos.length) * 70);
+              const videoProgress = Math.round(uploadProgress.progress * 0.7 / processedVideos.length);
+              onProgress({
+                stage: 'uploading',
+                videoIndex: i,
+                totalVideos: processedVideos.length,
+                currentProgress: baseProgress + videoProgress
+              });
+            }
+          },
+          options
+        );
+        
+        uploadResults.push(uploadResult);
+        
+        if (uploadResult.success) {
+          uploadedUrls.push(uploadResult.url);
+          successCount++;
+        } else {
+          uploadedUrls.push(null);
+        }
+
+        if (onSingleComplete) {
+          onSingleComplete(i, uploadResult);
+        }
+      }
+
+      console.log(`🏁 Batch upload complete! ${successCount}/${processedVideos.length} videos uploaded`);
+
+      return {
+        success: successCount > 0,
+        results: uploadResults,
+        uploadedUrls: uploadedUrls.filter(url => !!url),
+        processedVideos,
+        videoKeys,
+        processingErrors: errors,
+        stats: {
+          total: videoAssets.length,
+          processed: processedVideos.length,
+          uploaded: successCount,
+          failed: processedVideos.length - successCount,
+          processingErrors: errors.length
+        }
+      };
+
+    } catch (error) {
+      console.error('💥 Batch upload process failed:', error);
+      return {
+        success: false,
+        error: error.message || 'Batch upload failed',
+        results: [],
+        uploadedUrls: [],
+        stats: {
+          total: videoAssets.length,
+          processed: 0,
+          uploaded: 0,
+          failed: videoAssets.length
+        }
+      };
+    } finally {
+      this.isUploading = false;
     }
   }
 
   /**
    * @method uploadImage
-   * @description Complete image upload process with validation
-   * @param {Object} imageAsset - Image asset from ImagePicker
-   * @param {string} imageType - Type of image ('profile', 'cover', etc.)
-   * @param {Function} onProgress - Optional progress callback
-   * @returns {Promise<Object>} Upload result with image URL
+   * @description Upload an image file
    */
   async uploadImage(imageAsset, imageType = 'profile', onProgress = null) {
     try {
+      this.isUploading = true;
+      
       if (onProgress) onProgress({ stage: 'validating', progress: 0 });
 
       // Validate image file
@@ -352,101 +395,107 @@ class UploadFileService {
         throw new Error(validation.error);
       }
 
-      if (onProgress) onProgress({ stage: 'preparing_upload', progress: 30 });
+      if (onProgress) onProgress({ stage: 'uploading', progress: 30 });
 
-      // Generate filename and get pre-signed URL
-      const fileName = this.generateFileName(imageAsset.fileName || `${imageType}.jpg`, 'image');
-      console.log(`Uploading image with filename: ${fileName}`);
-
-      const { uploadUrl, fileUrl } = await this.getPreSignedUploadUrl(fileName);
-
-      if (onProgress) onProgress({ stage: 'uploading', progress: 60 });
-
-      // Upload to S3 if we have a pre-signed URL
-      if (uploadUrl) {
-        await this.uploadFileToS3(imageAsset.uri, uploadUrl, imageAsset.mimeType || 'image/jpeg');
-      }
-
-      if (onProgress) onProgress({ stage: 'complete', progress: 100 });
-
-      console.log(`Image uploaded successfully! URL: ${fileUrl}`);
-      
-      return {
-        success: true,
-        imageUrl: fileUrl,
-        fileName: fileName
+      // Prepare image data
+      const imageData = {
+        id: imageAsset.assetId || Date.now().toString(),
+        uri: imageAsset.uri,
+        fileName: imageAsset.fileName || `${imageType}_${Date.now()}.jpg`,
+        mimeType: imageAsset.mimeType || 'image/jpeg',
+        size: validation.fileInfo.sizeBytes
       };
 
+      const uploadResult = await this.uploadToLambda(imageData, 0, onProgress);
+
+      if (uploadResult.success) {
+        if (onProgress) onProgress({ stage: 'complete', progress: 100 });
+        
+        return {
+          success: true,
+          imageUrl: uploadResult.url,
+          fileName: uploadResult.fileName
+        };
+      } else {
+        throw new Error(uploadResult.error);
+      }
+
     } catch (error) {
-      console.error(`Error uploading image:`, error);
+      console.error(`❌ Error uploading image:`, error);
+      if (onProgress) onProgress({ stage: 'error', progress: 0, error: error.message });
       return {
         success: false,
         error: error.message || 'Failed to upload image'
       };
+    } finally {
+      this.isUploading = false;
     }
   }
 
   /**
    * @method deleteFile
-   * @description Deletes a file from S3 (if deletion endpoint is available)
-   * @param {string} fileName - Name of the file to delete
-   * @returns {Promise<boolean>} Success status
+   * @description Delete a file from S3
    */
   async deleteFile(fileName) {
     try {
-      console.log(`Attempting to delete file: ${fileName}`);
+      console.log(`🗑️ Deleting file from S3: ${fileName}`);
       
-      // Note: This would require implementing a delete endpoint
-      // For now, we'll just log the deletion attempt
-      console.log(`File deletion not implemented yet for: ${fileName}`);
-      
-      return true;
-    } catch (error) {
-      console.error(`Error deleting file ${fileName}:`, error);
-      return false;
-    }
-  }
+      const deleteUrl = `${UPLOAD_CONFIG.VIDEO_DELETE_URL}?filename=${encodeURIComponent(fileName)}`;
+      const response = await axios.delete(deleteUrl);
 
-  /**
-   * @method createVideoKey
-   * @description Creates a unique key for video deduplication
-   * @param {string} fileName - Original filename
-   * @param {number} size - File size in bytes
-   * @param {number} duration - Duration in seconds
-   * @returns {string} Unique video key
-   */
-  createVideoKey(fileName, size, duration) {
-    return `${fileName}_${size}_${Math.round(duration * 10)}`;
-  }
-
-  /**
-   * @method checkVideoDuplicate
-   * @description Checks if a video is a duplicate based on existing keys
-   * @param {Object} videoAsset - Video asset to check
-   * @param {Set} existingKeys - Set of existing video keys
-   * @returns {Promise<Object>} Duplicate check result
-   */
-  async checkVideoDuplicate(videoAsset, existingKeys) {
-    try {
-      const validation = await this.validateVideoFile(videoAsset);
-      if (!validation.success) {
-        return { isDuplicate: false, error: validation.error };
+      if (response.status === 200) {
+        console.log(`✅ File ${fileName} deleted successfully from S3`);
+        return {
+          success: true,
+          message: `File ${fileName} deleted successfully`
+        };
+      } else {
+        return {
+          success: false,
+          error: `Failed to delete file: ${response.status}`
+        };
       }
-
-      const videoKey = this.createVideoKey(
-        videoAsset.fileName || 'unknown',
-        validation.fileInfo.sizeBytes,
-        validation.fileInfo.durationSec
-      );
-
-      return {
-        isDuplicate: existingKeys.has(videoKey),
-        videoKey: videoKey
-      };
     } catch (error) {
-      console.error('Error checking video duplicate:', error);
-      return { isDuplicate: false, error: 'Failed to check duplicate' };
+      console.error(`❌ Error deleting file ${fileName}:`, error.response?.data || error.message);
+      return {
+        success: false,
+        error: error.response?.data?.message || error.message || 'Failed to delete file'
+      };
     }
+  }
+
+  /**
+   * @method getUploadStatus
+   * @description Get current upload status
+   */
+  getUploadStatus() {
+    return {
+      isUploading: this.isUploading,
+      uploadCounter: this.uploadCounter,
+      userIdentifier: this.getUserIdentifier()
+    };
+  }
+
+  /**
+   * @method getServiceStats
+   * @description Get service statistics
+   */
+  getServiceStats() {
+    return {
+      service: 'UploadFileService',
+      user: this.getUserIdentifier(),
+      uploadCounter: this.uploadCounter,
+      isUploading: this.isUploading,
+      config: {
+        maxImageSizeMB: UPLOAD_CONFIG.MAX_IMAGE_SIZE_MB,
+        maxRetries: UPLOAD_CONFIG.MAX_RETRIES
+      },
+      endpoints: {
+        upload: UPLOAD_CONFIG.VIDEO_UPLOAD_URL,
+        delete: UPLOAD_CONFIG.VIDEO_DELETE_URL,
+        s3Base: UPLOAD_CONFIG.S3_BUCKET_BASE_URL
+      }
+    };
   }
 }
 

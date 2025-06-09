@@ -87,12 +87,10 @@ const InstrumentsScreen = () => {
   const [searchQuery, setSearchQuery] = useState('');
   const [expandedCategories, setExpandedCategories] = useState({});
 
-  // 🚀 NEW: Load user data from AsyncStorage on component mount
   useEffect(() => {
     const loadUserFromStorage = async () => {
       try {
         const stored = await AsyncStorage.getItem('signupBuilderBackup');
-        console.log('📦 InstrumentsScreen: Attempting to read signupBuilderBackup from AsyncStorage...');
 
         if (stored) {
           const parsedUser = JSON.parse(stored);

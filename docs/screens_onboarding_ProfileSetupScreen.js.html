@@ -93,7 +93,6 @@ const ProfileSetupScreen = () => {
     const loadUserFromStorage = async () => {
       try {
         const stored = await AsyncStorage.getItem('signupBuilderBackup');
-        console.log('📦 Attempting to read signupBuilderBackup from AsyncStorage...');
 
         if (stored) {
           const parsedUser = JSON.parse(stored);  
