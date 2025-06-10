@@ -12,9 +12,9 @@ DB_PORT = 5432
 
 # Fields allowed to be updated
 ALLOWED_FIELDS = {
-    "phone_number", "address", "profile_picture",
-    "bio", "social_links", "instruments", "rating",
-    "genres", "videos", "full_name", "gender"
+    "address", "profile_picture",
+    "bio", "social_links", "instruments",
+    "genres", "videos", "location"
 }
 
 # Fields that can be used to identify the user
@@ -101,7 +101,7 @@ if __name__ == "__main__":
     test_event = {
         "body": json.dumps({
             "username": "ed_sheeran",
-            "gender": "male"
+            "bio": "Updated bio for Ed Sheeran"
         })
     }
 
