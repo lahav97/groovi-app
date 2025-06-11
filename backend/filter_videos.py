@@ -43,17 +43,17 @@ def lambda_handler(event, context):
         # If no filters: show 5 random videos
         if not any([location, min_age, max_age, instruments, genres]):
             cur.execute("""
-                SELECT id, username, videos, instruments
+                SELECT id, username, videos, profile_picture, instruments
                 FROM users
                 WHERE username != %s
                   AND videos IS NOT NULL
                   AND array_length(videos, 1) > 0
                 ORDER BY RANDOM()
-                LIMIT 10
+                LIMIT 3
             """, (username,))
         else:
             query = """
-                SELECT id, username, videos, instruments
+                SELECT id, username, videos, profile_picture, instruments
                 FROM users
                 WHERE username != %s
                   AND videos IS NOT NULL
@@ -91,21 +91,32 @@ def lambda_handler(event, context):
                 query += " AND genres && %s::text[]"
                 params.append(genres)
 
-            query += " ORDER BY RANDOM() LIMIT 10"
+            query += " ORDER BY RANDOM() LIMIT 3"
             cur.execute(query, params)
 
         users = cur.fetchall()
 
-        for user_id, u_name, videos, user_instruments in users:
-            if videos:
-                result.append({
-                    "user_id": user_id,
-                    "username": u_name,
-                    "video_url": random.choice(videos),
-                    "instruments": list(user_instruments.keys()) if user_instruments else []
-                })
-            if len(result) == 5:
-                break
+        # for user_id, u_name, videos, user_instruments in users:
+        #     if videos:
+        #         result.append({
+        #             "user_id": user_id,
+        #             "username": u_name,
+        #             "video_url": random.choice(videos),
+        #             "instruments": list(user_instruments.keys()) if user_instruments else []
+        #         })
+        #     if len(result) == 5:
+        #         break
+
+        result = [
+             {
+                 "id": row[0],
+                 "username": row[1],
+                 "video_url": random.choice(row[2]) if row[2] else None,  # pick a random video URL
+                 # "profile_picture": row[3],
+                 "instruments": list(row[4].keys()) if row[4] else [],  # to return just the instrument names no skill
+             }
+             for row in users
+        ]
 
         return {
             "statusCode": 200,
