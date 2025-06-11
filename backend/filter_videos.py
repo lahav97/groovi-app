@@ -96,17 +96,6 @@ def lambda_handler(event, context):
 
         users = cur.fetchall()
 
-        # for user_id, u_name, videos, user_instruments in users:
-        #     if videos:
-        #         result.append({
-        #             "user_id": user_id,
-        #             "username": u_name,
-        #             "video_url": random.choice(videos),
-        #             "instruments": list(user_instruments.keys()) if user_instruments else []
-        #         })
-        #     if len(result) == 5:
-        #         break
-
         result = [
              {
                  "id": row[0],
