@@ -26,6 +26,11 @@ import { useAuth } from '../../context/AuthContext';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import Button from '../../components/common/Button';
 import { COLORS } from '../../styles/theme';
+import {
+  ERROR_MESSAGES,
+  createValidationError,
+  handleError
+} from '../../utils/errors';
 
 if (Platform.OS === 'android' && UIManager.setLayoutAnimationEnabledExperimental) {
   UIManager.setLayoutAnimationEnabledExperimental(true);
@@ -190,18 +195,21 @@ const InstrumentsScreen = () => {
    * @description Proceeds to the next screen after selecting instruments.
    */
   const handleContinue = async () => {
-    if (Object.keys(instrumentLevels).length === 0) {
-      Alert.alert('Selection Required', 'Please select at least one instrument and its level.');
-      return;
+    try {
+      if (Object.keys(instrumentLevels).length === 0) {
+        throw createValidationError('REQUIRED_FIELD', 'instruments');
+      }
+
+      // Ensure builder has the latest instruments
+      builder.setInstruments(instrumentLevels);
+
+      await saveUserToStorage(instrumentLevels);
+
+      // Navigate to next screen
+      navigation.navigate('Profile Setup');
+    } catch (error) {
+      Alert.alert('Selection Required', handleError(error, 'InstrumentsScreen/handleContinue'));
     }
-
-    // Ensure builder has the latest instruments
-    builder.setInstruments(instrumentLevels);
-
-    await saveUserToStorage(instrumentLevels);
-
-    // Navigate to next screen
-    navigation.navigate('Profile Setup');
   };
 
   const allInstruments = Object.values(instrumentCategories).flat().filter(i => i !== 'Other');

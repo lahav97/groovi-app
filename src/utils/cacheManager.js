@@ -81,7 +81,7 @@ const setCacheTimestamp = async (key, timestamp = getCurrentTimestamp()) => {
 };
 
 // ============================================================================
-// FEED CACHE MANAGEMENT (COMPLETELY SEPARATE FROM PROFILE)
+// DISCOVER SCREEN CACHE MANAGEMENT
 // ============================================================================
 
 /**
@@ -91,7 +91,7 @@ const setCacheTimestamp = async (key, timestamp = getCurrentTimestamp()) => {
  */
 export const cacheFeedVideos = async (feedVideos, metadata = {}) => {
   try {
-    console.log(`💾 Caching ${feedVideos.length} FEED videos (separate from profile)`);
+    console.log(`💾 Caching ${feedVideos.length} discover screen videos`);
     
     // Cache FEED videos only
     await AsyncStorage.setItem(CACHE_KEYS.FEED_VIDEOS, JSON.stringify(feedVideos));
@@ -123,7 +123,6 @@ export const getFeedCache = async () => {
     // Check if FEED cache exists and is not expired
     const timestamp = await getCacheTimestamp(CACHE_KEYS.FEED_VIDEOS);
     if (!timestamp || isCacheExpired(timestamp, CACHE_EXPIRY.FEED_VIDEOS)) {
-      console.log('⏰ FEED cache expired or not found');
       return null;
     }
 
@@ -131,7 +130,7 @@ export const getFeedCache = async () => {
     const cachedFeedVideos = await AsyncStorage.getItem(CACHE_KEYS.FEED_VIDEOS);
     if (cachedFeedVideos) {
       const feedVideos = JSON.parse(cachedFeedVideos);
-      console.log(`⚡ Retrieved ${feedVideos.length} cached FEED videos (separate from profile)`);
+      console.log(`⚡ Retrieved ${feedVideos.length} cached discover screen videos`);
       return feedVideos;
     }
 
@@ -252,7 +251,6 @@ export const getProfileCache = async (userEmail) => {
         }
       }
       
-      console.log(`⚡ Retrieved cached profile for: ${userEmail} (independent of feed)`);
       return profile;
     }
 

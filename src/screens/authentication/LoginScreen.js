@@ -13,6 +13,9 @@ import * as Facebook from 'expo-auth-session/providers/facebook';
 import * as Google from 'expo-auth-session/providers/google';
 import * as WebBrowser from 'expo-web-browser';
 import Button from '../../components/common/Button';
+import {
+  handleError
+} from '../../utils/errors';
 
 WebBrowser.maybeCompleteAuthSession();
 
@@ -47,11 +50,14 @@ const LoginScreen = () => {
       const { accessToken, expiresIn } = googleResponse.authentication;
   
       (async () => {
-        const profile = await getGoogleProfile(accessToken);
-        await signInToCognito('google', accessToken, expiresIn, profile);
-  
-        navigation.navigate('Feed');
-      })().catch(console.error);
+        try {
+          const profile = await getGoogleProfile(accessToken);
+          await signInToCognito('google', accessToken, expiresIn, profile);
+          navigation.navigate('Feed');
+        } catch (error) {
+          console.error(handleError(error, 'LoginScreen/Google'));
+        }
+      })();
     }
   }, [googleResponse]);
 
@@ -61,10 +67,14 @@ const LoginScreen = () => {
       const { accessToken, expiresIn } = fbResponse.authentication;
   
       (async () => {
-        const profile = await getFacebookProfile(accessToken);
-        await signInToCognito('facebook', accessToken, expiresIn, profile);
-        navigation.navigate('Feed');
-      })().catch(console.error);
+        try {
+          const profile = await getFacebookProfile(accessToken);
+          await signInToCognito('facebook', accessToken, expiresIn, profile);
+          navigation.navigate('Feed');
+        } catch (error) {
+          console.error(handleError(error, 'LoginScreen/Facebook'));
+        }
+      })();
     }
   }, [fbResponse]);
 

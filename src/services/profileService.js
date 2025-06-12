@@ -19,7 +19,6 @@ export const fetchUserProfile = async (field, value) => {
       }
     });
     
-    console.log('Received response:', response.status);
     return response.data;
   } catch (error) {
     console.error('Error fetching profile:', error.message);

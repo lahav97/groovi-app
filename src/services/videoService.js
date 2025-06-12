@@ -1,17 +1,109 @@
 import axios from 'axios';
 import * as FileSystem from 'expo-file-system';
 import * as VideoThumbnails from 'expo-video-thumbnails';
+import { handleError } from '../utils/errors';
 
-const FEED_API_URL = 'https://ioeunedt82.execute-api.us-east-1.amazonaws.com/groovi/load_feed';
+const MUSICIAN_API_URL = 'https://yflgdontu1.execute-api.us-east-1.amazonaws.com/groovi/discover';
 const DELETE_API_URL = 'https://9u6y4sfrn2.execute-api.us-east-1.amazonaws.com/groovi/build_profile/delete';
 
-// Keep track of video IDs we've already fetched to avoid duplicates
 let fetchedVideoIds = new Set();
 let currentOffset = 0;
 let hasReachedActualEnd = false;
 
 /**
- * Fetches videos for the feed with pagination
+ * Fetches musicians with 3 distinct patterns
+ * @param {string} type - 'initial' (returns 5 users) or 'filter' (returns 3 users)
+ * @param {string} username - Username for musician search
+ * @param {Object} filterCriteria - Filter JSON for filtered musicians (optional)
+ * @param {boolean} hasFilters - Whether this is actual filtering or just "load more"
+ * @returns {Promise<Array>} - Array of musician objects (5 for initial, 3 for filter)
+ */
+export const fetchMusicians = async (type = 'initial', username = null, filterCriteria = null, hasFilters = false) => {
+  try {
+    console.log(`🎯 Fetching musicians - Type: ${type}, Username: ${username}, HasFilters: ${hasFilters}`);
+
+    if (type === 'initial') {
+      let url = `${MUSICIAN_API_URL}?type=initial&username=${encodeURIComponent(username)}`;
+
+      const response = await axios.get(url);
+      
+      if (!response.data || !Array.isArray(response.data)) {
+        console.log('❌ Invalid API response format');
+        return [];
+      }
+
+      console.log(`✅ Initial musicians: ${response.data.length} musicians`);
+      return formatMusicianResponse(response.data);
+      
+    } else if (type === 'filter') {
+      if (hasFilters && filterCriteria && Object.keys(filterCriteria).length > 1) {
+        let url = `${MUSICIAN_API_URL}?type=filter`;
+        
+        console.log(`📡 Filtered musicians: POST ${url}`);
+        console.log(`🔍 Filter criteria:`, filterCriteria);
+        
+        const response = await axios.post(url, filterCriteria, {
+          headers: {
+            'Content-Type': 'application/json'
+          }
+        });
+        
+        if (!response.data || !Array.isArray(response.data)) {
+          console.log('❌ Invalid API response format');
+          return [];
+        }
+
+        console.log(`✅ Filtered musicians: ${response.data.length} musicians`);
+        return formatMusicianResponse(response.data);
+        
+      } else {
+        let url = `${MUSICIAN_API_URL}?type=filter&username=${encodeURIComponent(username)}`;
+        
+        console.log(`📡 Load more musicians (no filters)`);
+        const response = await axios.get(url);
+        
+        if (!response.data || !Array.isArray(response.data)) {
+          console.log('❌ Invalid API response format');
+          return [];
+        }
+
+        console.log(`✅ Load more musicians: ${response.data.length} musicians`);
+        return formatMusicianResponse(response.data);
+      }
+    }
+
+  } catch (error) {
+    console.error('❌ Error fetching musicians:', handleError(error, 'videoService/fetchMusicians'));
+    if (error.response) {
+      console.error('Response data:', error.response.data);
+      console.error('Response status:', error.response.status);
+    }
+    return [];
+  }
+};
+
+/**
+ * Helper function to transform API response to expected format
+ * @param {Array} apiData - Raw data from API
+ * @returns {Array} - Transformed musician objects
+ */
+const formatMusicianResponse = (apiData) => {
+  const musicians = apiData.map(musician => ({
+    id: musician.id,
+    username: musician.username,
+    videos: [musician.video_url],
+    instruments: musician.instruments || [],
+    bio: `Music enthusiast playing ${(musician.instruments || []).slice(0, 2).join(', ')}`,
+    location: 'Unknown',
+    genres: [],
+    age: null,
+    rating: Math.floor(Math.random() * 5) + 1,
+  }));
+
+  return musicians;
+};
+
+/**
  * @param {number} offset - The starting index for fetching videos
  * @param {number} limit - How many videos to fetch
  * @returns {Promise<Array>} - Array of unique video objects
@@ -23,52 +115,78 @@ export const fetchVideos = async (offset = 0, limit = 5) => {
       console.log('🔄 Reset video state tracking');
     }
 
-    const response = await axios.get(FEED_API_URL, {
-      params: {
-        limit: limit,
-        lastId: offset > 0 ? offset : null,
-      }
-    });
-
-    console.log('API returned video IDs:', response.data.map(v => v.id || v.user_id || v.video_url));
-    console.log('Already fetched IDs:', Array.from(fetchedVideoIds));
-
-    if (!response.data || !Array.isArray(response.data)) {
-      console.log('❌ Invalid API response format');
-      return [];
-    }
-
-    console.log(`✅ API returned ${response.data.length} videos`);
-
-    if (response.data.length === 0) {
-      console.log('🏁 API returned 0 videos - reached actual end for this offset');
-      hasReachedActualEnd = true;
-      return [];
-    }
-
-    const uniqueVideos = response.data.filter(video => {
-      const videoId = video.id || video.user_id || video.video_url;
+    const musicians = await fetchMusicians('initial', 'default_user');
     
-      if (!fetchedVideoIds.has(videoId)) return true;
-    
-      const allowRepeat = Math.random() < 0.1;
-      return allowRepeat;
-    });
+    const videos = musicians.map(musician => ({
+      id: musician.id,
+      user_id: musician.id,
+      username: musician.username,
+      user: musician.username,
+      video_url: musician.videos[0],
+      videoUrl: musician.videos[0],
+      instruments: musician.instruments,
+    }));
 
-    uniqueVideos.forEach(video => {
-      const videoId = video.id || video.user_id || video.video_url;
-      if (videoId) {
-        fetchedVideoIds.add(videoId);
-      }
-    });
-
-    console.log(`🎯 Returning ${uniqueVideos.length} unique videos after filtering`);
-    console.log(`📊 Total unique videos fetched across all calls: ${fetchedVideoIds.size}`);
-
-    return uniqueVideos;
+    console.log(`🎯 Returning ${videos.length} videos from musician API`);
+    return videos;
 
   } catch (error) {
-    console.error('❌ Error fetching videos:', error);
+    console.error('❌ Error fetching videos:', handleError(error, 'videoService/fetchVideos'));
+    return [];
+  }
+};
+
+/**
+ * Apply filters to discovery (with actual filters)
+ * @param {string} username - Username applying filters
+ * @param {Object} filters - Filter object with genres, instruments, location, etc.
+ * @returns {Promise<Array>} - Filtered musicians (3 results)
+ */
+export const fetchFilteredMusicians = async (username, filters = {}) => {
+  try {
+    console.log(`🔍 Applying filters for ${username}:`, filters);
+
+    const filterCriteria = {
+      username: username,
+      ...filters
+    };
+
+    const hasActualFilters = Object.keys(filters).length > 0;
+    
+    return await fetchMusicians('filter', username, filterCriteria, hasActualFilters);
+  } catch (error) {
+    console.error('❌ Error applying filters:', error);
+    return [];
+  }
+};
+
+/**
+ * Load more musicians without filters
+ * @param {string} username - Username for discovery
+ * @returns {Promise<Array>} - 3 random musicians
+ */
+export const loadMusicianWithoutFilters = async (username) => {
+  try {
+    console.log(`🔄 Loading more musicians (no filters) for ${username}`);
+    
+    return await fetchMusicians('filter', username, { username }, false);
+  } catch (error) {
+    console.error('❌ Error loading more musicians:', error);
+    return [];
+  }
+};
+
+/**
+ * Get initial musicians for a user
+ * @param {string} username - Username to get discovery for
+ * @returns {Promise<Array>} - Initial discovery musicians
+ */
+export const fetchInitialMusicians = async (username) => {
+  try {
+    console.log(`🚀 Getting initial musicians for ${username}`);
+    return await fetchMusicians('initial', username);
+  } catch (error) {
+    console.error('❌ Error getting initial musicians:', error);
     return [];
   }
 };
@@ -82,26 +200,22 @@ export const fetchVideos = async (offset = 0, limit = 5) => {
 export const validateVideoFile = async (videoAsset, options = {}) => {
   try {
     const {
-      maxSizeMB = 20, // Default for upload screen, can be overridden for setup screen (4MB)
-      maxDurationSec = 45 // Default for upload screen, can be overridden for setup screen (30s)
+      maxSizeMB = 20,
+      maxDurationSec = 45
     } = options;
 
-    // Get file info to check size
     const fileInfo = await FileSystem.getInfoAsync(videoAsset.uri, { size: true });
     const sizeBytes = fileInfo?.size || 0;
     const sizeMB = sizeBytes / (1024 * 1024);
 
-    // Handle duration calculation - different versions return different formats
     let durationSec = videoAsset?.duration || 0;
     
-    // If duration is very large, it's likely in milliseconds, so convert to seconds
     if (durationSec > 100) {
       durationSec = durationSec / 1000;
     }
 
     console.log(`📊 Video validation - Size: ${sizeMB.toFixed(2)}MB, Duration: ${durationSec.toFixed(1)}s`);
 
-    // Validate size
     if (sizeMB > maxSizeMB) {
       return {
         success: false,
@@ -109,7 +223,6 @@ export const validateVideoFile = async (videoAsset, options = {}) => {
       };
     }
 
-    // Validate duration
     if (durationSec > maxDurationSec) {
       return {
         success: false,
@@ -208,7 +321,7 @@ export const generateVideoThumbnail = async (videoUri, timeMs = 100) => {
     console.error('❌ Error generating thumbnail:', error);
     return {
       success: false,
-      thumbnailUri: videoUri + "#t=0.1", // Fallback thumbnail
+      thumbnailUri: videoUri + "#t=0.1",
       error: 'Failed to generate thumbnail'
     };
   }
@@ -225,7 +338,6 @@ export const processVideoAsset = async (selectedAsset, existingKeys, options = {
   try {
     console.log(`🎬 Processing video: ${selectedAsset.fileName}`);
 
-    // Check for duplicates
     const duplicateCheck = await checkVideoDuplicate(selectedAsset, existingKeys, options);
     
     if (duplicateCheck.error) {
@@ -240,17 +352,14 @@ export const processVideoAsset = async (selectedAsset, existingKeys, options = {
       };
     }
 
-    // Validate video file
     const validation = await validateVideoFile(selectedAsset, options);
     
     if (!validation.success) {
       return { success: false, error: validation.error };
     }
 
-    // Generate thumbnail
     const thumbnailResult = await generateVideoThumbnail(selectedAsset.uri);
 
-    // Create video data object
     const videoData = {
       id: selectedAsset.assetId || Date.now().toString() + Math.random(),
       uri: selectedAsset.uri,
@@ -389,9 +498,6 @@ export const deleteVideoFromS3 = async (fileName) => {
  */
 export const createVideoManager = (videos, thumbnails, urls = [], statuses = []) => {
   return {
-    /**
-     * Moves a video from one position to another
-     */
     moveVideo: (fromIndex, toIndex) => {
       if (toIndex < 0 || toIndex >= videos.length || fromIndex === toIndex) {
         return { videos, thumbnails, urls, statuses };
@@ -412,9 +518,6 @@ export const createVideoManager = (videos, thumbnails, urls = [], statuses = [])
       };
     },
 
-    /**
-     * Removes a video at the specified index
-     */
     removeVideo: (index) => {
       return {
         videos: videos.filter((_, i) => i !== index),
@@ -424,9 +527,6 @@ export const createVideoManager = (videos, thumbnails, urls = [], statuses = [])
       };
     },
 
-    /**
-     * Adds a new video
-     */
     addVideo: (videoData, thumbnail, url = null, status = null) => {
       return {
         videos: [...videos, videoData],
@@ -436,9 +536,6 @@ export const createVideoManager = (videos, thumbnails, urls = [], statuses = [])
       };
     },
 
-    /**
-     * Updates a video at the specified index
-     */
     updateVideo: (index, updates) => {
       const newVideos = [...videos];
       const newThumbnails = [...thumbnails];
@@ -487,7 +584,6 @@ export const resetVideoState = () => {
   fetchedVideoIds.clear();
   currentOffset = 0;
   hasReachedActualEnd = false;
-  console.log('🔄 Video state reset');
 };
 
 /**
@@ -496,4 +592,4 @@ export const resetVideoState = () => {
 export const forceResetHasMoreVideos = () => {
   hasReachedActualEnd = false;
   console.log('🔁 Force reset hasReachedActualEnd');
-};
+};     

@@ -159,7 +159,6 @@ export const getFeedCache = async () => {
     const cachedFeedVideos = await AsyncStorage.getItem(CACHE_KEYS.FEED_VIDEOS);
     if (cachedFeedVideos) {
       const feedVideos = JSON.parse(cachedFeedVideos);
-      console.log(`⚡ Retrieved ${feedVideos.length} cached FEED videos (separate from profile)`);
       return feedVideos;
     }
 
@@ -280,7 +279,6 @@ export const getProfileCache = async (userEmail) => {
         }
       }
       
-      console.log(`⚡ Retrieved cached profile for: ${userEmail} (independent of feed)`);
       return profile;
     }
 

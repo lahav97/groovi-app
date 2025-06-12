@@ -194,7 +194,6 @@ const styles = StyleSheet.create({
     padding: 8,
   },
   tinySpinner: {
-    // Small spinner like TikTok/Instagram
   },
 
   // Video error overlay

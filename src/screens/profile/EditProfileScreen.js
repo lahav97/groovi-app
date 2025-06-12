@@ -19,6 +19,11 @@ import { COLORS } from '../../styles/theme';
 import { getUploadService } from '../../services/uploadFileService';
 import { useAuth } from '../../context/AuthContext';
 import axios from 'axios';
+import {
+  ERROR_MESSAGES,
+  createValidationError,
+  handleError
+} from '../../utils/errors';
 
 const predefinedInstruments = {
   Strings: ['Guitar', 'Bass', 'Violin', 'Cello'],
@@ -147,7 +152,7 @@ const EditProfileScreen = ({ navigation }) => {
   const pickProfilePicture = async () => {
     const permission = await ImagePicker.requestMediaLibraryPermissionsAsync();
     if (permission.status !== 'granted') {
-      Alert.alert('Permission required', 'Allow media access to choose a picture.');
+      Alert.alert('Permission required', ERROR_MESSAGES.PERMISSION.MEDIA_DENIED);
       return;
     }
 
@@ -174,14 +179,12 @@ const EditProfileScreen = ({ navigation }) => {
         if (uploadResult.success) {
           setProfilePictureUri(uploadResult.imageUrl);
         } else {
-          Alert.alert('Upload Error', uploadResult.error);
-          // Still show local image for preview
+          Alert.alert('Upload Error', handleError(uploadResult.error, 'EditProfileScreen/pickProfilePicture'));
           setProfilePictureUri(selectedAsset.uri);
         }
       } catch (error) {
         console.error('Error uploading profile picture:', error);
-        Alert.alert('Error', 'Failed to upload profile picture.');
-        // Still show local image for preview
+        Alert.alert('Error', handleError(error, 'EditProfileScreen/pickProfilePicture'));
         setProfilePictureUri(selectedAsset.uri);
       }
     }
@@ -197,7 +200,7 @@ const EditProfileScreen = ({ navigation }) => {
       const duplicateCheck = await uploadService.checkVideoDuplicate(selectedAsset, videoKeys);
       
       if (duplicateCheck.error) {
-        Alert.alert('Error', duplicateCheck.error);
+        Alert.alert('Error', handleError(duplicateCheck.error, 'EditProfileScreen/processSelectedVideo'));
         return false;
       }
 
@@ -210,7 +213,7 @@ const EditProfileScreen = ({ navigation }) => {
       const validation = await uploadService.validateVideoFile(selectedAsset);
       
       if (!validation.success) {
-        Alert.alert('Invalid Video', `${selectedAsset.fileName || 'Video'}: ${validation.error}`);
+        Alert.alert('Invalid Video', `${selectedAsset.fileName || 'Video'}: ${handleError(validation.error, 'EditProfileScreen/processSelectedVideo')}`);
         return false;
       }
 
@@ -238,7 +241,7 @@ const EditProfileScreen = ({ navigation }) => {
       return true;
     } catch (error) {
       console.error('Error processing video:', error);
-      Alert.alert('Error', `Failed to process video: ${selectedAsset.fileName || 'Unknown'}`);
+      Alert.alert('Error', handleError(error, 'EditProfileScreen/processSelectedVideo'));
       return false;
     }
   };
@@ -335,7 +338,7 @@ const EditProfileScreen = ({ navigation }) => {
   const pickVideos = async () => {
     const permission = await ImagePicker.requestMediaLibraryPermissionsAsync();
     if (permission.status !== 'granted') {
-      Alert.alert('Permission required', 'Allow media access to choose videos.');
+      Alert.alert('Permission required', ERROR_MESSAGES.PERMISSION.MEDIA_DENIED);
       return;
     }
 
@@ -362,7 +365,7 @@ const EditProfileScreen = ({ navigation }) => {
       }
     } catch (error) {
       console.error('Error picking videos:', error);
-      Alert.alert('Error', 'Failed to select videos. Please try again.');
+      Alert.alert('Error', handleError(error, 'EditProfileScreen/pickVideos'));
     }
   };
 
@@ -373,7 +376,7 @@ const EditProfileScreen = ({ navigation }) => {
   const deleteVideo = async (index) => {
     const videoToDelete = videos[index];
     if (!videoToDelete) {
-      Alert.alert('Error', 'Invalid video selected for deletion.');
+      Alert.alert('Error', handleError(createValidationError('REQUIRED_FIELD', 'videoToDelete'), 'EditProfileScreen/deleteVideo'));
       return;
     }
 
@@ -411,7 +414,7 @@ const EditProfileScreen = ({ navigation }) => {
       console.log(`Video at index ${index} deleted successfully`);
     } catch (error) {
       console.error(`Error deleting video:`, error);
-      Alert.alert('Error', 'Failed to delete video completely, but removed from local list.');
+      Alert.alert('Error', handleError(error, 'EditProfileScreen/deleteVideo') || 'Failed to delete video completely, but removed from local list.');
       
       // Still remove from local state even if server deletion fails
       setVideos(prev => prev.filter((_, i) => i !== index));
@@ -548,33 +551,7 @@ const EditProfileScreen = ({ navigation }) => {
 
     } catch (error) {
       console.error('Error saving profile:', error);
-      
-      let errorMessage = 'Failed to save profile. Please try again.';
-      
-      if (error.response) {
-        // Server responded with error status
-        const status = error.response.status;
-        const data = error.response.data;
-        
-        if (status === 400) {
-          errorMessage = data?.message || 'Invalid data provided. Please check your inputs.';
-        } else if (status === 401) {
-          errorMessage = 'Authentication failed. Please log in again.';
-        } else if (status === 403) {
-          errorMessage = 'Permission denied. You cannot edit this profile.';
-        } else if (status === 404) {
-          errorMessage = 'Profile not found.';
-        } else if (status === 500) {
-          errorMessage = 'Server error. Please try again later.';
-        } else {
-          errorMessage = data?.message || `Server error (${status}). Please try again.`;
-        }
-      } else if (error.request) {
-        // Network error
-        errorMessage = 'Network error. Please check your connection and try again.';
-      }
-      
-      Alert.alert('Error', errorMessage);
+      Alert.alert('Error', handleError(error, 'EditProfileScreen/handleSave'));
     } finally {
       setIsSaving(false);
     }

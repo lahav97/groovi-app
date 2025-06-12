@@ -22,6 +22,10 @@ import { Auth } from 'aws-amplify';
 import Button from '../../components/common/Button';
 import axios from 'axios';
 import { COLORS } from '../../styles/theme';
+import {
+  ERROR_MESSAGES,
+  handleError
+} from '../../utils/errors';
 
 /**
  * @function SignUpScreen
@@ -108,33 +112,25 @@ const SignUpScreen = () => {
    * @param {string} emailValue - Email to validate
    */
   const validateEmailInRealTime = async (emailValue) => {
-    // Clear previous errors
     setEmailError('');
-    
-    // Don't validate empty email
     if (!emailValue.trim()) {
       return;
     }
-    
-    // First check format
     if (!isValidEmail(emailValue)) {
-      setEmailError('Please enter a valid email address');
+      setEmailError(ERROR_MESSAGES.VALIDATION.EMAIL_INVALID);
       return;
     }
-    
-    // Then check if email exists
     setIsCheckingEmail(true);
     try {
       const emailExists = await isEmailExists(emailValue);
-      
       if (emailExists) {
-        setEmailError('This email is already registered');
+        setEmailError(ERROR_MESSAGES.VALIDATION.EMAIL_EXISTS);
       } else {
-        setEmailError(''); // Email is valid and available
+        setEmailError('');
       }
     } catch (error) {
       console.error('Error checking email:', error);
-      setEmailError('Unable to verify email. Please try again.');
+      setEmailError(handleError(error, 'SignUpScreen/validateEmailInRealTime'));
     } finally {
       setIsCheckingEmail(false);
     }
@@ -227,45 +223,39 @@ const SignUpScreen = () => {
   const handleContinue = async () => {
     let valid = true;
 
-    // Check if email validation is still in progress
     if (isCheckingEmail) {
       Alert.alert('Please wait', 'Still checking email availability...');
       return;
     }
 
-    // Check if there are any email errors
     if (emailError) {
       valid = false;
     }
 
-    // Re-validate email if it's empty
     if (!email.trim()) {
-      setEmailError('Please enter your email address');
+      setEmailError(ERROR_MESSAGES.VALIDATION.REQUIRED_FIELD);
       valid = false;
     }
 
-    // Validate password
     if (!isValidPassword(password)) {
-      setPasswordError('Password must contain at least 1 capital letter and 1 number');
+      setPasswordError(ERROR_MESSAGES.VALIDATION.PASSWORD_WEAK);
       valid = false;
     } else {
       setPasswordError('');
     }
 
-    // Validate birthday
     if (!birthdayDate) {
-      setDateError('Please select your birthday');
+      setDateError(ERROR_MESSAGES.VALIDATION.REQUIRED_FIELD);
       valid = false;
     }
 
-    // Validate other required fields
     if (!fullName.trim()) {
-      Alert.alert('Missing Information', 'Please enter your full name');
+      Alert.alert('Missing Information', ERROR_MESSAGES.VALIDATION.FULLNAME_REQUIRED);
       valid = false;
     }
 
     if (!username.trim()) {
-      Alert.alert('Missing Information', 'Please enter a username');
+      Alert.alert('Missing Information', ERROR_MESSAGES.VALIDATION.USERNAME_REQUIRED);
       valid = false;
     }
 
@@ -306,7 +296,7 @@ const SignUpScreen = () => {
     }
     catch (error) {
       console.error('❌ Error signing up:', error);
-      Alert.alert('Error', error.message || 'Failed to sign up.');
+      Alert.alert('Error', handleError(error, 'SignUpScreen/handleContinue'));
     }
   };
 

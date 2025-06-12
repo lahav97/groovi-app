@@ -6,6 +6,7 @@ import {
   getFeedCache, 
   getProfileCache,
 } from '../utils/cacheManager';
+import { handleError } from '../utils/errors';
 
 class BackgroundDataService {
   constructor() {
@@ -50,7 +51,7 @@ class BackgroundDataService {
       setTimeout(() => this.stage2_LoadProfileOnly(), 1500);
       
     } catch (error) {
-      console.error('❌ BackgroundDataService: Loading error:', error);
+      console.error('❌ BackgroundDataService: Loading error:', handleError(error, 'BackgroundDataService/startStagedLoading'));
     } finally {
       this.isLoading = false;
     }
@@ -94,7 +95,7 @@ class BackgroundDataService {
         return [];
       }
     } catch (error) {
-      console.error('❌ Feed loading failed:', error);
+      console.error('❌ Feed loading failed:', handleError(error, 'BackgroundDataService/stage1_LoadFeedOnly'));
       return [];
     }
   }
@@ -139,7 +140,7 @@ class BackgroundDataService {
         console.log('⚠️ No profile data received');
       }
     } catch (error) {
-      console.error('❌ Profile loading failed:', error);
+      console.error('❌ Profile loading failed:', handleError(error, 'BackgroundDataService/stage2_LoadProfileOnly'));
     }
   }
 
@@ -162,7 +163,7 @@ class BackgroundDataService {
         return [];
       }
     } catch (error) {
-      console.error('❌ BackgroundDataService: loadMoreFeedVideos failed:', error);
+      console.error('❌ BackgroundDataService: loadMoreFeedVideos failed:', handleError(error, 'BackgroundDataService/loadMoreFeedVideos'));
       return [];
     }
   }
@@ -217,7 +218,7 @@ class BackgroundDataService {
       await this.stage1_LoadFeedOnly();
       console.log('✅ BackgroundDataService: Feed refresh completed');
     } catch (error) {
-      console.error('❌ BackgroundDataService: Feed refresh failed:', error);
+      console.error('❌ BackgroundDataService: Feed refresh failed:', handleError(error, 'BackgroundDataService/forceRefreshFeedOnly'));
     }
   }
 
@@ -230,7 +231,7 @@ class BackgroundDataService {
       await this.stage2_LoadProfileOnly();
       console.log('✅ BackgroundDataService: Profile refresh completed');
     } catch (error) {
-      console.error('❌ BackgroundDataService: Profile refresh failed:', error);
+      console.error('❌ BackgroundDataService: Profile refresh failed:', handleError(error, 'BackgroundDataService/forceRefreshProfileOnly'));
     }
   }
 
@@ -251,7 +252,7 @@ class BackgroundDataService {
       
       console.log('✅ BackgroundDataService: All systems refreshed');
     } catch (error) {
-      console.error('❌ BackgroundDataService: Force refresh failed:', error);
+      console.error('❌ BackgroundDataService: Force refresh failed:', handleError(error, 'BackgroundDataService/forceRefreshAll'));
     }
   }
 

@@ -2,6 +2,7 @@ import React from 'react';
 import { View, Text, StyleSheet, useColorScheme, Dimensions } from 'react-native';
 import { COLORS, SIZES } from '../../styles/theme';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { handleError } from '../../utils/errors';
 
 const { height: SCREEN_HEIGHT } = Dimensions.get('window');
 
@@ -9,6 +10,13 @@ const VideoInfo = ({ video }) => {
   const colorScheme = useColorScheme();
   const theme = colorScheme === 'dark' ? COLORS.dark : COLORS.light;
   const insets = useSafeAreaInsets();
+
+  // Defensive: handle missing or malformed video prop
+  if (!video || typeof video !== 'object') {
+    // Optionally, you could display an error message or log it
+    console.error(handleError(new Error('Invalid video data'), 'VideoInfo'));
+    return null;
+  }
 
   return (
     <View style={[styles.container, { bottom: SCREEN_HEIGHT * 0.1 + insets.bottom }]}>

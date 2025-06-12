@@ -35,6 +35,11 @@ import {
   deleteVideoFromS3 
 } from '../../services/videoService';
 import { COLORS } from '../../styles/theme';
+import {
+  ERROR_MESSAGES,
+  createValidationError,
+  handleError
+} from '../../utils/errors';
 
 const BUILD_PROFILE_API_URL = 'https://9u6y4sfrn2.execute-api.us-east-1.amazonaws.com/groovi/build_profile';
 const predefinedGenres = ['Pop', 'Rock', 'Metal', 'Jazz', 'Hip Hop', 'Classical', 'Electronic', 'R&B'];
@@ -124,7 +129,7 @@ const ProfileSetupScreen = () => {
     try {
       const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
       if (status !== 'granted') {
-        Alert.alert("Permission required", "Please allow access to media library.");
+        Alert.alert("Permission required", ERROR_MESSAGES.PERMISSION.MEDIA_DENIED);
         return;
       }
       
@@ -150,14 +155,13 @@ const ProfileSetupScreen = () => {
         if (uploadResult.success) {
           setProfilePictureUri(uploadResult.imageUrl);
         } else {
-          Alert.alert('Upload Error', uploadResult.error);
-          // Still show local image for preview
+          Alert.alert('Upload Error', handleError(uploadResult.error, 'ProfileSetupScreen/pickProfilePicture'));
           setProfilePictureUri(selectedAsset.uri);
         }
       }
     } catch (error) {
       console.error('Error picking profile picture:', error);
-      Alert.alert('Error', 'Failed to pick profile picture.');
+      Alert.alert('Error', handleError(error, 'ProfileSetupScreen/pickProfilePicture'));
     }
   };
 
@@ -168,7 +172,7 @@ const ProfileSetupScreen = () => {
   const pickVideos = async () => {
     const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
     if (status !== 'granted') {
-      Alert.alert('Permission required', 'Please allow access to media library.');
+      Alert.alert('Permission required', ERROR_MESSAGES.PERMISSION.MEDIA_DENIED);
       return;
     }
 
@@ -225,20 +229,20 @@ const ProfileSetupScreen = () => {
 
         // Show errors if any
         if (batchResult.errors.length > 0) {
-          const errorMessages = batchResult.errors.map(e => e.error).join('\n');
+          const errorMessages = batchResult.errors.map(e => handleError(e, 'ProfileSetupScreen/pickVideos')).join('\n');
           Alert.alert('Some videos could not be processed', errorMessages);
         }
 
         console.log(`✅ Processed ${batchResult.processedVideos.length} videos successfully`);
         setVideoError('');
       } else {
-        Alert.alert('Error', batchResult.error || 'Failed to process videos');
-        setVideoError(batchResult.error || 'Failed to process videos');
+        Alert.alert('Error', handleError(batchResult.error, 'ProfileSetupScreen/pickVideos') || 'Failed to process videos');
+        setVideoError(handleError(batchResult.error, 'ProfileSetupScreen/pickVideos') || 'Failed to process videos');
       }
 
     } catch (err) {
       console.error('Failed to pick videos:', err);
-      setVideoError('Could not access videos.');
+      setVideoError(handleError(err, 'ProfileSetupScreen/pickVideos') || 'Could not access videos.');
     }
   };
 
@@ -453,9 +457,9 @@ const ProfileSetupScreen = () => {
       if (uploadStatuses.some(status => status && status.uploading)) {
         Alert.alert('Upload in Progress', 'Please wait for all videos to finish uploading.');
       } else if (!address.city || address.city.trim() === '') {
-        Alert.alert('Location Required', 'Please enter your location.');
+        Alert.alert('Location Required', ERROR_MESSAGES.VALIDATION.REQUIRED_FIELD);
       } else if (videos.filter(v => v !== null).length === 0) {
-        Alert.alert('Videos Required', 'Please upload at least one video.');
+        Alert.alert('Videos Required', ERROR_MESSAGES.VALIDATION.REQUIRED_FIELD);
       }
       return;
     }
@@ -517,7 +521,7 @@ const ProfileSetupScreen = () => {
       });
     } catch (error) {
       console.error('Error in profile setup:', error.response?.data || error.message);
-      Alert.alert('Error', error.message || 'Failed to complete profile setup. Please try again.');
+      Alert.alert('Error', handleError(error, 'ProfileSetupScreen/handleContinue'));
     } finally {
       setIsUploading(false);
     }

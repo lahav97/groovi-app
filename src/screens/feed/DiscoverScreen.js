@@ -6,32 +6,50 @@ import TopBar from '../../components/navigationBar/TopNavigation';
 import { LAYOUT } from '../../styles/theme';
 import { useIsFocused } from '@react-navigation/native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { fetchVideos, resetVideoState, forceResetHasMoreVideos, hasMoreVideos as checkHasMoreVideos } from '../../services/videoService';
+import { 
+  fetchInitialMusicians,
+  loadMusicianWithoutFilters,
+  fetchFilteredMusicians,
+  resetVideoState, 
+  forceResetHasMoreVideos 
+} from '../../services/videoService';
 import { getFeedCache, cacheFeedVideos } from '../../utils/cacheManager';
 import BackgroundDataService from '../../services/BackgroundDataService';
+import {
+  AppError,
+  ValidationError,
+  NetworkError,
+  PermissionError,
+  AuthError,
+  ERROR_MESSAGES,
+  createValidationError,
+  createNetworkError,
+  createPermissionError,
+  createAuthError,
+  handleError
+} from '../../utils/errors';
 
 const { height: SCREEN_HEIGHT } = Dimensions.get('window');
 
-const FEED_CONFIG = {
-  INITIAL_VIDEOS: 5,
-  BATCH_SIZE: 3,
-  MAX_FEED_VIDEOS: 8,
-  CLEANUP_AT: 6,
-  LOAD_WHEN: 1, 
+const MUSICIAN_CONFIG = {
+  INITIAL_BATCH: 5,
+  FILTER_BATCH: 3,
+  WINDOW_BEHIND: 3,
+  WINDOW_AHEAD: 8,
+  PRELOAD_AHEAD: 3,
+  LOAD_TRIGGER: 5,
   MIN_THROTTLE: 200,
-  CACHE_PRIORITY_COUNT: 3,
 };
 
 const DiscoverScreen = () => {
-  const [feedVideos, setFeedVideos] = useState([]);
+  const [musicianVideos, setMusicianVideos] = useState([]);
   const [currentVisibleIndex, setCurrentVisibleIndex] = useState(0);
-  const [currentPage, setCurrentPage] = useState(0);
   const [isInitialLoading, setIsInitialLoading] = useState(true);
   const [isLoadingMore, setIsLoadingMore] = useState(false);
   const [hasMoreVideos, setHasMoreVideos] = useState(true);
   const [error, setError] = useState(null);
+  const [currentUser] = useState('lahav97');
 
-  // Refs for control
   const flatListRef = useRef(null);
   const isFocused = useIsFocused();
   const insets = useSafeAreaInsets();
@@ -44,76 +62,90 @@ const DiscoverScreen = () => {
 
   const videoHeight = SCREEN_HEIGHT - insets.bottom;
 
-  // ============================================================================
-  // OPTIMIZED FEED LOADING WITH BACKGROUND SERVICE COORDINATION
-  // ============================================================================
+  const applySlidingWindowCache = useCallback((videos, currentIndex) => {
+    const keepStart = Math.max(0, currentIndex - MUSICIAN_CONFIG.WINDOW_BEHIND);
+    const keepEnd = currentIndex + MUSICIAN_CONFIG.WINDOW_AHEAD;
+    const windowSize = MUSICIAN_CONFIG.WINDOW_BEHIND + MUSICIAN_CONFIG.WINDOW_AHEAD + 1;
+    
+    if (videos.length > windowSize) {
+      const cleanedVideos = videos.slice(keepStart, Math.min(keepEnd, videos.length));
+      
+      console.log(`🎯 Cache: User at ${currentIndex}, keeping videos ${keepStart}-${Math.min(keepEnd-1, videos.length-1)} (${cleanedVideos.length} total)`);
+      
+      return {
+        videos: cleanedVideos,
+        indexAdjustment: keepStart
+      };
+    }
+    
+    return {
+      videos: videos,
+      indexAdjustment: 0
+    };
+  }, []);
 
-  const loadInitialFeedVideos = useCallback(async () => {
+  const loadInitialMusicianVideos = useCallback(async () => {
     if (isLoadingRef.current) return;
     
-    console.log('🚀 DiscoverScreen: Starting optimized initial load...');
     setIsInitialLoading(true);
-    setError(null);
+    setError(null); 
     isLoadingRef.current = true;
     loadAttempts.current = 0;
 
     try {
-      //Check if BackgroundDataService already loaded feed
       const backgroundStatus = BackgroundDataService.getSeparatedSystemStatus();
       if (backgroundStatus.feed.loaded && backgroundStatus.feed.videoCount > 0) {
-        const cachedFeedVideos = await getFeedCache();
+        const cachedMusicianVideos = await getFeedCache();
         
-        if (cachedFeedVideos && cachedFeedVideos.length > 0) {
-          setFeedVideos(cachedFeedVideos);
-          setCurrentPage(Math.ceil(cachedFeedVideos.length / FEED_CONFIG.BATCH_SIZE));
-          setHasMoreVideos(checkHasMoreVideos());
+        if (cachedMusicianVideos && cachedMusicianVideos.length > 0) {
+          setMusicianVideos(cachedMusicianVideos);
           setIsInitialLoading(false);
           isLoadingRef.current = false;
-          
-          // Start smart caching for priority videos
-          setTimeout(() => startSmartCaching(cachedFeedVideos), 500);
           return;
         }
       }
 
-      // Check cache if BackgroundService didn't load
-      const cachedFeedVideos = await getFeedCache();
-      if (cachedFeedVideos && cachedFeedVideos.length > 0) {
-        setFeedVideos(cachedFeedVideos);
-        setCurrentPage(Math.ceil(cachedFeedVideos.length / FEED_CONFIG.BATCH_SIZE));
-        setHasMoreVideos(checkHasMoreVideos());
+      const cachedMusicianVideos = await getFeedCache();
+      if (cachedMusicianVideos && cachedMusicianVideos.length > 0) {
+        setMusicianVideos(cachedMusicianVideos);
         setIsInitialLoading(false);
         isLoadingRef.current = false;
-        
-        // Start smart caching
-        setTimeout(() => startSmartCaching(cachedFeedVideos), 500);
         return;
       }
 
-      // Load from API
       resetVideoState();
-      const initialFeedVideos = await fetchVideos(0, FEED_CONFIG.INITIAL_VIDEOS);
+      const musicians = await fetchInitialMusicians(currentUser);
       
       if (!mountedRef.current) return;
       
-      if (initialFeedVideos && initialFeedVideos.length > 0) {        
-        setFeedVideos(initialFeedVideos);
-        setCurrentPage(1);
-        setCurrentVisibleIndex(0);
-        setHasMoreVideos(checkHasMoreVideos());
+      if (musicians && musicians.length > 0) {
+        const transformedVideos = musicians.map((musician, index) => ({
+          id: musician.id,
+          user_id: musician.id,
+          username: musician.username,
+          user: musician.username,
+          video_url: musician.videos[0],
+          videoUrl: musician.videos[0],
+          instruments: musician.instruments,
+          likes: Math.floor(Math.random() * 1000) + 100,
+          comments: Math.floor(Math.random() * 100) + 10,
+        }));
         
-        // Cache and start smart caching
-        await cacheFeedVideos(initialFeedVideos);
-        setTimeout(() => startSmartCaching(initialFeedVideos), 500);
+        setMusicianVideos(transformedVideos);
+        setCurrentVisibleIndex(0);
+        setHasMoreVideos(true);
+        
+        await cacheFeedVideos(transformedVideos);
+        console.log(`✅ Initial load: ${transformedVideos.length} videos from ${musicians.length} musicians`);
       } else {
-        console.log('❌ DiscoverScreen: No videos received');
-        setError('No videos available');
+        console.log('❌ No musicians received');
+        setError(ERROR_MESSAGES.NETWORK.NO_MUSICIANS);
         setHasMoreVideos(false);
       }
     } catch (err) {
-      console.error('❌ DiscoverScreen: Failed to load videos:', err);
+      console.error('❌ Failed to load musicians:', err);
       if (mountedRef.current) {
-        setError('Failed to load videos. Please try again.');
+        setError(handleError(err, 'DiscoverScreen/InitialLoad'));
       }
     } finally {
       if (mountedRef.current) {
@@ -121,40 +153,20 @@ const DiscoverScreen = () => {
         isLoadingRef.current = false;
       }
     }
-  }, []);
+  }, [currentUser]);
 
-  // ============================================================================
-  // SMART CACHING SYSTEM FOR TAB SWITCHING
-  // ============================================================================
-
-  const startSmartCaching = useCallback((videos) => {
-    if (!videos || videos.length === 0) return;
-        
-    // Cache priority videos (first 3) for instant playback
-    const priorityVideos = videos.slice(0, FEED_CONFIG.CACHE_PRIORITY_COUNT);
-    priorityVideos.forEach((video, index) => {
-      if (video.video_url || video.videoUrl) {
-        // Trigger video caching in VideoItem
-        // This will be handled by the VideoItem component
-      }
-    });
-  }, []);
-
-  const loadMoreFeedVideos = useCallback(async () => {
-    if (isLoadingRef.current || !mountedRef.current || isLoadingMore) {
-      return;
-    }
-
-    const serviceHasMore = checkHasMoreVideos();
-    if (!serviceHasMore && !hasMoreVideos) {
+  const loadMoreMusicianVideos = useCallback(async () => {
+    if (isLoadingRef.current || !mountedRef.current || isLoadingMore || !hasMoreVideos) {
       return;
     }
 
     const now = Date.now();
-    if (now - lastScrollTimeRef.current < FEED_CONFIG.MIN_THROTTLE) {
-      setTimeout(() => loadMoreFeedVideos(), FEED_CONFIG.MIN_THROTTLE);
+    if (now - lastScrollTimeRef.current < MUSICIAN_CONFIG.MIN_THROTTLE) {
+      setTimeout(() => loadMoreMusicianVideos(), MUSICIAN_CONFIG.MIN_THROTTLE);
       return;
     }
+
+    console.log(`📊 Loading more musicians. Current cache: ${musicianVideos.length}`);
 
     loadAttempts.current += 1;
     setIsLoadingMore(true);
@@ -162,26 +174,40 @@ const DiscoverScreen = () => {
     lastScrollTimeRef.current = now;
 
     try {
-      const moreFeedVideos = await fetchVideos(currentPage, FEED_CONFIG.BATCH_SIZE);
+      console.log(`🔍 Loading more musicians for ${currentUser}`);
+      const moreMusicians = await loadMusicianWithoutFilters(currentUser);
       
       if (!mountedRef.current) return;
       
-      if (moreFeedVideos && moreFeedVideos.length > 0) {
+      if (moreMusicians && moreMusicians.length > 0) {
         loadAttempts.current = 0;
         
-        setFeedVideos(prevFeedVideos => {
-          const updatedFeedVideos = [...prevFeedVideos, ...moreFeedVideos];
-
-          // OPTIMIZED memory management
-          if (updatedFeedVideos.length >= FEED_CONFIG.MAX_FEED_VIDEOS) {
-            const cleanedFeedVideos = updatedFeedVideos.slice(-FEED_CONFIG.CLEANUP_AT);
-                        
-            // Adjust current index after cleanup
-            const removedCount = updatedFeedVideos.length - cleanedFeedVideos.length;
+        const transformedVideos = moreMusicians.map((musician, index) => ({
+          id: `${musician.id}-${Date.now()}-${index}`,
+          user_id: musician.id,
+          username: musician.username,
+          user: musician.username,
+          video_url: musician.videos[0],
+          videoUrl: musician.videos[0],
+          instruments: musician.instruments,
+          likes: Math.floor(Math.random() * 1000) + 100,
+          comments: Math.floor(Math.random() * 100) + 10,
+        }));
+        
+        setMusicianVideos(prevMusicianVideos => {
+          const updatedMusicianVideos = [...prevMusicianVideos, ...transformedVideos];
+          
+          const { videos: cleanedVideos, indexAdjustment } = applySlidingWindowCache(
+            updatedMusicianVideos, 
+            currentVisibleIndex
+          );
+          
+          if (indexAdjustment > 0) {
             setCurrentVisibleIndex(prevIndex => {
-              const newIndex = Math.max(0, prevIndex - removedCount);
+              const newIndex = Math.max(0, prevIndex - indexAdjustment);
               
-              // Scroll to new position
+              console.log(`📍 Index adjustment: ${prevIndex} -> ${newIndex} (removed ${indexAdjustment} videos)`);
+              
               setTimeout(() => {
                 if (flatListRef.current && mountedRef.current) {
                   try {
@@ -190,38 +216,34 @@ const DiscoverScreen = () => {
                       animated: false
                     });
                   } catch (scrollError) {
-                    // Silent fail
+                    console.error('❌ Scroll adjustment error:', handleError(scrollError, 'DiscoverScreen/ScrollAdjust'));
                   }
                 }
               }, 100);
               
               return newIndex;
             });
-            
-            cacheFeedVideos(cleanedFeedVideos);
-            return cleanedFeedVideos;
           }
-
-          cacheFeedVideos(updatedFeedVideos);
-          return updatedFeedVideos;
+          
+          cacheFeedVideos(cleanedVideos);
+          return cleanedVideos;
         });
-
-        setCurrentPage(prev => prev + 1);
-        setHasMoreVideos(checkHasMoreVideos());
+        
+        console.log(`✅ Loaded ${transformedVideos.length} more videos from musicians`);
         
       } else {
         if (loadAttempts.current < 3) {
-          // Retry logic
+          setTimeout(() => loadMoreMusicianVideos(), 2000);
         } else {
-          console.log('🏁 DiscoverScreen: No more videos available');
+          console.log('🏁 No more musicians available');
           setHasMoreVideos(false);
         }
       }
     } catch (err) {
-      console.error('❌ DiscoverScreen: Failed to load more videos:', err);
+      console.error('❌ Failed to load more musicians:', handleError(err, 'DiscoverScreen/LoadMore'));
       
       if (loadAttempts.current < 3) {
-        // Retry logic
+        setTimeout(() => loadMoreMusicianVideos(), 2000);
       } else {
         setHasMoreVideos(false);
       }
@@ -231,11 +253,7 @@ const DiscoverScreen = () => {
         isLoadingRef.current = false;
       }
     }
-  }, [currentPage, hasMoreVideos, videoHeight]);
-
-  // ============================================================================
-  // OPTIMIZED TOUCH HANDLING
-  // ============================================================================
+  }, [hasMoreVideos, videoHeight, musicianVideos.length, currentVisibleIndex, applySlidingWindowCache, currentUser]);
 
   const onViewableItemsChanged = useCallback(({ viewableItems }) => {
     if (viewableItems.length > 0) {
@@ -243,21 +261,21 @@ const DiscoverScreen = () => {
       if (newIndex !== currentVisibleIndex) {
         setCurrentVisibleIndex(newIndex);
         
-        // Check if we need to load more videos
-        const feedVideosRemaining = feedVideos.length - newIndex - 1;
+        const remainingVideos = musicianVideos.length - newIndex - 1;
         
         const shouldLoadMore = (
-          feedVideosRemaining <= FEED_CONFIG.LOAD_WHEN && 
-          (hasMoreVideos || checkHasMoreVideos()) && 
+          remainingVideos <= MUSICIAN_CONFIG.LOAD_TRIGGER && 
+          hasMoreVideos && 
           !isLoadingMore
         );
         
         if (shouldLoadMore) {
-          loadMoreFeedVideos();
+          console.log(`🔄 Load trigger: ${remainingVideos} videos remaining`);
+          loadMoreMusicianVideos();
         }
       }
     }
-  }, [feedVideos, currentVisibleIndex, hasMoreVideos, isLoadingMore, loadMoreFeedVideos]);
+  }, [musicianVideos, currentVisibleIndex, hasMoreVideos, isLoadingMore, loadMoreMusicianVideos]);
 
   const viewConfigRef = useRef({
     viewAreaCoveragePercentThreshold: 60,
@@ -282,7 +300,7 @@ const DiscoverScreen = () => {
       return;
     }
     
-    isScrollingRef.current = false;
+    isScrollingRef.current = true;
     lastScrollTimeRef.current = now;
     
     if (diff > 0) { 
@@ -290,36 +308,44 @@ const DiscoverScreen = () => {
     } else { 
       moveToIndex(currentVisibleIndex - 1);
     }
+    
+    setTimeout(() => {
+      isScrollingRef.current = false;
+    }, 500);
   };
 
   const moveToIndex = (index) => {
     if (index < 0) {
       index = 0;
-    } else if (index >= feedVideos.length) {
-      index = feedVideos.length - 1;
+    } else if (index >= musicianVideos.length) {
+      index = musicianVideos.length - 1;
     }
 
-    if (index !== currentVisibleIndex) {
+    if (index !== currentVisibleIndex && flatListRef.current) {
       const targetOffset = index * videoHeight;
       
-      flatListRef.current?.scrollToOffset({
-        offset: targetOffset,
-        animated: true
-      });
-      setCurrentVisibleIndex(index);
+      try {
+        flatListRef.current.scrollToOffset({
+          offset: targetOffset,
+          animated: true
+        });
+        setCurrentVisibleIndex(index);
 
-      // Manual load check
-      setTimeout(() => {
-        const feedVideosRemaining = feedVideos.length - index - 1;
-        const shouldLoadMore =
-          feedVideosRemaining <= FEED_CONFIG.LOAD_WHEN &&
-          (hasMoreVideos || checkHasMoreVideos()) &&
-          !isLoadingMore;
+        setTimeout(() => {
+          const remainingVideos = musicianVideos.length - index - 1;
+          const shouldLoadMore =
+            remainingVideos <= MUSICIAN_CONFIG.LOAD_TRIGGER &&
+            hasMoreVideos &&
+            !isLoadingMore;
 
-        if (shouldLoadMore) {
-          loadMoreFeedVideos();
-        }
-      }, 250);
+          if (shouldLoadMore) {
+            console.log(`🔄 Post-scroll load trigger: ${remainingVideos} videos remaining`);
+            loadMoreMusicianVideos();
+          }
+        }, 250);
+      } catch (error) {
+        console.error('❌ Scroll error:', error);
+      }
     }
   };
 
@@ -331,10 +357,6 @@ const DiscoverScreen = () => {
     enforcePerfectAlignment();
   };
 
-  // ============================================================================
-  // LIFECYCLE
-  // ============================================================================
-
   useEffect(() => {
     mountedRef.current = true;
     return () => {
@@ -343,18 +365,17 @@ const DiscoverScreen = () => {
   }, []);
 
   useEffect(() => {
-    console.log('🚀 DiscoverScreen: Component mounted');
-    loadInitialFeedVideos();
-  }, [loadInitialFeedVideos]);
+    loadInitialMusicianVideos();
+  }, [loadInitialMusicianVideos]);
 
   useEffect(() => {
-    if (flatListRef.current && feedVideos.length > 0) {
+    if (flatListRef.current && musicianVideos.length > 0) {
       enforcePerfectAlignment();
     }
   }, [videoHeight, insets]);
 
   useEffect(() => {
-    if (isFocused && feedVideos.length > 0 && currentVisibleIndex > 0) {
+    if (isFocused && musicianVideos.length > 0 && currentVisibleIndex > 0) {
       setTimeout(() => {
         if (flatListRef.current && mountedRef.current) {
           try {
@@ -368,39 +389,31 @@ const DiscoverScreen = () => {
         }
       }, 500);
     }
-  }, [isFocused, feedVideos.length, currentVisibleIndex]);
-
-  // ============================================================================
-  // ERROR HANDLING
-  // ============================================================================
+  }, [isFocused, musicianVideos.length, currentVisibleIndex]);
 
   const handleRetry = useCallback(() => {
-    console.log('🔄 DiscoverScreen: Retrying...');
+    console.log('🔄 Retrying musicians load...');
     setError(null);
     setHasMoreVideos(true);
-    setCurrentPage(0);
-    setFeedVideos([]);
+    setMusicianVideos([]);
     setCurrentVisibleIndex(0);
     loadAttempts.current = 0;
     
     BackgroundDataService.forceRefreshAll();
-    loadInitialFeedVideos();
-  }, [loadInitialFeedVideos]);
+    loadInitialMusicianVideos();
+  }, [loadInitialMusicianVideos]);
 
-  // ============================================================================
-  // RENDER
-  // ============================================================================
-
-  if (isInitialLoading && feedVideos.length === 0) {
+  if (isInitialLoading && musicianVideos.length === 0) {
     return (
       <View style={[styles.container, styles.centered]}>
         <ActivityIndicator size="large" color="#ff6ec4" />
-        <Text style={styles.loadingText}>Loading your feed...</Text>
+        <Text style={styles.loadingText}>Loading amazing musicians...</Text>
+        <Text style={styles.loadingSubText}>Finding great music videos</Text>
       </View>
     );
   }
 
-  if (error && feedVideos.length === 0) {
+  if (error && musicianVideos.length === 0) {
     return (
       <View style={[styles.container, styles.centered]}>
         <Text style={styles.errorText}>{error}</Text>
@@ -411,10 +424,10 @@ const DiscoverScreen = () => {
     );
   }
 
-  if (!isInitialLoading && feedVideos.length === 0) {
+  if (!isInitialLoading && musicianVideos.length === 0) {
     return (
       <View style={[styles.container, styles.centered]}>
-        <Text style={styles.errorText}>No videos found</Text>
+        <Text style={styles.errorText}>No musicians found</Text>
         <TouchableOpacity style={styles.retryButton} onPress={handleRetry}>
           <Text style={styles.retryText}>Refresh</Text>
         </TouchableOpacity>
@@ -431,18 +444,18 @@ const DiscoverScreen = () => {
       <View style={styles.feedContainer}>
         <FlatList
           ref={flatListRef}
-          data={feedVideos}
+          data={musicianVideos}
           ListFooterComponent={
             <View style={{ height: 55 }}>
               {isLoadingMore && (
                 <View style={styles.loadingMoreContainer}>
                   <ActivityIndicator size="small" color="#ff6ec4" />
-                  <Text style={styles.loadingMoreText}>Loading more...</Text>
+                  <Text style={styles.loadingMoreText}>Finding more musicians...</Text>
                 </View>
               )}
-              {!hasMoreVideos && !isLoadingMore && feedVideos.length > 0 && (
+              {!hasMoreVideos && !isLoadingMore && musicianVideos.length > 0 && (
                 <View style={styles.endContainer}>
-                  <Text style={styles.endText}>You've seen all videos! 🎉</Text>
+                  <Text style={styles.endText}>You've seen all videos! 🌍</Text>
                 </View>
               )}
             </View>
@@ -450,7 +463,7 @@ const DiscoverScreen = () => {
           renderItem={({ item, index }) => (
             <VideoItem
               item={{
-                id: item.id || item.user_id || `feed-video-${index}`,
+                id: item.id || item.user_id || `musician-video-${index}`,
                 user: item.username || item.user || 'Unknown',
                 description: Array.isArray(item.instruments) ? item.instruments.join(', ') : (item.instruments || 'Music Video'),
                 videoUrl: item.video_url || item.videoUrl,
@@ -459,7 +472,7 @@ const DiscoverScreen = () => {
               }}
               isVisible={index === currentVisibleIndex && isFocused}
               height={videoHeight}
-              shouldCache={index < FEED_CONFIG.CACHE_PRIORITY_COUNT} // Smart caching flag
+              shouldCache={index >= currentVisibleIndex && index <= currentVisibleIndex + MUSICIAN_CONFIG.PRELOAD_AHEAD}
             />
           )}
           scrollEnabled={false}
@@ -472,14 +485,19 @@ const DiscoverScreen = () => {
             index,
           })}
           keyExtractor={(item, index) => 
-            `feed-${item.id || item.user_id || 'video'}-${index}`
+            `musician-video-${item.id || item.user_id || 'video'}-${index}`
           }
           showsVerticalScrollIndicator={false}
           initialScrollIndex={0}
-          maxToRenderPerBatch={2} // Optimized for performance
-          windowSize={3} // Smaller window for better memory usage
-          removeClippedSubviews={true} // Enable view recycling
-          initialNumToRender={2} // Render fewer items initially
+          maxToRenderPerBatch={2}
+          windowSize={3}
+          removeClippedSubviews={true}
+          initialNumToRender={2}
+          updateCellsBatchingPeriod={100}
+          disableIntervalMomentum={true}
+          decelerationRate="fast"
+          snapToAlignment="start"
+          snapToInterval={videoHeight}
         />
       </View>
 
@@ -528,6 +546,12 @@ const styles = StyleSheet.create({
     marginTop: 15,
     fontSize: 16,
     fontWeight: '500',
+  },
+  loadingSubText: {
+    color: '#ff6ec4',
+    marginTop: 5,
+    fontSize: 14,
+    fontStyle: 'italic',
   },
   errorText: {
     color: 'white',

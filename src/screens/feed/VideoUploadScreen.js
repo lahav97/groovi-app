@@ -14,7 +14,6 @@ import * as ImagePicker from 'expo-image-picker';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
 import { useNavigation } from '@react-navigation/native';
-import { COLORS } from '../../styles/theme';
 import { getUploadService } from '../../services/uploadFileService';
 import { 
   processBatchVideos, 
@@ -22,6 +21,11 @@ import {
   deleteVideoFromS3 
 } from '../../services/videoService';
 import { useAuth } from '../../context/AuthContext';
+import {
+  ERROR_MESSAGES,
+  createValidationError,
+  handleError
+} from '../../utils/errors';
 
 const VideoUploadScreen = () => {
   const navigation = useNavigation();
@@ -49,7 +53,7 @@ const VideoUploadScreen = () => {
       // Request permission
       const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
       if (status !== 'granted') {
-        Alert.alert('Permission required', 'Please allow access to media library.');
+        Alert.alert('Permission required', ERROR_MESSAGES.PERMISSION.MEDIA_DENIED);
         return;
       }
 
@@ -102,18 +106,18 @@ const VideoUploadScreen = () => {
 
         // Show errors if any
         if (batchResult.errors.length > 0) {
-          const errorMessages = batchResult.errors.map(e => e.error).join('\n');
+          const errorMessages = batchResult.errors.map(e => handleError(e, 'VideoUploadScreen/pickVideos')).join('\n');
           Alert.alert('Some videos could not be processed', errorMessages);
         }
 
         console.log(`✅ Processed ${batchResult.processedVideos.length} videos successfully`);
       } else {
-        Alert.alert('Error', batchResult.error || 'Failed to process videos');
+        Alert.alert('Error', handleError(batchResult.error, 'VideoUploadScreen/pickVideos') || 'Failed to process videos');
       }
 
     } catch (error) {
       console.error('❌ Error picking videos:', error);
-      Alert.alert('Error', 'Failed to select videos. Please try again.');
+      Alert.alert('Error', handleError(error, 'VideoUploadScreen/pickVideos'));
     }
   };
 
@@ -172,11 +176,11 @@ const VideoUploadScreen = () => {
           } else {
             // Update status with error
             const newArrays = videoManager.updateVideo(actualIndex, {
-              status: { uploading: false, uploaded: false, error: result.error }
+              status: { uploading: false, uploaded: false, error: handleError(result.error, 'VideoUploadScreen/handleUploadAll') }
             });
             
             setUploadStatuses(newArrays.statuses);
-            console.log(`❌ Video ${index + 1} upload failed: ${result.error}`);
+            console.log(`❌ Video ${index + 1} upload failed: ${handleError(result.error, 'VideoUploadScreen/handleUploadAll')}`);
           }
         },
         // Upload options
@@ -206,7 +210,7 @@ const VideoUploadScreen = () => {
 
     } catch (error) {
       console.error('💥 Upload process failed:', error);
-      Alert.alert('Upload Failed', 'Failed to upload videos. Please try again.');
+      Alert.alert('Upload Failed', handleError(error, 'VideoUploadScreen/handleUploadAll'));
     } finally {
       setIsUploading(false);
       setCurrentUploadingIndex(null);
@@ -220,7 +224,7 @@ const VideoUploadScreen = () => {
   const removeVideo = (index) => {
     const videoToRemove = videos[index];
     if (!videoToRemove) {
-      Alert.alert('Error', 'Invalid video selected for deletion.');
+      Alert.alert('Error', handleError(createValidationError('REQUIRED_FIELD', 'videoToRemove'), 'VideoUploadScreen/removeVideo'));
       return;
     }
 
@@ -247,6 +251,7 @@ const VideoUploadScreen = () => {
                   console.warn(`⚠️ S3 deletion failed: ${deleteResult.error}`);
                   Alert.alert(
                     'Warning', 
+                    handleError(deleteResult.error, 'VideoUploadScreen/removeVideo') ||
                     'Video was removed locally but may still exist on server. Please contact support if needed.'
                   );
                 }
@@ -289,7 +294,7 @@ const VideoUploadScreen = () => {
               
             } catch (error) {
               console.error(`❌ Error deleting video:`, error);
-              Alert.alert('Error', 'Failed to delete video. Please try again.');
+              Alert.alert('Error', handleError(error, 'VideoUploadScreen/removeVideo'));
             }
           },
         },

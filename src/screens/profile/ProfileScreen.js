@@ -24,6 +24,7 @@ import { useProfileData } from '../../hooks/useProfileData';
 import { useVideoCache } from '../../hooks/useVideoCache';
 import ProfileVideoSwiper from '../../components/profile/ProfileVideoSwiper';
 import ProfileInfo from '../../components/profile/ProfileInfo';
+import { handleError } from '../../utils/errors';
 
 /**
  * @function ProfileScreen
@@ -97,7 +98,7 @@ const ProfileScreen = () => {
       <SafeAreaView style={[styles.container, { backgroundColor: theme.background }]}>
         <View style={styles.errorContainer}>
           <Text style={[styles.errorText, { color: theme.text }]}>Failed to load profile</Text>
-          <Text style={[styles.errorSubtext, { color: theme.textSecondary }]}>{error}</Text>
+          <Text style={[styles.errorSubtext, { color: theme.textSecondary }]}>{handleError(error, 'ProfileScreen')}</Text>
           <TouchableOpacity style={styles.retryButton} onPress={loadProfileInstantly}>
             <Text style={styles.retryButtonText}>Try Again</Text>
           </TouchableOpacity>

@@ -1,4 +1,5 @@
 import * as Location from 'expo-location';
+import { handleError } from '../utils/errors';
 
 /**
  * @typedef {Object} DetailedAddress
@@ -29,11 +30,11 @@ class LocationService {
         status: status
       };
     } catch (error) {
-      console.error('Error requesting location permissions:', error);
+      console.error('Error requesting location permissions:', handleError(error, 'LocationService/requestPermissions'));
       return {
         granted: false,
         status: 'error',
-        error: error.message
+        error: handleError(error, 'LocationService/requestPermissions') || error.message
       };
     }
   }
@@ -59,10 +60,10 @@ class LocationService {
         }
       };
     } catch (error) {
-      console.error('Error getting current position:', error);
+      console.error('Error getting current position:', handleError(error, 'LocationService/getCurrentPosition'));
       return {
         success: false,
-        error: error.message
+        error: handleError(error, 'LocationService/getCurrentPosition') || error.message
       };
     }
   }
@@ -107,10 +108,10 @@ class LocationService {
         address: detailedAddress
       };
     } catch (error) {
-      console.error('Error getting detailed address:', error);
+      console.error('Error getting detailed address:', handleError(error, 'LocationService/getDetailedAddress'));
       return {
         success: false,
-        error: error.message
+        error: handleError(error, 'LocationService/getDetailedAddress') || error.message
       };
     }
   }
@@ -158,10 +159,10 @@ class LocationService {
         address: addressResult.address
       };
     } catch (error) {
-      console.error('Error getting current location with address:', error);
+      console.error('Error getting current location with address:', handleError(error, 'LocationService/getCurrentLocationWithAddress'));
       return {
         success: false,
-        error: error.message
+        error: handleError(error, 'LocationService/getCurrentLocationWithAddress') || error.message
       };
     }
   }

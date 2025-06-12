@@ -15,6 +15,10 @@ import { LinearGradient } from 'expo-linear-gradient';
 import { useNavigation } from '@react-navigation/native';
 import { COLORS } from '../../styles/theme';
 import Slider from '@react-native-community/slider';
+import {
+  createValidationError,
+  handleError
+} from '../../utils/errors';
 
 const INSTRUMENTS = {
   Strings: ['Guitar', 'Bass', 'Violin', 'Cello'],
@@ -122,6 +126,23 @@ const DiscoverFiltersScreen = () => {
   const applyFilters = () => {
     // Apply filters and navigate back to Discover
     navigation.goBack();
+  };
+
+  // Example: Validate custom genre before adding
+  const handleAddCustomGenre = () => {
+    try {
+      if (!customGenre.trim()) {
+        throw createValidationError('REQUIRED_FIELD', 'customGenre');
+      }
+      if (selectedGenres.includes(customGenre.trim())) {
+        throw createValidationError('VALIDATION', 'customGenre', { message: 'Genre already selected' });
+      }
+      setSelectedGenres([...selectedGenres, customGenre.trim()]);
+      setCustomGenre('');
+    } catch (error) {
+      // Show user-friendly error message
+      alert(handleError(error, 'FilterScreen/AddCustomGenre'));
+    }
   };
 
   // Button animation for Apply button
@@ -251,12 +272,7 @@ const DiscoverFiltersScreen = () => {
             placeholderTextColor="#9E9E9E"
             value={customGenre}
             onChangeText={setCustomGenre}
-            onSubmitEditing={() => {
-              if (customGenre.trim() && !selectedGenres.includes(customGenre.trim())) {
-                setSelectedGenres([...selectedGenres, customGenre.trim()]);
-                setCustomGenre('');
-              }
-            }}
+            onSubmitEditing={handleAddCustomGenre}
           />
 
           {selectedGenres.length > 0 && (

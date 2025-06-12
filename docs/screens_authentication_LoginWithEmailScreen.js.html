@@ -103,7 +103,7 @@ const handleContinue = async () => {
       
       // Save the email to AsyncStorage for later use
       await saveUserEmail(email);
-      console.log('Email saved to AsyncStorage:', email);
+      console.log('cStorage:', email);
     } else {
       console.log('❌ Sign in failed:', result.error);
       setAuthError(result.error || 'Failed to sign in. Please try again.');

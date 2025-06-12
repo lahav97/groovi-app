@@ -5,6 +5,7 @@ import { fetchUserProfile } from '../services/profileService';
 import { getCurrentUserEmail } from '../utils/userUtils';
 import { useIsFocused } from '@react-navigation/native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import { handleError } from '../utils/errors';
 
 const PROFILE_CACHE_KEY = 'profileCache';
 const PROFILE_VIDEOS_KEY = 'profileVideos';
@@ -114,7 +115,7 @@ const userProfileManager = ({
         return profileData;
       } catch (err) {
         console.error('Failed to load profile:', err);
-        setError(err.message || 'Could not load profile data');
+        setError(handleError(err, 'userProfileManager/loadProfile') || err.message || 'Could not load profile data');
         
         // Try to use cached data as fallback if API fails
         try {

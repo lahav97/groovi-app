@@ -10,6 +10,9 @@ import { useAuth } from '../context/AuthContext';
 import { getCurrentUserEmail } from '../utils/userUtils';
 import { fetchUserProfile } from '../services/profileService';
 import { getProfileCache, cacheUserProfile, clearAllCaches } from '../utils/cacheManager';
+import {
+  handleError
+} from '../utils/errors';
 
 /**
  * Custom hook for profile data management
@@ -69,7 +72,7 @@ export const useProfileData = () => {
         console.error('❌ useProfileData: Logout failed:', result.error);
         Alert.alert(
           'Logout Failed',
-          result.error || 'Unable to sign out. Please try again.',
+          handleError(result.error, 'useProfileData/performLogout') || 'Unable to sign out. Please try again.',
           [{ text: 'OK' }]
         );
       }
@@ -77,7 +80,7 @@ export const useProfileData = () => {
       console.error('❌ useProfileData: Error during logout:', error);
       Alert.alert(
         'Logout Error',
-        'An error occurred while signing out. Please try again.',
+        handleError(error, 'useProfileData/performLogout') || 'An error occurred while signing out. Please try again.',
         [{ text: 'OK' }]
       );
     } finally {

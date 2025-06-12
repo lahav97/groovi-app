@@ -3,6 +3,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Auth } from 'aws-amplify';
 import BackgroundDataService from '../services/BackgroundDataService';
 import { saveUserEmail, clearUserEmail } from '../utils/userUtils';
+import { handleError, AuthError } from '../utils/errors';
 
 const AuthContext = createContext(null);
 
@@ -118,10 +119,11 @@ export const AuthProvider = ({ children }) => {
         userData
       };
     } catch (error) {
-      console.error('❌ AuthContext: Sign in error:', error);
+      const authErr = new AuthError(handleError(error, 'AuthContext/signIn'));
+      console.error('❌ AuthContext: Sign in error:', authErr);
       return { 
         success: false, 
-        error: error.message || 'Failed to sign in' 
+        error: authErr 
       };
     }
   };
@@ -159,7 +161,7 @@ export const AuthProvider = ({ children }) => {
       console.error('❌ AuthContext: Sign up error:', error);
       return {
         success: false,
-        error: error.message || 'Failed to sign up'
+        error: handleError(error, 'AuthContext/signUp') || error.message || 'Failed to sign up'
       };
     } finally {
       setIsLoading(false);
@@ -177,7 +179,7 @@ export const AuthProvider = ({ children }) => {
       console.error('❌ AuthContext: Confirm sign up error:', error);
       return {
         success: false,
-        error: error.message || 'Failed to confirm sign up'
+        error: handleError(error, 'AuthContext/confirmSignUp') || error.message || 'Failed to confirm sign up'
       };
     }
   };
@@ -191,7 +193,7 @@ export const AuthProvider = ({ children }) => {
       if (error.code === 'UserNotFoundException') {
         return { exists: false };
       }
-      return { exists: true, error: error.message };
+      return { exists: true, error: handleError(error, 'AuthContext/checkUserExistsInCognito') || error.message };
     }
   };
 
@@ -228,7 +230,7 @@ export const AuthProvider = ({ children }) => {
       console.error('❌ AuthContext: Error completing onboarding:', error);
       return {
         success: false,
-        error: error.message || 'Failed to mark onboarding as complete'
+        error: handleError(error, 'AuthContext/completeOnboarding') || error.message || 'Failed to mark onboarding as complete'
       };
     }
   };
@@ -244,7 +246,7 @@ export const AuthProvider = ({ children }) => {
       console.error('❌ AuthContext: Resend confirmation error:', error);
       return {
         success: false,
-        error: error.message || 'Failed to resend confirmation code'
+        error: handleError(error, 'AuthContext/resendConfirmationCode') || error.message || 'Failed to resend confirmation code'
       };
     }
     // No finally block - don't change global loading state
@@ -276,7 +278,7 @@ export const AuthProvider = ({ children }) => {
       console.error('❌ AuthContext: Sign out error:', error);
       return {
         success: false,
-        error: error.message || 'Failed to sign out'
+        error: handleError(error, 'AuthContext/signOut') || error.message || 'Failed to sign out'
       };
     } finally {
       setIsLoading(false);
@@ -310,7 +312,7 @@ export const AuthProvider = ({ children }) => {
       console.error('❌ AuthContext: Federated sign in error:', error);
       return {
         success: false,
-        error: error.message || 'Failed to sign in'
+        error: handleError(error, 'AuthContext/federatedSignIn') || error.message || 'Failed to sign in'
       };
     } finally {
       setIsLoading(false);

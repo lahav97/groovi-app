@@ -13,6 +13,7 @@ import {
   generateVideoThumbnail,
   createVideoKey 
 } from './videoService';
+import { handleError } from '../utils/errors';
 
 /**
  * Configuration for upload endpoints
@@ -75,10 +76,10 @@ class UploadFileService {
         fileInfo: { sizeBytes, sizeMB }
       };
     } catch (error) {
-      console.error('❌ Error validating image file:', error);
+      console.error('❌ Error validating image file:', handleError(error, 'UploadFileService/validateImageFile'));
       return {
         success: false,
-        error: 'Failed to validate image file.'
+        error: handleError(error, 'UploadFileService/validateImageFile') || 'Failed to validate image file.'
       };
     }
   }
@@ -184,12 +185,12 @@ class UploadFileService {
         return uploadResult;
 
       } catch (error) {
-        console.error(`❌ Upload attempt ${attempt} failed:`, error);
+        console.error(`❌ Upload attempt ${attempt} failed:`, handleError(error, 'UploadFileService/uploadToLambda'));
         
         if (attempt === maxRetries) {
           return {
             success: false,
-            error: error.message || 'Upload failed after all retry attempts'
+            error: handleError(error, 'UploadFileService/uploadToLambda') || error.message || 'Upload failed after all retry attempts'
           };
         }
         
@@ -251,11 +252,11 @@ class UploadFileService {
       }
 
     } catch (error) {
-      console.error(`❌ Error uploading video:`, error);
-      if (onProgress) onProgress({ stage: 'error', progress: 0, index, error: error.message });
+      console.error(`❌ Error uploading video:`, handleError(error, 'UploadFileService/uploadVideo'));
+      if (onProgress) onProgress({ stage: 'error', progress: 0, index, error: handleError(error, 'UploadFileService/uploadVideo') });
       return {
         success: false,
-        error: error.message || 'Failed to upload video'
+        error: handleError(error, 'UploadFileService/uploadVideo') || 'Failed to upload video'
       };
     } finally {
       this.isUploading = false;
@@ -361,10 +362,10 @@ class UploadFileService {
       };
 
     } catch (error) {
-      console.error('💥 Batch upload process failed:', error);
+      console.error('💥 Batch upload process failed:', handleError(error, 'UploadFileService/uploadMultipleVideos'));
       return {
         success: false,
-        error: error.message || 'Batch upload failed',
+        error: handleError(error, 'UploadFileService/uploadMultipleVideos') || 'Batch upload failed',
         results: [],
         uploadedUrls: [],
         stats: {
@@ -421,11 +422,11 @@ class UploadFileService {
       }
 
     } catch (error) {
-      console.error(`❌ Error uploading image:`, error);
-      if (onProgress) onProgress({ stage: 'error', progress: 0, error: error.message });
+      console.error(`❌ Error uploading image:`, handleError(error, 'UploadFileService/uploadImage'));
+      if (onProgress) onProgress({ stage: 'error', progress: 0, error: handleError(error, 'UploadFileService/uploadImage') });
       return {
         success: false,
-        error: error.message || 'Failed to upload image'
+        error: handleError(error, 'UploadFileService/uploadImage') || 'Failed to upload image'
       };
     } finally {
       this.isUploading = false;
@@ -456,10 +457,10 @@ class UploadFileService {
         };
       }
     } catch (error) {
-      console.error(`❌ Error deleting file ${fileName}:`, error.response?.data || error.message);
+      console.error(`❌ Error deleting file ${fileName}:`, handleError(error, 'UploadFileService/deleteFile'));
       return {
         success: false,
-        error: error.response?.data?.message || error.message || 'Failed to delete file'
+        error: handleError(error, 'UploadFileService/deleteFile') || error.response?.data?.message || error.message || 'Failed to delete file'
       };
     }
   }
