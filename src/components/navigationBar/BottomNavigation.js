@@ -36,7 +36,7 @@ const BottomNavigation = () => {
         </LinearGradient>
       </TouchableOpacity>
 
-      <TouchableOpacity style={styles.navItem} onPress={() => navigation.navigate('MusicianProfile')}>
+      <TouchableOpacity style={styles.navItem} onPress={() => navigation.navigate('MatchScreen')}>
         <Icon name="home-outline" size={ICON_SIZE} color={ICON_COLOR} />
       </TouchableOpacity>
 

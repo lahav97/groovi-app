@@ -1,8 +1,3 @@
-/**
- * @module SearchScreen
- * Real-time user search screen with Instagram-like functionality
- */
-
 import React, { useState, useEffect, useRef } from 'react';
 import {
   View,
@@ -14,62 +9,36 @@ import {
   Image,
   ActivityIndicator,
   useColorScheme,
-  Keyboard,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useNavigation } from '@react-navigation/native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { COLORS, SIZES } from '../../styles/theme';
-import {
-  AppError,
-  ValidationError,
-  NetworkError,
-  PermissionError,
-  AuthError,
-  ERROR_MESSAGES,
-  createValidationError,
-  createNetworkError,
-  createPermissionError,
-  createAuthError,
-  handleError
-} from '../../utils/errors';
+import { COLORS } from '../../styles/theme';
+import { createNetworkError, handleError } from '../../utils/errors';
 
-// API function to search users using your Lambda endpoint
 const searchUsers = async (query) => {
   try {
-    const url = `https://xvtkovlwr3.execute-api.us-east-1.amazonaws.com/groovi/search_user?query=${encodeURIComponent(query.trim())}`;
-
+    const SEARCH_URL = `https://xvtkovlwr3.execute-api.us-east-1.amazonaws.com/groovi/search_user?query=${encodeURIComponent(query.trim())}`;
     
-    const response = await fetch(url, {
+    const response = await fetch(SEARCH_URL, {
       method: 'GET',
       headers: {
         'Content-Type': 'application/json',
       }
     });
-    
-    console.log('📡 Response status:', response.status);
 
     if (!response.ok) {
-      const errorText = await response.text();
-      console.log('❌ Error response:', errorText);
       throw createNetworkError('SEARCH_FAILED', response.status, 'search_user');
     }
 
     const data = await response.json();
-    
     const users = Array.isArray(data) ? data : [];
     
-    // Transform the API response to match our component's expected format
     return users.map(user => ({
       id: user.id?.toString() || Math.random().toString(),
       username: user.username || 'Unknown',
       fullName: user.full_name || '',
-      bio: user.bio || '',
       profilePicture: user.profile_picture || 'https://via.placeholder.com/50',
-      instruments: user.instruments || {},
-      genres: user.genres || [],
-      videos: user.videos || [],
-      socialLinks: user.social_links || {},
       rating: user.rating || 0,
       isVerified: (user.rating && user.rating >= 4.5) || false
     }));
@@ -79,11 +48,6 @@ const searchUsers = async (query) => {
   }
 };
 
-/**
- * @function SearchScreen
- * @description Real-time search screen for finding users
- * @returns {JSX.Element}
- */
 const SearchScreen = () => {
   const navigation = useNavigation();
   const insets = useSafeAreaInsets();
@@ -95,18 +59,11 @@ const SearchScreen = () => {
   const [searchResults, setSearchResults] = useState([]);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState(null);
-  const [recentSearches, setRecentSearches] = useState([
-    // Start with empty recent searches - they'll be populated when users search
-  ]);
+  const [recentSearches, setRecentSearches] = useState([]);
   
   const searchTimeoutRef = useRef(null);
   const inputRef = useRef(null);
 
-  /**
-   * @function handleSearch
-   * @description Performs the search with debouncing
-   * @param {string} query - Search query
-   */
   const handleSearch = async (query) => {
     if (!query.trim()) {
       setSearchResults([]);
@@ -122,7 +79,6 @@ const SearchScreen = () => {
       const results = await searchUsers(query);
       setSearchResults(results);
     } catch (error) {
-      console.error('Search error:', error);
       setSearchResults([]);
       setError('Failed to search users. Please try again.');
     } finally {
@@ -130,47 +86,28 @@ const SearchScreen = () => {
     }
   };
 
-  /**
-   * @function onSearchChange
-   * @description Handles search input change with debouncing
-   * @param {string} text - Input text
-   */
   const onSearchChange = (text) => {
     setSearchQuery(text);
     setError(null);
     
-    // Clear previous timeout
     if (searchTimeoutRef.current) {
       clearTimeout(searchTimeoutRef.current);
     }
     
-    // Set new timeout for debounced search
     searchTimeoutRef.current = setTimeout(() => {
       handleSearch(text);
-    }, 300); // 300ms debounce
+    }, 300);
   };
 
-  /**
-   * @function handleUserPress
-   * @description Handles user selection
-   * @param {Object} user - Selected user
-   */
   const handleUserPress = (user) => {
-    // Add to recent searches (avoid duplicates)
     setRecentSearches(prev => {
       const filtered = prev.filter(item => item.id !== user.id);
-      return [user, ...filtered].slice(0, 5); // Keep only 5 recent searches
+      return [user, ...filtered].slice(0, 5);
     });
     
-    // Navigate to user profile or handle selection
     console.log('Selected user:', user);
-    // navigation.navigate('UserProfile', { userId: user.id });
   };
 
-  /**
-   * @function clearSearch
-   * @description Clears the search input and results
-   */
   const clearSearch = () => {
     setSearchQuery('');
     setSearchResults([]);
@@ -181,20 +118,10 @@ const SearchScreen = () => {
     }
   };
 
-  /**
-   * @function clearRecentSearches
-   * @description Clears all recent searches
-   */
   const clearRecentSearches = () => {
     setRecentSearches([]);
   };
 
-  /**
-   * @function renderUserItem
-   * @description Renders a user item in the search results (Instagram style - simple)
-   * @param {Object} item - User item
-   * @returns {JSX.Element}
-   */
   const renderUserItem = ({ item }) => (
     <View>
       <TouchableOpacity
@@ -204,24 +131,23 @@ const SearchScreen = () => {
       >
         <Image source={{ uri: item.profilePicture }} style={styles.profilePicture} />
         <View style={styles.userInfo}>
-          <Text style={[styles.username, { color: theme.text }]}>
-            {item.username}
-          </Text>
+          <View style={styles.usernameRow}>
+            <Text style={[styles.username, { color: theme.text }]}>
+              {item.username}
+            </Text>
+            {item.isVerified && (
+              <Ionicons name="checkmark-circle" size={16} color={COLORS.button.primary} style={styles.verifiedIcon} />
+            )}
+          </View>
           <Text style={[styles.fullName, { color: theme.textSecondary }]}>
             {item.fullName}
           </Text>
         </View>
       </TouchableOpacity>
-      {/* Separator line */}
       <View style={[styles.separator, { backgroundColor: theme.border }]} />
     </View>
   );
 
-  /**
-   * @function renderEmptyState
-   * @description Renders empty state when no results found
-   * @returns {JSX.Element}
-   */
   const renderEmptyState = () => (
     <View style={styles.emptyState}>
       <Ionicons name="search-outline" size={60} color={theme.textSecondary} />
@@ -229,14 +155,13 @@ const SearchScreen = () => {
         {searchQuery ? 'No users found' : 'Search for users'}
       </Text>
       {error && (
-        <Text style={[styles.errorText, { color: '#FF3B30' }]}>
+        <Text style={[styles.errorText, { color: COLORS.error }]}>
           {error}
         </Text>
       )}
     </View>
   );
 
-  // Cleanup timeout on unmount
   useEffect(() => {
     return () => {
       if (searchTimeoutRef.current) {
@@ -245,7 +170,6 @@ const SearchScreen = () => {
     };
   }, []);
 
-  // Auto-focus input when screen loads
   useEffect(() => {
     const timer = setTimeout(() => {
       inputRef.current?.focus();
@@ -259,7 +183,6 @@ const SearchScreen = () => {
 
   return (
     <View style={[styles.container, { backgroundColor: theme.background }]}>
-      {/* Header */}
       <View style={[styles.header, { paddingTop: insets.top + 10 }]}>
         <TouchableOpacity
           style={styles.backButton}
@@ -268,7 +191,6 @@ const SearchScreen = () => {
           <Ionicons name="arrow-back" size={28} color={theme.text} />
         </TouchableOpacity>
         
-        {/* Search Input */}
         <View style={[styles.searchContainer, { backgroundColor: isDark ? '#2c2c2e' : '#f0f0f0' }]}>
           <Ionicons name="search" size={20} color={theme.textSecondary} style={styles.searchIcon} />
           <TextInput
@@ -290,9 +212,7 @@ const SearchScreen = () => {
         </View>
       </View>
 
-      {/* Content */}
       <View style={styles.content}>
-        {/* Loading indicator */}
         {isLoading && (
           <View style={styles.loadingContainer}>
             <ActivityIndicator size="small" color={theme.textSecondary} />
@@ -302,7 +222,6 @@ const SearchScreen = () => {
           </View>
         )}
 
-        {/* Recent Searches */}
         {showRecentSearches && (
           <View style={styles.section}>
             <View style={styles.sectionHeader}>
@@ -324,7 +243,6 @@ const SearchScreen = () => {
           </View>
         )}
 
-        {/* Search Results */}
         {showResults && (
           <FlatList
             data={searchResults}
@@ -335,7 +253,6 @@ const SearchScreen = () => {
           />
         )}
 
-        {/* Empty State */}
         {showEmpty && renderEmptyState()}
       </View>
     </View>
@@ -426,17 +343,25 @@ const styles = StyleSheet.create({
   userInfo: {
     flex: 1,
   },
+  usernameRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
   username: {
     fontSize: 16,
     fontWeight: '600',
+  },
+  verifiedIcon: {
+    marginLeft: 4,
   },
   fullName: {
     fontSize: 14,
     marginTop: 2,
   },
   separator: {
-    height: StyleSheet.hairlineWidth,
-    marginLeft: 65, 
+    height: 1,
+    marginLeft: 68,
+    marginRight: 16,
   },
   emptyState: {
     flex: 1,

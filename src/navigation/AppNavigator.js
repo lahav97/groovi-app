@@ -14,7 +14,7 @@ import { SignupFlowProvider } from '../context/SignupFlowContext';
 import InstrumentsScreen from '../screens/onboarding/InstrumentsScreen';
 import ProfileSetupScreen from '../screens/onboarding/ProfileSetupScreen';
 import VideoUploadScreen from '../screens/feed/VideoUploadScreen';
-import MusicianProfileScreen from '../screens/profile/MusicianProfileScreen';
+import MatchScreen from '../screens/feed/MatchScreen';
 import SearchScreen from '../screens/feed/SearchScreen';
 
 // Ignore specific harmless warnings
@@ -53,7 +53,7 @@ const MainStack = () => (
     <Stack.Screen name="Filter" component={FilterScreen} /> 
     <Stack.Screen name="EditProfile" component={EditProfileScreen} />
     <Stack.Screen name="VideoUpload" component={VideoUploadScreen} />
-    <Stack.Screen name="MusicianProfile" component={MusicianProfileScreen} />
+    <Stack.Screen name="MusicianProfile" component={MatchScreen} />
     <Stack.Screen name="Search" component={SearchScreen} />
   </Stack.Navigator>
 );
