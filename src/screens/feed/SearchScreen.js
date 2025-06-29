@@ -100,12 +100,19 @@ const SearchScreen = () => {
   };
 
   const handleUserPress = (user) => {
+    // Add to recent searches
     setRecentSearches(prev => {
       const filtered = prev.filter(item => item.id !== user.id);
       return [user, ...filtered].slice(0, 5);
     });
     
-    console.log('Selected user:', user);
+    // Navigate to MusicianProfileScreen
+    navigation.navigate('MusicianProfile', {
+      username: user.username,
+      userId: user.id
+    });
+    
+    console.log('Navigating to profile:', user.username);
   };
 
   const clearSearch = () => {

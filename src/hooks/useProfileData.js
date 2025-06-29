@@ -203,7 +203,7 @@ export const useProfileData = () => {
     if (!profile?.instruments) return 'Guitar, Acoustic Guitar';
     
     if (typeof profile.instruments === 'object') {
-      return Object.keys(profile.instruments).join(', ');
+      return Object.values(profile.instruments).join(', ');
     }
     
     if (Array.isArray(profile.instruments)) {

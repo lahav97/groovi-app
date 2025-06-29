@@ -16,7 +16,6 @@ import { COLORS } from '../../styles/theme';
 import { useIsFocused } from '@react-navigation/native';
 import VideoInfo from './VideoInfo';
 import * as FileSystem from 'expo-file-system';
-import { handleError } from '../../utils/errors';
 
 const { width, height: SCREEN_HEIGHT } = Dimensions.get('window');
 

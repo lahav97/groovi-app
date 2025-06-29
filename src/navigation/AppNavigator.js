@@ -16,6 +16,7 @@ import ProfileSetupScreen from '../screens/onboarding/ProfileSetupScreen';
 import VideoUploadScreen from '../screens/feed/VideoUploadScreen';
 import MatchScreen from '../screens/feed/MatchScreen';
 import SearchScreen from '../screens/feed/SearchScreen';
+import MusicianProfileScreen from '../screens/profile/MusicianProfileScreen';
 
 // Ignore specific harmless warnings
 LogBox.ignoreLogs([
@@ -53,8 +54,9 @@ const MainStack = () => (
     <Stack.Screen name="Filter" component={FilterScreen} /> 
     <Stack.Screen name="EditProfile" component={EditProfileScreen} />
     <Stack.Screen name="VideoUpload" component={VideoUploadScreen} />
-    <Stack.Screen name="MusicianProfile" component={MatchScreen} />
+    <Stack.Screen name="Match" component={MatchScreen} />
     <Stack.Screen name="Search" component={SearchScreen} />
+    <Stack.Screen name="MusicianProfile" component={MusicianProfileScreen} />
   </Stack.Navigator>
 );
 
