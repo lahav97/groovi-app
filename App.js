@@ -10,58 +10,60 @@ import awsConfig from './src/utils/awsConfig';
 import AppNavigator from './src/navigation/AppNavigator';
 import React, { useEffect } from 'react';
 import { SignupFlowProvider } from './src/context/SignupFlowContext';
-
+import { FiltersProvider } from './src/context/FiltersContext';
 
 Amplify.configure(awsConfig);
 
 LogBox.ignoreLogs([
-  'Support for defaultProps will be removed from function components',
+    'Support for defaultProps will be removed from function components',
 ]);
 
 export default function App() {
-  useEffect(() => {
-    const initializeCache = async () => {
-      try {
-        await manageCacheSize(200);
-        console.log('Initial cache management completed');
-      } catch (error) {
-        console.error('Error in initial cache management:', error);
-      }
-    };
-    
-    initializeCache();
-    
-    // Set up AppState listener for background cleanup
-    const subscription = AppState.addEventListener('change', nextAppState => {
-      if (nextAppState === 'background') {
-        console.log('App going to background, cleaning cache...');
-        manageCacheSize(200).catch(err => 
-          console.error('Error cleaning cache in background:', err)
-        );
-      }
-    });
+    useEffect(() => {
+        const initializeCache = async () => {
+            try {
+                await manageCacheSize(200);
+                console.log('Initial cache management completed');
+            } catch (error) {
+                console.error('Error in initial cache management:', error);
+            }
+        };
 
-    // Clean up listener on component unmount
-    return () => {
-      subscription.remove();
-    };
-  }, []);
+        initializeCache();
 
-  return (
-    <GestureHandlerRootView style={styles.container}>
-      <SafeAreaProvider>
-        <SignupFlowProvider>
-          <AuthProvider>
-            <AppNavigator />
-          </AuthProvider>
-        </SignupFlowProvider>
-      </SafeAreaProvider>
-    </GestureHandlerRootView>
-  );
+        // Set up AppState listener for background cleanup
+        const subscription = AppState.addEventListener('change', nextAppState => {
+            if (nextAppState === 'background') {
+                console.log('App going to background, cleaning cache...');
+                manageCacheSize(200).catch(err =>
+                    console.error('Error cleaning cache in background:', err)
+                );
+            }
+        });
+
+        // Clean up listener on component unmount
+        return () => {
+            subscription.remove();
+        };
+    }, []);
+
+    return (
+        <GestureHandlerRootView style={styles.container}>
+            <SafeAreaProvider>
+                <SignupFlowProvider>
+                    <AuthProvider>
+                        <FiltersProvider>
+                            <AppNavigator />
+                        </FiltersProvider>
+                    </AuthProvider>
+                </SignupFlowProvider>
+            </SafeAreaProvider>
+        </GestureHandlerRootView>
+    );
 }
 
 const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-  },
+    container: {
+        flex: 1,
+    },
 });

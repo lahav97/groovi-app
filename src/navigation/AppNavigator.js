@@ -17,6 +17,8 @@ import VideoUploadScreen from '../screens/feed/VideoUploadScreen';
 import MatchScreen from '../screens/feed/MatchScreen';
 import SearchScreen from '../screens/feed/SearchScreen';
 import MusicianProfileScreen from '../screens/profile/MusicianProfileScreen';
+import ChatListScreen from '../screens/chat/ChatListScreen';
+import ChatScreen from '../screens/chat/ChatScreen';
 
 // Ignore specific harmless warnings
 LogBox.ignoreLogs([
@@ -57,6 +59,8 @@ const MainStack = () => (
     <Stack.Screen name="Match" component={MatchScreen} />
     <Stack.Screen name="Search" component={SearchScreen} />
     <Stack.Screen name="MusicianProfile" component={MusicianProfileScreen} />
+    <Stack.Screen name="ChatList" component={ChatListScreen} />
+    <Stack.Screen name="ChatScreen" component={ChatScreen} />
   </Stack.Navigator>
 );
 

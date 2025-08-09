@@ -7,7 +7,6 @@ const Button = ({ onPress, title, style, textStyle, disabled, children }) => {
       style={[
         styles.button,
         disabled && styles.disabled,
-        // If children are present, don't apply default background
         children ? { backgroundColor: 'transparent' } : {},
         style,
       ]}

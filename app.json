@@ -6,6 +6,9 @@
     "sdkVersion": "52.0.0",
     "platforms": ["ios", "android", "web"],
     "userInterfaceStyle": "automatic",
+    "developmentClient": {
+      "silentLaunch": true
+    },
     "android": {
       "package": "com.groovi.app",
       "permissions": ["WRITE_EXTERNAL_STORAGE", "READ_EXTERNAL_STORAGE"],

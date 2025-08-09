@@ -6,81 +6,38 @@ import { handleError } from '../utils/errors';
 const MUSICIAN_API_URL = 'https://yflgdontu1.execute-api.us-east-1.amazonaws.com/groovi/discover';
 const DELETE_API_URL = 'https://9u6y4sfrn2.execute-api.us-east-1.amazonaws.com/groovi/build_profile/delete';
 
+// ✅ ADD THIS HERE - AFTER THE API URLS, BEFORE OTHER VARIABLES
+const INSTRUMENT_VARIATIONS = {
+    // Bass variations
+    'Bass': ['Bass', 'Bass guitar', 'Electric bass', 'Acoustic bass', 'Upright bass', 'Double bass', 'Bass guitar electric', 'Bass guitar acoustic'],
+
+    // Guitar variations
+    'Guitar': ['Guitar', 'Electric guitar', 'Acoustic guitar', 'Classical guitar', 'Guitar electric', 'Guitar acoustic', 'Guitar classical'],
+
+    // Piano variations
+    'Piano': ['Piano', 'Piano keyboard', 'Keyboard', 'Electric piano', 'Digital piano'],
+
+    // Drums variations
+    'Drums': ['Drums', 'Drum kit', 'Percussion', 'Drum set', 'Electronic drums'],
+
+    // Violin variations
+    'Violin': ['Violin', 'Electric violin', 'Acoustic violin'],
+
+    // Other instruments (add exact matches for now)
+    'Cello': ['Cello'],
+    'Cajon': ['Cajon'],
+    'Bongos': ['Bongos'],
+    'Synth': ['Synth', 'Synthesizer', 'Electronic keyboard'],
+    'Lead Vocals': ['Lead Vocals', 'Singer', 'Vocals', 'Voice'],
+    'Backing Vocals': ['Backing Vocals', 'Background vocals', 'Harmony vocals'],
+    'Saxophone': ['Saxophone', 'Sax'],
+    'Trumpet': ['Trumpet'],
+    'Flute': ['Flute']
+};
+
 let fetchedVideoIds = new Set();
 let currentOffset = 0;
 let hasReachedActualEnd = false;
-
-/**
- * Fetches musicians with 3 distinct patterns
- * @param {string} type - 'initial' (returns 5 users) or 'filter' (returns 3 users)
- * @param {string} username - Username for musician search
- * @param {Object} filterCriteria - Filter JSON for filtered musicians (optional)
- * @param {boolean} hasFilters - Whether this is actual filtering or just "load more"
- * @returns {Promise<Array>} - Array of musician objects (5 for initial, 3 for filter)
- */
-export const fetchMusicians = async (type = 'initial', username = null, filterCriteria = null, hasFilters = false) => {
-  try {
-    console.log(`🎯 Fetching musicians - Type: ${type}, Username: ${username}, HasFilters: ${hasFilters}`);
-
-    if (type === 'initial') {
-      let url = `${MUSICIAN_API_URL}?type=initial&username=${encodeURIComponent(username)}`;
-
-      const response = await axios.get(url);
-      
-      if (!response.data || !Array.isArray(response.data)) {
-        console.log('❌ Invalid API response format');
-        return [];
-      }
-
-      console.log(`✅ Initial musicians: ${response.data.length} musicians`);
-      return formatMusicianResponse(response.data);
-      
-    } else if (type === 'filter') {
-      if (hasFilters && filterCriteria && Object.keys(filterCriteria).length > 1) {
-        let url = `${MUSICIAN_API_URL}?type=filter`;
-        
-        console.log(`📡 Filtered musicians: POST ${url}`);
-        console.log(`🔍 Filter criteria:`, filterCriteria);
-        
-        const response = await axios.post(url, filterCriteria, {
-          headers: {
-            'Content-Type': 'application/json'
-          }
-        });
-        
-        if (!response.data || !Array.isArray(response.data)) {
-          console.log('❌ Invalid API response format');
-          return [];
-        }
-
-        console.log(`✅ Filtered musicians: ${response.data.length} musicians`);
-        return formatMusicianResponse(response.data);
-        
-      } else {
-        let url = `${MUSICIAN_API_URL}?type=filter&username=${encodeURIComponent(username)}`;
-        
-        console.log(`📡 Load more musicians (no filters)`);
-        const response = await axios.get(url);
-        
-        if (!response.data || !Array.isArray(response.data)) {
-          console.log('❌ Invalid API response format');
-          return [];
-        }
-
-        console.log(`✅ Load more musicians: ${response.data.length} musicians`);
-        return formatMusicianResponse(response.data);
-      }
-    }
-
-  } catch (error) {
-    console.error('❌ Error fetching musicians:', handleError(error, 'videoService/fetchMusicians'));
-    if (error.response) {
-      console.error('Response data:', error.response.data);
-      console.error('Response status:', error.response.status);
-    }
-    return [];
-  }
-};
 
 /**
  * Helper function to transform API response to expected format
@@ -88,19 +45,261 @@ export const fetchMusicians = async (type = 'initial', username = null, filterCr
  * @returns {Array} - Transformed musician objects
  */
 const formatMusicianResponse = (apiData) => {
-  const musicians = apiData.map(musician => ({
-    id: musician.id,
-    username: musician.username,
-    videos: [musician.video_url],
-    instruments: musician.instruments || [],
-    bio: `Music enthusiast playing ${(musician.instruments || []).slice(0, 2).join(', ')}`,
-    location: 'Unknown',
-    genres: [],
-    age: null,
-    rating: Math.floor(Math.random() * 5) + 1,
-  }));
+    const musicians = apiData.map(musician => ({
+        id: musician.user_id || musician.id,
+        username: musician.username,
+        videos: [musician.video_url],
+        instruments: musician.instruments || [],
+        bio: `Music enthusiast playing ${(musician.instruments || []).slice(0, 2).join(', ')}`,
+        location: 'Unknown',
+        genres: [],
+        age: null,
+        rating: Math.floor(Math.random() * 5) + 1,
+    }));
 
-  return musicians;
+    return musicians;
+};
+
+/**
+ * Fetch initial musicians (no filters) - 5 random users
+ */
+export const fetchInitialMusicians = async (currentUser, limit = 5) => {
+    try {
+        console.log('🎵 Fetching initial musicians...');
+
+        const url = `${MUSICIAN_API_URL}?type=initial&username=${encodeURIComponent(currentUser)}`;
+        console.log('🎵 GET request to:', url);
+
+        const response = await axios.get(url);
+
+        if (!response.data || !Array.isArray(response.data)) {
+            console.log('❌ Invalid API response format');
+            return [];
+        }
+
+        console.log(`✅ Fetched ${response.data.length} initial musicians`);
+        return formatMusicianResponse(response.data);
+    } catch (error) {
+        console.error('❌ Error fetching initial musicians:', error);
+        throw error;
+    }
+};
+
+/**
+ * Fetch filtered musicians using GET with query parameters
+ */
+export const fetchFilteredMusicians = async (currentUser, filters, limit = 5) => {
+    try {
+        console.log('🎯 Fetching filtered musicians:', filters);
+
+        const params = new URLSearchParams();
+        params.append('type', 'filter');
+        params.append('username', currentUser);
+
+        // SMART INSTRUMENT FILTERING
+        if (filters.selectedInstruments && filters.selectedInstruments.length > 0) {
+            // Expand each selected instrument to include all its variations
+            const expandedInstruments = {};
+
+            filters.selectedInstruments.forEach(selectedInstrument => {
+                const skillLevel = filters.selectedSkill && filters.selectedSkill.length > 0 ? filters.selectedSkill[0] : "any";
+
+                // Get all variations for this instrument
+                const variations = INSTRUMENT_VARIATIONS[selectedInstrument] || [selectedInstrument];
+
+                console.log(`🎸 Expanding "${selectedInstrument}" to:`, variations);
+
+                // Add all variations to the filter
+                variations.forEach(variation => {
+                    expandedInstruments[variation] = skillLevel;
+                });
+            });
+
+            console.log('🎸 Final expanded instruments:', expandedInstruments);
+            params.append('instruments', JSON.stringify(expandedInstruments));
+        }
+
+        // Add genre filters as JSON string
+        if (filters.selectedGenres && filters.selectedGenres.length > 0) {
+            params.append('genres', JSON.stringify(filters.selectedGenres));
+        }
+
+        // Add gender filter as JSON array string
+        if (filters.selectedGender && filters.selectedGender !== 'Any') {
+            params.append('gender', JSON.stringify([filters.selectedGender.toLowerCase()]));
+        }
+
+        const url = `${MUSICIAN_API_URL}?${params.toString()}`;
+
+        const response = await axios.get(url);
+
+        if (!response.data || !Array.isArray(response.data)) {
+            console.log('❌ Invalid API response format');
+            return [];
+        }
+
+        // DEBUG: Show what instruments we got back
+        const responseInstruments = response.data.map(musician => musician.instruments || []).flat();
+        console.log('🎸 Found instruments in response:', [...new Set(responseInstruments)]);
+
+        console.log(`✅ Fetched ${response.data.length} filtered musicians with smart matching`);
+        return formatMusicianResponse(response.data);
+    } catch (error) {
+        console.error('❌ Error fetching filtered musicians:', error);
+        throw error;
+    }
+};
+
+/**
+ * Load more filtered musicians using GET
+ */
+export const loadMoreFilteredMusicians = async (currentUser, filters, limit = 3) => {
+    try {
+        console.log('🎯 Loading more filtered musicians...');
+
+        const params = new URLSearchParams();
+        params.append('type', 'filter');
+        params.append('username', currentUser);
+
+        // SAME SMART INSTRUMENT FILTERING
+        if (filters.selectedInstruments && filters.selectedInstruments.length > 0) {
+            const expandedInstruments = {};
+
+            filters.selectedInstruments.forEach(selectedInstrument => {
+                const skillLevel = filters.selectedSkill && filters.selectedSkill.length > 0 ? filters.selectedSkill[0] : "any";
+                const variations = INSTRUMENT_VARIATIONS[selectedInstrument] || [selectedInstrument];
+
+                variations.forEach(variation => {
+                    expandedInstruments[variation] = skillLevel;
+                });
+            });
+
+            params.append('instruments', JSON.stringify(expandedInstruments));
+        }
+
+        // Add genre filters as JSON string
+        if (filters.selectedGenres && filters.selectedGenres.length > 0) {
+            params.append('genres', JSON.stringify(filters.selectedGenres));
+        }
+
+        // Add gender filter as JSON array string
+        if (filters.selectedGender && filters.selectedGender !== 'Any') {
+            params.append('gender', JSON.stringify([filters.selectedGender.toLowerCase()]));
+        }
+
+        const url = `${MUSICIAN_API_URL}?${params.toString()}`;
+        console.log('🎯 Loading more with smart filtering:', url);
+
+        const response = await axios.get(url);
+
+        if (!response.data || !Array.isArray(response.data)) {
+            console.log('❌ Invalid API response format');
+            return [];
+        }
+
+        console.log(`✅ Loaded ${response.data.length} more filtered musicians with smart matching`);
+        return formatMusicianResponse(response.data);
+    } catch (error) {
+        console.error('❌ Error loading more filtered musicians:', error);
+        throw error;
+    }
+};
+
+/**
+ * Function to discover new instrument variations from your backend
+ */
+export const discoverInstrumentVariations = async (currentUser) => {
+    try {
+        // Get all musicians to see what instruments exist
+        const response = await axios.get(`${MUSICIAN_API_URL}?type=initial&username=${currentUser}`);
+
+        if (response.data && Array.isArray(response.data)) {
+            const allInstruments = new Set();
+
+            response.data.forEach(musician => {
+                if (musician.instruments && Array.isArray(musician.instruments)) {
+                    musician.instruments.forEach(instrument => {
+                        allInstruments.add(instrument);
+                    });
+                }
+            });
+
+            const sortedInstruments = Array.from(allInstruments).sort();
+
+            console.log('🔍 All instruments found in backend:');
+            console.log(sortedInstruments);
+
+            // Group similar instruments
+            const instrumentGroups = {
+                bass: sortedInstruments.filter(i => i.toLowerCase().includes('bass')),
+                guitar: sortedInstruments.filter(i => i.toLowerCase().includes('guitar')),
+                piano: sortedInstruments.filter(i => i.toLowerCase().includes('piano') || i.toLowerCase().includes('keyboard')),
+                drums: sortedInstruments.filter(i => i.toLowerCase().includes('drum') || i.toLowerCase().includes('percussion')),
+                vocals: sortedInstruments.filter(i => i.toLowerCase().includes('vocal') || i.toLowerCase().includes('singer')),
+            };
+
+            console.log('🎸 Instrument groups found:');
+            Object.entries(instrumentGroups).forEach(([group, instruments]) => {
+                if (instruments.length > 0) {
+                    console.log(`${group}:`, instruments);
+                }
+            });
+
+            return { allInstruments: sortedInstruments, instrumentGroups };
+        }
+
+        return { allInstruments: [], instrumentGroups: {} };
+    } catch (error) {
+        console.error('❌ Error discovering instruments:', error);
+        return { allInstruments: [], instrumentGroups: {} };
+    }
+};
+
+/**
+ * Load more musicians without filters using GET
+ */
+export const loadMusicianWithoutFilters = async (currentUser, limit = 3) => {
+    try {
+        console.log('🎵 Loading more musicians without filters...');
+
+        // Use filter endpoint with just username to get random users
+        const url = `${MUSICIAN_API_URL}?type=filter&username=${encodeURIComponent(currentUser)}`;
+        console.log('🎵 GET request to:', url);
+
+        const response = await axios.get(url);
+
+        if (!response.data || !Array.isArray(response.data)) {
+            console.log('❌ Invalid API response format');
+            return [];
+        }
+
+        console.log(`✅ Loaded ${response.data.length} more musicians`);
+        return formatMusicianResponse(response.data);
+    } catch (error) {
+        console.error('❌ Error loading more musicians:', error);
+        throw error;
+    }
+};
+
+/**
+ * Legacy function for backward compatibility
+ */
+export const fetchMusicians = async (type = 'initial', username = null, filterCriteria = null, hasFilters = false) => {
+    try {
+        if (type === 'initial') {
+            return await fetchInitialMusicians(username);
+        } else if (type === 'filter') {
+            if (hasFilters && filterCriteria && Object.keys(filterCriteria).length > 1) {
+                // This would need to be converted to the new filter format
+                return await loadMusicianWithoutFilters(username);
+            } else {
+                return await loadMusicianWithoutFilters(username);
+            }
+        }
+    } catch (error) {
+        console.error('❌ Error in legacy fetchMusicians:', error);
+        return [];
+    }
 };
 
 /**
@@ -109,86 +308,31 @@ const formatMusicianResponse = (apiData) => {
  * @returns {Promise<Array>} - Array of unique video objects
  */
 export const fetchVideos = async (offset = 0, limit = 5) => {
-  try {
-    if (offset === 0) {
-      fetchedVideoIds.clear();
-      console.log('🔄 Reset video state tracking');
+    try {
+        if (offset === 0) {
+            fetchedVideoIds.clear();
+            console.log('🔄 Reset video state tracking');
+        }
+
+        const musicians = await fetchInitialMusicians('default_user');
+
+        const videos = musicians.map(musician => ({
+            id: musician.id,
+            user_id: musician.id,
+            username: musician.username,
+            user: musician.username,
+            video_url: musician.videos[0],
+            videoUrl: musician.videos[0],
+            instruments: musician.instruments,
+        }));
+
+        console.log(`🎯 Returning ${videos.length} videos from musician API`);
+        return videos;
+
+    } catch (error) {
+        console.error('❌ Error fetching videos:', handleError(error, 'videoService/fetchVideos'));
+        return [];
     }
-
-    const musicians = await fetchMusicians('initial', 'default_user');
-    
-    const videos = musicians.map(musician => ({
-      id: musician.id,
-      user_id: musician.id,
-      username: musician.username,
-      user: musician.username,
-      video_url: musician.videos[0],
-      videoUrl: musician.videos[0],
-      instruments: musician.instruments,
-    }));
-
-    console.log(`🎯 Returning ${videos.length} videos from musician API`);
-    return videos;
-
-  } catch (error) {
-    console.error('❌ Error fetching videos:', handleError(error, 'videoService/fetchVideos'));
-    return [];
-  }
-};
-
-/**
- * Apply filters to discovery (with actual filters)
- * @param {string} username - Username applying filters
- * @param {Object} filters - Filter object with genres, instruments, location, etc.
- * @returns {Promise<Array>} - Filtered musicians (3 results)
- */
-export const fetchFilteredMusicians = async (username, filters = {}) => {
-  try {
-    console.log(`🔍 Applying filters for ${username}:`, filters);
-
-    const filterCriteria = {
-      username: username,
-      ...filters
-    };
-
-    const hasActualFilters = Object.keys(filters).length > 0;
-    
-    return await fetchMusicians('filter', username, filterCriteria, hasActualFilters);
-  } catch (error) {
-    console.error('❌ Error applying filters:', error);
-    return [];
-  }
-};
-
-/**
- * Load more musicians without filters
- * @param {string} username - Username for discovery
- * @returns {Promise<Array>} - 3 random musicians
- */
-export const loadMusicianWithoutFilters = async (username) => {
-  try {
-    console.log(`🔄 Loading more musicians (no filters) for ${username}`);
-    
-    return await fetchMusicians('filter', username, { username }, false);
-  } catch (error) {
-    console.error('❌ Error loading more musicians:', error);
-    return [];
-  }
-};
-
-/**
- * Get initial musicians for a user
- * @param {string} username - Username to get discovery for
- * @returns {Promise<Array>} - Initial discovery musicians
- */
-export const fetchInitialMusicians = async (username) => {
-  try {
-    console.log(`🚀 Getting initial musicians for ${username}`);
-    return await fetchMusicians('initial', username);
-  } catch (error) {
-    console.error('❌ Error getting initial musicians:', error);
-    return [];
-  }
 };
 
 /**
@@ -198,54 +342,54 @@ export const fetchInitialMusicians = async (username) => {
  * @returns {Promise<Object>} - Validation result with success/error
  */
 export const validateVideoFile = async (videoAsset, options = {}) => {
-  try {
-    const {
-      maxSizeMB = 20,
-      maxDurationSec = 45
-    } = options;
+    try {
+        const {
+            maxSizeMB = 20,
+            maxDurationSec = 45
+        } = options;
 
-    const fileInfo = await FileSystem.getInfoAsync(videoAsset.uri, { size: true });
-    const sizeBytes = fileInfo?.size || 0;
-    const sizeMB = sizeBytes / (1024 * 1024);
+        const fileInfo = await FileSystem.getInfoAsync(videoAsset.uri, { size: true });
+        const sizeBytes = fileInfo?.size || 0;
+        const sizeMB = sizeBytes / (1024 * 1024);
 
-    let durationSec = videoAsset?.duration || 0;
-    
-    if (durationSec > 100) {
-      durationSec = durationSec / 1000;
+        let durationSec = videoAsset?.duration || 0;
+
+        if (durationSec > 100) {
+            durationSec = durationSec / 1000;
+        }
+
+        console.log(`📊 Video validation - Size: ${sizeMB.toFixed(2)}MB, Duration: ${durationSec.toFixed(1)}s`);
+
+        if (sizeMB > maxSizeMB) {
+            return {
+                success: false,
+                error: `Video too large: ${sizeMB.toFixed(2)}MB. Maximum allowed: ${maxSizeMB}MB.`
+            };
+        }
+
+        if (durationSec > maxDurationSec) {
+            return {
+                success: false,
+                error: `Video too long: ${durationSec.toFixed(1)} seconds. Maximum allowed: ${maxDurationSec} seconds.`
+            };
+        }
+
+        return {
+            success: true,
+            fileInfo: {
+                sizeBytes,
+                sizeMB,
+                durationSec
+            }
+        };
+
+    } catch (error) {
+        console.error('❌ Error validating video:', error);
+        return {
+            success: false,
+            error: 'Failed to validate video file.'
+        };
     }
-
-    console.log(`📊 Video validation - Size: ${sizeMB.toFixed(2)}MB, Duration: ${durationSec.toFixed(1)}s`);
-
-    if (sizeMB > maxSizeMB) {
-      return {
-        success: false,
-        error: `Video too large: ${sizeMB.toFixed(2)}MB. Maximum allowed: ${maxSizeMB}MB.`
-      };
-    }
-
-    if (durationSec > maxDurationSec) {
-      return {
-        success: false,
-        error: `Video too long: ${durationSec.toFixed(1)} seconds. Maximum allowed: ${maxDurationSec} seconds.`
-      };
-    }
-
-    return {
-      success: true,
-      fileInfo: {
-        sizeBytes,
-        sizeMB,
-        durationSec
-      }
-    };
-
-  } catch (error) {
-    console.error('❌ Error validating video:', error);
-    return {
-      success: false,
-      error: 'Failed to validate video file.'
-    };
-  }
 };
 
 /**
@@ -256,7 +400,7 @@ export const validateVideoFile = async (videoAsset, options = {}) => {
  * @returns {string} - Unique video key
  */
 export const createVideoKey = (fileName, size, duration) => {
-  return `${fileName}_${size}_${Math.round(duration * 10)}`;
+    return `${fileName}_${size}_${Math.round(duration * 10)}`;
 };
 
 /**
@@ -267,36 +411,36 @@ export const createVideoKey = (fileName, size, duration) => {
  * @returns {Promise<Object>} - Duplicate check result
  */
 export const checkVideoDuplicate = async (videoAsset, existingKeys, validationOptions = {}) => {
-  try {
-    const validation = await validateVideoFile(videoAsset, validationOptions);
-    
-    if (!validation.success) {
-      return {
-        isDuplicate: false,
-        videoKey: null,
-        error: validation.error
-      };
+    try {
+        const validation = await validateVideoFile(videoAsset, validationOptions);
+
+        if (!validation.success) {
+            return {
+                isDuplicate: false,
+                videoKey: null,
+                error: validation.error
+            };
+        }
+
+        const fileName = videoAsset.fileName || `video_${Date.now()}.mp4`;
+        const videoKey = createVideoKey(fileName, validation.fileInfo.sizeBytes, validation.fileInfo.durationSec);
+
+        const isDuplicate = existingKeys.has(videoKey);
+
+        return {
+            isDuplicate,
+            videoKey,
+            error: null
+        };
+
+    } catch (error) {
+        console.error('❌ Error checking video duplicate:', error);
+        return {
+            isDuplicate: false,
+            videoKey: null,
+            error: 'Failed to check for duplicates.'
+        };
     }
-
-    const fileName = videoAsset.fileName || `video_${Date.now()}.mp4`;
-    const videoKey = createVideoKey(fileName, validation.fileInfo.sizeBytes, validation.fileInfo.durationSec);
-
-    const isDuplicate = existingKeys.has(videoKey);
-
-    return {
-      isDuplicate,
-      videoKey,
-      error: null
-    };
-
-  } catch (error) {
-    console.error('❌ Error checking video duplicate:', error);
-    return {
-      isDuplicate: false,
-      videoKey: null,
-      error: 'Failed to check for duplicates.'
-    };
-  }
 };
 
 /**
@@ -306,25 +450,25 @@ export const checkVideoDuplicate = async (videoAsset, existingKeys, validationOp
  * @returns {Promise<Object>} - Thumbnail generation result
  */
 export const generateVideoThumbnail = async (videoUri, timeMs = 100) => {
-  try {
-    const { uri: thumbnailUri } = await VideoThumbnails.getThumbnailAsync(
-      videoUri,
-      { time: timeMs }
-    );
+    try {
+        const { uri: thumbnailUri } = await VideoThumbnails.getThumbnailAsync(
+            videoUri,
+            { time: timeMs }
+        );
 
-    return {
-      success: true,
-      thumbnailUri
-    };
+        return {
+            success: true,
+            thumbnailUri
+        };
 
-  } catch (error) {
-    console.error('❌ Error generating thumbnail:', error);
-    return {
-      success: false,
-      thumbnailUri: videoUri + "#t=0.1",
-      error: 'Failed to generate thumbnail'
-    };
-  }
+    } catch (error) {
+        console.error('❌ Error generating thumbnail:', error);
+        return {
+            success: false,
+            thumbnailUri: videoUri + "#t=0.1",
+            error: 'Failed to generate thumbnail'
+        };
+    }
 };
 
 /**
@@ -335,60 +479,60 @@ export const generateVideoThumbnail = async (videoUri, timeMs = 100) => {
  * @returns {Promise<Object>} - Processed video data or error
  */
 export const processVideoAsset = async (selectedAsset, existingKeys, options = {}) => {
-  try {
-    console.log(`🎬 Processing video: ${selectedAsset.fileName}`);
+    try {
+        console.log(`🎬 Processing video: ${selectedAsset.fileName}`);
 
-    const duplicateCheck = await checkVideoDuplicate(selectedAsset, existingKeys, options);
-    
-    if (duplicateCheck.error) {
-      return { success: false, error: duplicateCheck.error };
+        const duplicateCheck = await checkVideoDuplicate(selectedAsset, existingKeys, options);
+
+        if (duplicateCheck.error) {
+            return { success: false, error: duplicateCheck.error };
+        }
+
+        if (duplicateCheck.isDuplicate) {
+            return {
+                success: false,
+                error: 'You have already added this video.',
+                isDuplicate: true
+            };
+        }
+
+        const validation = await validateVideoFile(selectedAsset, options);
+
+        if (!validation.success) {
+            return { success: false, error: validation.error };
+        }
+
+        const thumbnailResult = await generateVideoThumbnail(selectedAsset.uri);
+
+        const videoData = {
+            id: selectedAsset.assetId || Date.now().toString() + Math.random(),
+            uri: selectedAsset.uri,
+            fileName: selectedAsset.fileName || `video_${Date.now()}.mp4`,
+            mimeType: selectedAsset.mimeType || 'video/mp4',
+            duration: validation.fileInfo.durationSec,
+            size: validation.fileInfo.sizeBytes,
+            thumbnail: thumbnailResult.thumbnailUri,
+        };
+
+        console.log(`✅ Video processed successfully:`, {
+            fileName: videoData.fileName,
+            size: `${(videoData.size / (1024 * 1024)).toFixed(2)}MB`,
+            duration: `${videoData.duration}s`
+        });
+
+        return {
+            success: true,
+            videoData,
+            videoKey: duplicateCheck.videoKey
+        };
+
+    } catch (error) {
+        console.error('❌ Error processing video asset:', error);
+        return {
+            success: false,
+            error: 'Failed to process video.'
+        };
     }
-
-    if (duplicateCheck.isDuplicate) {
-      return { 
-        success: false, 
-        error: 'You have already added this video.',
-        isDuplicate: true 
-      };
-    }
-
-    const validation = await validateVideoFile(selectedAsset, options);
-    
-    if (!validation.success) {
-      return { success: false, error: validation.error };
-    }
-
-    const thumbnailResult = await generateVideoThumbnail(selectedAsset.uri);
-
-    const videoData = {
-      id: selectedAsset.assetId || Date.now().toString() + Math.random(),
-      uri: selectedAsset.uri,
-      fileName: selectedAsset.fileName || `video_${Date.now()}.mp4`,
-      mimeType: selectedAsset.mimeType || 'video/mp4',
-      duration: validation.fileInfo.durationSec,
-      size: validation.fileInfo.sizeBytes,
-      thumbnail: thumbnailResult.thumbnailUri,
-    };
-
-    console.log(`✅ Video processed successfully:`, {
-      fileName: videoData.fileName,
-      size: `${(videoData.size / (1024 * 1024)).toFixed(2)}MB`,
-      duration: `${videoData.duration}s`
-    });
-
-    return {
-      success: true,
-      videoData,
-      videoKey: duplicateCheck.videoKey
-    };
-
-  } catch (error) {
-    console.error('❌ Error processing video asset:', error);
-    return {
-      success: false,
-      error: 'Failed to process video.'
-    };
-  }
 };
 
 /**
@@ -400,57 +544,57 @@ export const processVideoAsset = async (selectedAsset, existingKeys, options = {
  * @returns {Promise<Object>} - Batch processing result
  */
 export const processBatchVideos = async (videoAssets, existingKeys, options = {}, onProgress = null) => {
-  try {
-    console.log(`🎬 Processing ${videoAssets.length} videos...`);
+    try {
+        console.log(`🎬 Processing ${videoAssets.length} videos...`);
 
-    const processedVideos = [];
-    const videoKeys = new Set(existingKeys);
-    const errors = [];
+        const processedVideos = [];
+        const videoKeys = new Set(existingKeys);
+        const errors = [];
 
-    for (let i = 0; i < videoAssets.length; i++) {
-      const asset = videoAssets[i];
-      
-      if (onProgress) {
-        onProgress({ current: i + 1, total: videoAssets.length, stage: 'processing', asset });
-      }
+        for (let i = 0; i < videoAssets.length; i++) {
+            const asset = videoAssets[i];
 
-      const result = await processVideoAsset(asset, videoKeys, options);
-      
-      if (result.success) {
-        processedVideos.push(result.videoData);
-        videoKeys.add(result.videoKey);
-      } else {
-        errors.push({
-          asset,
-          error: result.error,
-          isDuplicate: result.isDuplicate
-        });
-      }
+            if (onProgress) {
+                onProgress({ current: i + 1, total: videoAssets.length, stage: 'processing', asset });
+            }
+
+            const result = await processVideoAsset(asset, videoKeys, options);
+
+            if (result.success) {
+                processedVideos.push(result.videoData);
+                videoKeys.add(result.videoKey);
+            } else {
+                errors.push({
+                    asset,
+                    error: result.error,
+                    isDuplicate: result.isDuplicate
+                });
+            }
+        }
+
+        console.log(`✅ Batch processing complete: ${processedVideos.length} successful, ${errors.length} errors`);
+
+        return {
+            success: true,
+            processedVideos,
+            videoKeys,
+            errors,
+            stats: {
+                total: videoAssets.length,
+                processed: processedVideos.length,
+                errors: errors.length
+            }
+        };
+
+    } catch (error) {
+        console.error('❌ Error in batch video processing:', error);
+        return {
+            success: false,
+            error: 'Failed to process videos.',
+            processedVideos: [],
+            errors: []
+        };
     }
-
-    console.log(`✅ Batch processing complete: ${processedVideos.length} successful, ${errors.length} errors`);
-
-    return {
-      success: true,
-      processedVideos,
-      videoKeys,
-      errors,
-      stats: {
-        total: videoAssets.length,
-        processed: processedVideos.length,
-        errors: errors.length
-      }
-    };
-
-  } catch (error) {
-    console.error('❌ Error in batch video processing:', error);
-    return {
-      success: false,
-      error: 'Failed to process videos.',
-      processedVideos: [],
-      errors: []
-    };
-  }
 };
 
 /**
@@ -459,33 +603,33 @@ export const processBatchVideos = async (videoAssets, existingKeys, options = {}
  * @returns {Promise<Object>} - Deletion result
  */
 export const deleteVideoFromS3 = async (fileName) => {
-  try {
-    console.log(`🗑️ Deleting video from S3: ${fileName}`);
-    
-    const deleteUrl = `${DELETE_API_URL}?filename=${encodeURIComponent(fileName)}`;
-    const response = await axios.delete(deleteUrl);
+    try {
+        console.log(`🗑️ Deleting video from S3: ${fileName}`);
 
-    if (response.status === 200) {
-      console.log(`✅ Video ${fileName} deleted successfully from S3`);
-      return {
-        success: true,
-        message: `Video ${fileName} deleted successfully`
-      };
-    } else {
-      console.error(`❌ Failed to delete video ${fileName}:`, response.data);
-      return {
-        success: false,
-        error: `Failed to delete video: ${response.status}`
-      };
+        const deleteUrl = `${DELETE_API_URL}?filename=${encodeURIComponent(fileName)}`;
+        const response = await axios.delete(deleteUrl);
+
+        if (response.status === 200) {
+            console.log(`✅ Video ${fileName} deleted successfully from S3`);
+            return {
+                success: true,
+                message: `Video ${fileName} deleted successfully`
+            };
+        } else {
+            console.error(`❌ Failed to delete video ${fileName}:`, response.data);
+            return {
+                success: false,
+                error: `Failed to delete video: ${response.status}`
+            };
+        }
+
+    } catch (error) {
+        console.error(`❌ Error deleting video ${fileName}:`, error.response?.data || error.message);
+        return {
+            success: false,
+            error: error.response?.data?.message || error.message || 'Failed to delete video'
+        };
     }
-
-  } catch (error) {
-    console.error(`❌ Error deleting video ${fileName}:`, error.response?.data || error.message);
-    return {
-      success: false,
-      error: error.response?.data?.message || error.message || 'Failed to delete video'
-    };
-  }
 };
 
 /**
@@ -497,64 +641,64 @@ export const deleteVideoFromS3 = async (fileName) => {
  * @returns {Object} - Video management utilities
  */
 export const createVideoManager = (videos, thumbnails, urls = [], statuses = []) => {
-  return {
-    moveVideo: (fromIndex, toIndex) => {
-      if (toIndex < 0 || toIndex >= videos.length || fromIndex === toIndex) {
-        return { videos, thumbnails, urls, statuses };
-      }
-      
-      const moveArray = (arr) => {
-        const newArr = [...arr];
-        const [movedItem] = newArr.splice(fromIndex, 1);
-        newArr.splice(toIndex, 0, movedItem);
-        return newArr;
-      };
+    return {
+        moveVideo: (fromIndex, toIndex) => {
+            if (toIndex < 0 || toIndex >= videos.length || fromIndex === toIndex) {
+                return { videos, thumbnails, urls, statuses };
+            }
 
-      return {
-        videos: moveArray(videos),
-        thumbnails: moveArray(thumbnails),
-        urls: moveArray(urls),
-        statuses: moveArray(statuses)
-      };
-    },
+            const moveArray = (arr) => {
+                const newArr = [...arr];
+                const [movedItem] = newArr.splice(fromIndex, 1);
+                newArr.splice(toIndex, 0, movedItem);
+                return newArr;
+            };
 
-    removeVideo: (index) => {
-      return {
-        videos: videos.filter((_, i) => i !== index),
-        thumbnails: thumbnails.filter((_, i) => i !== index),
-        urls: urls.filter((_, i) => i !== index),
-        statuses: statuses.filter((_, i) => i !== index)
-      };
-    },
+            return {
+                videos: moveArray(videos),
+                thumbnails: moveArray(thumbnails),
+                urls: moveArray(urls),
+                statuses: moveArray(statuses)
+            };
+        },
 
-    addVideo: (videoData, thumbnail, url = null, status = null) => {
-      return {
-        videos: [...videos, videoData],
-        thumbnails: [...thumbnails, thumbnail],
-        urls: url ? [...urls, url] : urls,
-        statuses: status ? [...statuses, status] : statuses
-      };
-    },
+        removeVideo: (index) => {
+            return {
+                videos: videos.filter((_, i) => i !== index),
+                thumbnails: thumbnails.filter((_, i) => i !== index),
+                urls: urls.filter((_, i) => i !== index),
+                statuses: statuses.filter((_, i) => i !== index)
+            };
+        },
 
-    updateVideo: (index, updates) => {
-      const newVideos = [...videos];
-      const newThumbnails = [...thumbnails];
-      const newUrls = [...urls];
-      const newStatuses = [...statuses];
+        addVideo: (videoData, thumbnail, url = null, status = null) => {
+            return {
+                videos: [...videos, videoData],
+                thumbnails: [...thumbnails, thumbnail],
+                urls: url ? [...urls, url] : urls,
+                statuses: status ? [...statuses, status] : statuses
+            };
+        },
 
-      if (updates.videoData) newVideos[index] = updates.videoData;
-      if (updates.thumbnail) newThumbnails[index] = updates.thumbnail;
-      if (updates.url) newUrls[index] = updates.url;
-      if (updates.status) newStatuses[index] = updates.status;
+        updateVideo: (index, updates) => {
+            const newVideos = [...videos];
+            const newThumbnails = [...thumbnails];
+            const newUrls = [...urls];
+            const newStatuses = [...statuses];
 
-      return {
-        videos: newVideos,
-        thumbnails: newThumbnails,
-        urls: newUrls,
-        statuses: newStatuses
-      };
-    }
-  };
+            if (updates.videoData) newVideos[index] = updates.videoData;
+            if (updates.thumbnail) newThumbnails[index] = updates.thumbnail;
+            if (updates.url) newUrls[index] = updates.url;
+            if (updates.status) newStatuses[index] = updates.status;
+
+            return {
+                videos: newVideos,
+                thumbnails: newThumbnails,
+                urls: newUrls,
+                statuses: newStatuses
+            };
+        }
+    };
 };
 
 /**
@@ -562,7 +706,7 @@ export const createVideoManager = (videos, thumbnails, urls = [], statuses = [])
  * @returns {boolean} True if more videos might be available
  */
 export const hasMoreVideos = () => {
-  return !hasReachedActualEnd;
+    return !hasReachedActualEnd;
 };
 
 /**
@@ -570,26 +714,26 @@ export const hasMoreVideos = () => {
  * @returns {Object} Current pagination information
  */
 export const getPaginationStats = () => {
-  return {
-    totalFetched: fetchedVideoIds.size,
-    currentOffset,
-    hasReachedEnd: hasReachedActualEnd
-  };
+    return {
+        totalFetched: fetchedVideoIds.size,
+        currentOffset,
+        hasReachedEnd: hasReachedActualEnd
+    };
 };
 
 /**
  * Reset the video fetching state (useful for refresh)
  */
 export const resetVideoState = () => {
-  fetchedVideoIds.clear();
-  currentOffset = 0;
-  hasReachedActualEnd = false;
+    fetchedVideoIds.clear();
+    currentOffset = 0;
+    hasReachedActualEnd = false;
 };
 
 /**
  * Force reset has more videos flag
  */
 export const forceResetHasMoreVideos = () => {
-  hasReachedActualEnd = false;
-  console.log('🔁 Force reset hasReachedActualEnd');
-};     
+    hasReachedActualEnd = false;
+    console.log('🔁 Force reset hasReachedActualEnd');
+};

@@ -1,5 +1,5 @@
 /**
- * ULTRA-OPTIMIZED cache manager with non-blocking operations
+ * cache manager with non-blocking operations
  * Prevents ALL cache operations from interfering with video scrolling
  * Uses priority queue system for smooth user experience
  */
@@ -34,7 +34,7 @@ let isProcessingQueue = false;
 let queueProcessor = null;
 
 /**
- * FIX 3B: INTELLIGENT QUEUE PROCESSOR with priority handling
+ * INTELLIGENT QUEUE PROCESSOR with priority handling
  */
 const processCacheQueue = async () => {
   if (isProcessingQueue) return;
