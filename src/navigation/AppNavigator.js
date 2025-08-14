@@ -51,7 +51,7 @@ const OnboardingStack = () => (
 // Main app screens
 const MainStack = () => (
   <Stack.Navigator screenOptions={{ headerShown: false }}>
-    <Stack.Screen name="Feed" component={DiscoverScreen} />
+    <Stack.Screen name="Discover" component={DiscoverScreen} />
     <Stack.Screen name="Profile" component={ProfileScreen} />
     <Stack.Screen name="Filter" component={FilterScreen} /> 
     <Stack.Screen name="EditProfile" component={EditProfileScreen} />

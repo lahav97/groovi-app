@@ -1,7 +1,8 @@
 import React from 'react';
-import { View, Text, StyleSheet, useColorScheme, Dimensions } from 'react-native';
+import { View, Text, StyleSheet, useColorScheme, Dimensions, TouchableOpacity } from 'react-native';
 import { COLORS, SIZES } from '../../styles/theme';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { useNavigation } from '@react-navigation/native';
 import { handleError } from '../../utils/errors';
 
 const { height: SCREEN_HEIGHT } = Dimensions.get('window');
@@ -10,17 +11,47 @@ const VideoInfo = ({ video }) => {
   const colorScheme = useColorScheme();
   const theme = colorScheme === 'dark' ? COLORS.dark : COLORS.light;
   const insets = useSafeAreaInsets();
+  const navigation = useNavigation();
 
-  // Defensive: handle missing or malformed video prop
+  // Handle missing or malformed video prop
   if (!video || typeof video !== 'object') {
-    // Optionally, you could display an error message or log it
     console.error(handleError(new Error('Invalid video data'), 'VideoInfo'));
     return null;
   }
 
+  /**
+   * Navigate to musician profile
+   */
+  const handleUsernamePress = () => {
+    try {
+      if (!video?.username) {
+        console.warn('⚠️ No username available for navigation');
+        return;
+      }
+
+      console.log(`🔍 Navigating to profile: ${video.username}`);
+      
+      // Navigate to MusicianProfileScreen with username parameter
+      navigation.navigate('MusicianProfile', {
+        username: video.username,
+        // If userId is available in video object, pass it too
+        ...(video.userId && { userId: video.userId })
+      });
+    } catch (error) {
+      console.error('❌ Error navigating to profile:', handleError(error, 'VideoInfo/handleUsernamePress'));
+    }
+  };
+
   return (
     <View style={[styles.container, { bottom: SCREEN_HEIGHT * 0.1 + insets.bottom }]}>
-      <Text style={[styles.username, { color: theme.icon }]}>@{video?.username}</Text>
+      {/* Clickable Username */}
+      <TouchableOpacity onPress={handleUsernamePress} activeOpacity={0.7}>
+        <Text style={[styles.username, { color: theme.icon }]}>
+          @{video?.username}
+        </Text>
+      </TouchableOpacity>
+      
+      {/* Description */}
       <Text style={[styles.description, { color: theme.icon }]} numberOfLines={2}>
         {video?.description}
       </Text>
@@ -42,7 +73,7 @@ const styles = StyleSheet.create({
     marginBottom: 8,
     textShadowColor: 'rgba(0, 0, 0, 0.75)',
     textShadowOffset: { width: -1, height: 1 },
-    textShadowRadius: 10
+    textShadowRadius: 10,
   },
   description: {
     fontSize: SIZES.font.medium,

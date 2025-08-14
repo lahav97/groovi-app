@@ -2,8 +2,6 @@ import React from 'react';
 import { View, TouchableOpacity, StyleSheet } from 'react-native';
 import Icon from 'react-native-vector-icons/Ionicons';
 import { useNavigation } from '@react-navigation/native';
-import { COLORS } from '../../styles/theme';
-import { LinearGradient } from 'expo-linear-gradient';
 
 const BottomNavigation = () => {
   const navigation = useNavigation();
@@ -12,34 +10,27 @@ const BottomNavigation = () => {
 
   return (
     <View style={styles.bottomNav}>
-      <TouchableOpacity style={styles.navItem} onPress={() => navigation.navigate('Feed')}>
+      {/* DISCOVER BUTTON - Aperture Icon (was Discover, now goes to Discover) */}
+      <TouchableOpacity style={styles.navItem} onPress={() => navigation.navigate('Discover')}>
         <Icon name="aperture-outline" size={ICON_SIZE} color={ICON_COLOR} />
       </TouchableOpacity>
 
+      {/* PROFILE BUTTON - Person Icon */}
       <TouchableOpacity style={styles.navItem} onPress={() => navigation.navigate('Profile')}>
         <Icon name="person-outline" size={ICON_SIZE} color={ICON_COLOR} />
       </TouchableOpacity>
 
-      {/* Upload Video - Plus Button */}
-      <TouchableOpacity 
-        style={styles.navItem} 
-        onPress={() => navigation.navigate('VideoUpload')}
-        activeOpacity={0.7}
-      >
-        <LinearGradient
-          colors={['#6233b4', '#d981c3']}
-          start={{ x: 0, y: 1 }}
-          end={{ x: 1, y: 0 }}
-          style={styles.gradientPlusButton}
-        >
-          <Icon name="add" size={28} color="white" />
-        </LinearGradient>
+      {/* CREATE CONTENT BUTTON - Plus Icon */}
+      <TouchableOpacity style={styles.navItem} onPress={() => navigation.navigate('VideoUpload')}>
+        <Icon name="add-circle-outline" size={36} color={ICON_COLOR} />
       </TouchableOpacity>
 
+      {/* HOME BUTTON - Goes to Match Screen */}
       <TouchableOpacity style={styles.navItem} onPress={() => navigation.navigate('Match')}>
         <Icon name="home-outline" size={ICON_SIZE} color={ICON_COLOR} />
       </TouchableOpacity>
 
+      {/* CHAT BUTTON - Goes to Chat List */}
       <TouchableOpacity style={styles.navItem} onPress={() => navigation.navigate('ChatList')}>
         <Icon name="chatbubble-ellipses-outline" size={ICON_SIZE} color={ICON_COLOR} />
       </TouchableOpacity>
@@ -57,24 +48,10 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'space-around',
   },
-
   navItem: {
     justifyContent: 'center',
     alignItems: 'center',
     flex: 1,
-  },
-
-  gradientPlusButton: {
-    width: 50,
-    height: 50,
-    borderRadius: 25,
-    justifyContent: 'center',
-    alignItems: 'center',
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.25,
-    shadowRadius: 4,
-    elevation: 5,
   },
 });
 

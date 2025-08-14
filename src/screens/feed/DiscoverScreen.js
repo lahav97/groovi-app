@@ -1,4 +1,4 @@
-// DiscoverScreen.js - OPTIMIZED VERSION with Filter Integration
+// DiscoverScreen.js - OPTIMIZED VERSION with Filter Integration - FIXED for compatibility
 import React, { useRef, useState, useEffect, useCallback, useMemo } from 'react';
 import {
     View,
@@ -97,7 +97,7 @@ const DiscoverScreen = () => {
         index,
     }), [videoHeight]);
 
-    // ENHANCED LOAD INITIAL with Filter Support
+    // ENHANCED LOAD INITIAL with Filter Support - FIXED for compatibility
     const loadInitialVideos = useCallback(async () => {
         if (isLoadingRef.current) return;
 
@@ -111,23 +111,29 @@ const DiscoverScreen = () => {
         try {
             // Quick cache check only for non-filtered results
             if (!filters.isActive) {
-                const backgroundStatus = BackgroundDataService.getSeparatedSystemStatus();
-                if (backgroundStatus.feed.loaded) {
-                    const cachedVideos = await getDiscoverCache();
-                    if (cachedVideos && cachedVideos.length > 0) {
-                        console.log(`⚡ Using ${cachedVideos.length} cached musician videos`);
+                try {
+                    // FIXED: Use the correct method signature from fixed BackgroundDataService
+                    const backgroundStatus = BackgroundDataService.getSeparatedSystemStatus();
+                    if (backgroundStatus.feed.loaded) {
+                        const cachedVideos = await getDiscoverCache();
+                        if (cachedVideos && cachedVideos.length > 0) {
+                            console.log(`⚡ Using ${cachedVideos.length} cached musician videos`);
 
-                        InteractionManager.runAfterInteractions(() => {
-                            if (mountedRef.current) {
-                                setMusicianVideos(cachedVideos);
-                                setCurrentIndex(0);
-                                currentIndexRef.current = 0;
-                                setIsInitialLoading(false);
-                                isLoadingRef.current = false;
-                            }
-                        });
-                        return;
+                            InteractionManager.runAfterInteractions(() => {
+                                if (mountedRef.current) {
+                                    setMusicianVideos(cachedVideos);
+                                    setCurrentIndex(0);
+                                    currentIndexRef.current = 0;
+                                    setIsInitialLoading(false);
+                                    isLoadingRef.current = false;
+                                }
+                            });
+                            return;
+                        }
                     }
+                } catch (cacheError) {
+                    console.warn('⚠️ Cache check failed:', cacheError);
+                    // Continue with fresh load
                 }
             }
 
@@ -176,9 +182,13 @@ const DiscoverScreen = () => {
                         setIsInitialLoading(false);
                         isLoadingRef.current = false;
 
-                        // Only cache non-filtered results
+                        // Only cache non-filtered results - FIXED: Added error handling
                         if (!filters.isActive) {
-                            setTimeout(() => cacheFeedVideos(transformedVideos), 100);
+                            setTimeout(() => {
+                                cacheFeedVideos(transformedVideos).catch(err => {
+                                    console.warn('⚠️ Failed to cache videos:', err);
+                                });
+                            }, 100);
                         }
                     }
                 });
@@ -206,7 +216,7 @@ const DiscoverScreen = () => {
         }
     }, [currentUser, filters]);
 
-    // ENHANCED LOAD MORE with Filter Support
+    // ENHANCED LOAD MORE with Filter Support - FIXED for compatibility
     const loadMoreVideos = useCallback(async () => {
         if (isLoadingRef.current || !mountedRef.current || isLoadingMore || !hasMoreVideos) {
             return;
@@ -286,14 +296,23 @@ const DiscoverScreen = () => {
                             });
 
                             if (!filters.isActive) {
-                                setTimeout(() => cacheFeedVideos(cleanedVideos), 100);
+                                setTimeout(() => {
+                                    cacheFeedVideos(cleanedVideos).catch(err => {
+                                        console.warn('⚠️ Failed to cache cleaned videos:', err);
+                                    });
+                                }, 100);
                             }
                             return cleanedVideos;
                         }
                     }
 
+                    // FIXED: Added error handling for caching
                     if (!filters.isActive) {
-                        setTimeout(() => cacheFeedVideos(updatedVideos), 100);
+                        setTimeout(() => {
+                            cacheFeedVideos(updatedVideos).catch(err => {
+                                console.warn('⚠️ Failed to cache updated videos:', err);
+                            });
+                        }, 100);
                     }
                     return updatedVideos;
                 });
@@ -307,7 +326,7 @@ const DiscoverScreen = () => {
                         }
                     }, 2000);
                 } else {
-                    console.log('🏁 No more musicians available');
+                    console.log('🔚 No more musicians available');
                     setHasMoreVideos(false);
                 }
             }
@@ -352,7 +371,7 @@ const DiscoverScreen = () => {
                         hasMoreVideos &&
                         !isLoadingMore &&
                         !isLoadingRef.current) {
-                        console.log(`🔄 Load trigger: ${remainingVideos} videos remaining`);
+                        console.log(`🔥 Load trigger: ${remainingVideos} videos remaining`);
                         loadMoreVideos();
                     }
                 }
@@ -413,7 +432,7 @@ const DiscoverScreen = () => {
         />
     ), [currentIndex, isFocused, videoHeight]);
 
-    // OPTIMIZED RETRY HANDLER
+    // OPTIMIZED RETRY HANDLER - FIXED for compatibility
     const handleRetry = useCallback(() => {
         console.log('🔄 Retrying musicians load...');
         setError(null);
@@ -432,7 +451,14 @@ const DiscoverScreen = () => {
 
         InteractionManager.runAfterInteractions(() => {
             if (!filters.isActive) {
-                BackgroundDataService.forceRefreshAll();
+                // FIXED: Use correct method signature
+                try {
+                    BackgroundDataService.forceRefreshAll().catch(err => {
+                        console.warn('⚠️ Background refresh failed:', err);
+                    });
+                } catch (error) {
+                    console.warn('⚠️ Force refresh error:', error);
+                }
             }
             loadInitialVideos();
         });
@@ -466,18 +492,38 @@ const DiscoverScreen = () => {
         return unsubscribe;
     }, [navigation, route.params, loadInitialVideos]);
 
-    // EFFECTS
+    // EFFECTS - FIXED with enhanced cleanup
     useEffect(() => {
         mountedRef.current = true;
         return () => {
             mountedRef.current = false;
 
+            // CRITICAL: Clear all timers
             if (stabilityTimeoutRef.current) {
                 clearTimeout(stabilityTimeoutRef.current);
+                stabilityTimeoutRef.current = null;
             }
             if (loadMoreTimeoutRef.current) {
                 clearTimeout(loadMoreTimeoutRef.current);
+                loadMoreTimeoutRef.current = null;
             }
+
+            // CRITICAL: Clear video data to free memory
+            setMusicianVideos([]);
+            setCurrentIndex(0);
+            currentIndexRef.current = 0;
+
+            // CRITICAL: Clear BackgroundDataService timers - FIXED
+            try {
+                BackgroundDataService.performQuickCleanup('discover_screen_unmount');
+            } catch (error) {
+                console.warn('⚠️ Cleanup error:', error);
+            }
+
+            // Reset loading states
+            setIsInitialLoading(false);
+            setIsLoadingMore(false);
+            isLoadingRef.current = false;
         };
     }, []);
 

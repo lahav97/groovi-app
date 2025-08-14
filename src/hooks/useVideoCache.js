@@ -1,6 +1,6 @@
 /**
  * @module useVideoCache
- * Custom hook for video caching and loading state management
+ * ENHANCED: Better profile video handling and loading state management
  * Handles tiny loading spinners and smart video caching for smooth playback
  */
 
@@ -24,10 +24,26 @@ export const useVideoCache = (videos = []) => {
   const videoRefs = useRef({}); // Cache video refs to prevent re-loading
   const videoCache = useRef(new Map()); // Simple memory cache for video states
 
+  // Debug video input
+  useEffect(() => {
+    console.log('🎬 useVideoCache: Received videos:', {
+      type: typeof videos,
+      isArray: Array.isArray(videos),
+      length: videos?.length || 0,
+      first: videos?.[0],
+      data: videos
+    });
+  }, [videos]);
+
   /**
    * Generate unique video ID for consistent caching
    */
   const generateVideoId = useCallback((videoUrl, index) => {
+    if (!videoUrl || typeof videoUrl !== 'string') {
+      console.warn('⚠️ Invalid video URL:', videoUrl);
+      return `profile-video-${index}-invalid`;
+    }
+    
     const urlHash = videoUrl.split('/').pop() || videoUrl.substring(videoUrl.length - 10);
     return `profile-video-${index}-${urlHash}`;
   }, []);
@@ -64,6 +80,7 @@ export const useVideoCache = (videos = []) => {
    * Handle video load start - show tiny spinner
    */
   const handleVideoLoadStart = useCallback((videoId) => {
+    console.log('🔄 Video load start:', videoId);
     setVideoLoadingState(videoId, 'loading');
   }, [setVideoLoadingState]);
 
@@ -71,6 +88,7 @@ export const useVideoCache = (videos = []) => {
    * Handle video ready for display - hide spinner, cache ref
    */
   const handleVideoReadyForDisplay = useCallback((videoId, videoRef) => {
+    console.log('✅ Video ready for display:', videoId);
     setVideoLoadingState(videoId, 'loaded');
     
     // CACHE the video ref to prevent re-loading when swiping back
@@ -99,64 +117,128 @@ export const useVideoCache = (videos = []) => {
   }, []);
 
   /**
-   * Convert profile videos (array of URL strings) to video objects with caching info
+   * ENHANCED: Convert profile videos to video objects with better validation
    */
   const videoObjects = useMemo(() => {
-    if (!videos || !Array.isArray(videos)) {
+    console.log('🔄 Processing videos for videoObjects...');
+    
+    // Handle various video input formats
+    if (!videos) {
+      console.log('📝 No videos provided (null/undefined)');
       return [];
     }
 
-    return videos.map((videoUrl, index) => {
-      const videoId = generateVideoId(videoUrl, index);
-      return {
-        id: videoId,
-        uri: videoUrl,
-        index,
-        isCached: isVideoCached(videoId),
-        isLoading: isVideoLoading(videoId),
-        isLoaded: isVideoLoaded(videoId)
-      };
+    if (!Array.isArray(videos)) {
+      console.warn('⚠️ Videos is not an array:', typeof videos, videos);
+      return [];
+    }
+
+    if (videos.length === 0) {
+      console.log('📝 Videos array is empty');
+      return [];
+    }
+
+    const processedVideos = videos
+      .map((videoUrl, index) => {
+        // Handle different video formats
+        let finalVideoUrl = videoUrl;
+        
+        // If video is an object, extract URL
+        if (typeof videoUrl === 'object' && videoUrl !== null) {
+          finalVideoUrl = videoUrl.url || videoUrl.uri || videoUrl.video_url || videoUrl.videoUrl;
+        }
+        
+        // Validate URL
+        if (!finalVideoUrl || typeof finalVideoUrl !== 'string') {
+          console.warn(`⚠️ Invalid video at index ${index}:`, videoUrl);
+          return null;
+        }
+        
+        // Basic URL validation
+        if (!finalVideoUrl.startsWith('http')) {
+          console.warn(`⚠️ Invalid video URL format at index ${index}:`, finalVideoUrl);
+          return null;
+        }
+
+        const videoId = generateVideoId(finalVideoUrl, index);
+        
+        return {
+          id: videoId,
+          uri: finalVideoUrl,
+          index,
+          isCached: isVideoCached(videoId),
+          isLoading: isVideoLoading(videoId),
+          isLoaded: isVideoLoaded(videoId)
+        };
+      })
+      .filter(video => video !== null); // Remove invalid videos
+
+    console.log('✅ Processed video objects:', {
+      input: videos.length,
+      output: processedVideos.length,
+      videos: processedVideos.map(v => ({ id: v.id, uri: v.uri?.substring(0, 50) + '...' }))
     });
+
+    return processedVideos;
   }, [videos, generateVideoId, isVideoCached, isVideoLoading, isVideoLoaded]);
 
   /**
    * Toggle video pause/play
    */
   const togglePause = useCallback((id) => {
+    console.log('⏯️ Toggling pause for video:', id);
     setPausedStatus(prev => ({ ...prev, [id]: !prev[id] }));
   }, []);
 
   /**
+   * Check if video should play (based on focus, index, and pause status)
+   */
+  const shouldVideoPlay = useCallback((videoId, index) => {
+    const isCurrentVideo = index === currentIndex;
+    const isPaused = pausedStatus[videoId];
+    const shouldPlay = isFocused && isCurrentVideo && !isPaused;
+    
+    return shouldPlay;
+  }, [isFocused, currentIndex, pausedStatus]);
+
+  /**
    * Handle video swiper index change with smart caching
    */
-  const onIndexChanged = useCallback((index) => {
+  const onIndexChanged = useCallback((index, videos) => {
+    console.log('📱 Video index changed to:', index);
     setCurrentIndex(index);
     
+    if (!videos || videos.length === 0) return;
+    
     // Pause all videos except current one
-    videoObjects.forEach(video => {
-      if (video.id !== videoObjects[index].id && videoRefs.current[video.id]?.pauseAsync) {
-        videoRefs.current[video.id].pauseAsync();
+    videos.forEach(video => {
+      if (video.id !== videos[index]?.id && videoRefs.current[video.id]?.pauseAsync) {
+        videoRefs.current[video.id].pauseAsync().catch(() => {});
       }
     });
     
     // Play current video if not paused and loaded
-    if (!pausedStatus[videoObjects[index].id] && videoRefs.current[videoObjects[index].id]?.playAsync) {
-      videoRefs.current[videoObjects[index].id].playAsync();
+    const currentVideo = videos[index];
+    if (currentVideo && !pausedStatus[currentVideo.id] && videoRefs.current[currentVideo.id]?.playAsync) {
+      videoRefs.current[currentVideo.id].playAsync().catch(() => {});
     }
 
     // PRELOAD next video in background (for smooth swiping)
     const nextIndex = index + 1;
-    if (nextIndex < videoObjects.length) {
-      const nextVideo = videoObjects[nextIndex];
-      if (!nextVideo.isCached && !nextVideo.isLoading) {
+    if (nextIndex < videos.length) {
+      const nextVideo = videos[nextIndex];
+      if (nextVideo && !nextVideo.isCached && !nextVideo.isLoading) {
+        // Trigger preload
+        console.log('🔄 Preloading next video:', nextVideo.id);
       }
     }
-  }, [videoObjects, pausedStatus]);
+  }, [pausedStatus]);
 
   /**
    * Set video ref in cache
    */
   const setVideoRef = useCallback((videoId, ref) => {
+    console.log('📝 Setting video ref for:', videoId);
     videoRefs.current[videoId] = ref;
     
     // CACHE VIDEO REF when it's ready
@@ -173,79 +255,78 @@ export const useVideoCache = (videos = []) => {
   }, []);
 
   /**
-   * Check if video should play
-   */
-  const shouldVideoPlay = useCallback((videoId, index) => {
-    const video = videoObjects.find(v => v.id === videoId);
-    
-    return (
-      !pausedStatus[videoId] && 
-      isFocused && 
-      currentIndex === index &&
-      !video?.isLoading
-    );
-  }, [videoObjects, pausedStatus, isFocused, currentIndex]);
-
-  /**
-   * Clear video cache
+   * Clear all video cache (for logout, etc.)
    */
   const clearVideoCache = useCallback(() => {
-    // Pause all videos first
+    console.log('🧹 Clearing video cache...');
+    
+    // Pause all videos
     Object.values(videoRefs.current).forEach(ref => {
-      if (ref?.pauseAsync) {
-        ref.pauseAsync();
+      if (ref && ref.pauseAsync) {
+        ref.pauseAsync().catch(() => {});
       }
     });
     
-    // Clear all caches and states
+    // Clear all refs and cache
+    videoRefs.current = {};
     videoCache.current.clear();
     setVideoStates({});
     setPausedStatus({});
     setCurrentIndex(0);
-    videoRefs.current = {};
   }, []);
 
-  // Pause videos when screen loses focus
-  useEffect(() => {
-    if (!isFocused) {
-      Object.values(videoRefs.current).forEach(ref => {
-        if (ref?.pauseAsync) {
-          ref.pauseAsync();
-        }
-      });
+  /**
+   * Preload videos for better performance
+   */
+  const preloadVideos = useCallback((startIndex = 0, count = 2) => {
+    console.log(`🔄 Preloading ${count} videos starting from index ${startIndex}`);
+    
+    for (let i = startIndex; i < Math.min(startIndex + count, videoObjects.length); i++) {
+      const video = videoObjects[i];
+      if (video && !video.isCached && !video.isLoading) {
+        // Trigger video preload
+        setVideoLoadingState(video.id, 'preloading');
+      }
     }
-  }, [isFocused]);
+  }, [videoObjects, setVideoLoadingState]);
+
+  // Preload first few videos when component mounts
+  useEffect(() => {
+    if (videoObjects.length > 0) {
+      console.log('🚀 Auto-preloading first videos...');
+      preloadVideos(0, 2);
+    }
+  }, [videoObjects.length > 0]);
 
   return {
-    // Video objects with cache info (MEMOIZED)
+    // Video objects for rendering
     videoObjects,
     
-    // State
+    // State management
     videoStates,
-    pausedStatus,
     currentIndex,
     
-    // Video state checkers
-    isVideoLoading,
-    isVideoLoaded,
-    isVideoCached,
+    // Control functions
+    onIndexChanged,
+    togglePause,
+    shouldVideoPlay,
     
-    // Event handlers
+    // Video event handlers
     handleVideoLoadStart,
     handleVideoReadyForDisplay,
     handleVideoLoadError,
     
-    // Video controls
-    togglePause,
-    onIndexChanged,
-    shouldVideoPlay,
-    
-    // Video ref management
+    // Reference management
     setVideoRef,
     getVideoRef,
     
-    // Utilities
-    generateVideoId,
+    // Cache utilities
     clearVideoCache,
+    preloadVideos,
+    isVideoCached,
+    isVideoLoading,
+    isVideoLoaded,
   };
 };
+
+export default useVideoCache;

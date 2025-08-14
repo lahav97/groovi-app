@@ -27,6 +27,9 @@
       "eas": {
         "projectId": "46aa4db4-94ed-4428-8aa7-6b1605678369"
       }
+    },
+    "experiments": {
+      "ignoreBundledNativeVersion": true
     }
   }
 }

@@ -19,12 +19,12 @@ import * as FileSystem from 'expo-file-system';
 
 const { width, height: SCREEN_HEIGHT } = Dimensions.get('window');
 
-// IMPROVED VIDEO MANAGER - Single source of truth
+// SIMPLIFIED VIDEO MANAGER - More reliable state management
 class GlobalVideoManager {
   constructor() {
     this.currentActiveVideo = null;
-    this.allVideoRefs = new Map(); // Use Map for better tracking
-    this.pendingOperations = new Set(); // Track pending operations
+    this.allVideoRefs = new Map();
+    this.pausedVideos = new Set(); // Track manually paused videos
   }
 
   registerVideo(videoRef, videoId) {
@@ -33,20 +33,18 @@ class GlobalVideoManager {
 
   unregisterVideo(videoId) {
     this.allVideoRefs.delete(videoId);
-    this.pendingOperations.delete(videoId);
+    this.pausedVideos.delete(videoId);
   }
 
-  // FIXED: Prevent race conditions with operation tracking
-  async setActiveVideo(videoRef, videoId) {
-    // Prevent multiple simultaneous operations
-    if (this.pendingOperations.has(videoId)) {
-      return;
-    }
-
-    this.pendingOperations.add(videoId);
-
+  // FIXED: Better handling of manual pause/play
+  async setActiveVideo(videoRef, videoId, isManualPlay = false) {
     try {
-      // Only pause videos that aren't the new active one
+      // If this video was manually paused, remove it from paused set
+      if (isManualPlay) {
+        this.pausedVideos.delete(videoId);
+      }
+
+      // Pause all other videos
       for (const [id, ref] of this.allVideoRefs) {
         if (id !== videoId && ref.current) {
           try {
@@ -59,16 +57,33 @@ class GlobalVideoManager {
 
       this.currentActiveVideo = videoId;
       
-      // Start the new video only if ref is still valid
-      if (videoRef.current && this.allVideoRefs.has(videoId)) {
+      // Start the new video
+      if (videoRef.current) {
         try {
           await videoRef.current.playAsync();
+          console.log(`▶️ Video playing: ${videoId}`);
         } catch (error) {
           console.warn('Failed to play video:', error);
         }
       }
-    } finally {
-      this.pendingOperations.delete(videoId);
+    } catch (error) {
+      console.error('Error setting active video:', error);
+    }
+  }
+
+  async pauseVideo(videoId) {
+    try {
+      const ref = this.allVideoRefs.get(videoId);
+      if (ref && ref.current) {
+        await ref.current.pauseAsync();
+        this.pausedVideos.add(videoId); // Mark as manually paused
+        if (this.currentActiveVideo === videoId) {
+          this.currentActiveVideo = null;
+        }
+        console.log(`⏸️ Video paused: ${videoId}`);
+      }
+    } catch (error) {
+      console.error('Error pausing video:', error);
     }
   }
 
@@ -90,11 +105,15 @@ class GlobalVideoManager {
   isActive(videoId) {
     return this.currentActiveVideo === videoId;
   }
+
+  isManuallyPaused(videoId) {
+    return this.pausedVideos.has(videoId);
+  }
 }
 
 const globalVideoManager = new GlobalVideoManager();
 
-// Background cache queue - unchanged
+// Background cache queue
 const cacheQueue = [];
 let isProcessingCacheQueue = false;
 
@@ -116,12 +135,12 @@ const processCacheQueue = async () => {
   isProcessingCacheQueue = false;
 };
 
-// FIXED: Ultra-stable VideoItem with controlled playback
+// FIXED: Improved VideoItem with better pause/play handling
 const VideoItem = memo(({ item, isVisible, height, shouldCache = false }) => {
   const videoRef = useRef(null);
   const isFocused = useIsFocused();
   
-  // FIXED: Simplified state management
+  // SIMPLIFIED state management
   const [userPaused, setUserPaused] = useState(false);
   const [showPlayIcon, setShowPlayIcon] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
@@ -130,11 +149,10 @@ const VideoItem = memo(({ item, isVisible, height, shouldCache = false }) => {
   const [isPlaying, setIsPlaying] = useState(false);
   const [videoLoaded, setVideoLoaded] = useState(false);
   
-  // FIXED: Stable refs
+  // Refs
   const retryCountRef = useRef(0);
   const componentMountedRef = useRef(true);
   const cacheAttemptedRef = useRef(false);
-  const lastPlayStateRef = useRef(false);
   const stableVideoSourceRef = useRef(null);
   
   const videoId = useRef(`video-${item.id || 'unknown'}-${Date.now()}`).current;
@@ -142,7 +160,7 @@ const VideoItem = memo(({ item, isVisible, height, shouldCache = false }) => {
   const colorScheme = useColorScheme();
   const COLOR = colorScheme === 'dark' ? COLORS.dark : COLORS.light;
 
-  // FIXED: Stable video source - prevents restarts from source changes
+  // Stable video source
   const videoSource = stableVideoSourceRef.current || localVideoUri || item.videoUrl;
   
   // Initialize stable source
@@ -160,25 +178,18 @@ const VideoItem = memo(({ item, isVisible, height, shouldCache = false }) => {
     };
   }, [videoId]);
 
-  // FIXED: Single playback control logic - prevents conflicts
+  // FIXED: Simplified playback control
   const updatePlaybackState = useCallback(async () => {
     if (!componentMountedRef.current || !videoLoaded) return;
 
     const shouldPlay = isVisible && isFocused && !userPaused;
     const isCurrentlyActive = globalVideoManager.isActive(videoId);
 
-    // Only change state if needed - prevents unnecessary operations
-    if (shouldPlay === lastPlayStateRef.current) {
-      return;
-    }
-
-    lastPlayStateRef.current = shouldPlay;
-
     if (shouldPlay && !isCurrentlyActive) {
       // Need to start playing
-      await globalVideoManager.setActiveVideo(videoRef, videoId);
+      await globalVideoManager.setActiveVideo(videoRef, videoId, false);
     } else if (!shouldPlay && isCurrentlyActive) {
-      // Need to stop playing
+      // Need to stop playing (but don't mark as manually paused unless user did it)
       if (videoRef.current) {
         try {
           await videoRef.current.pauseAsync();
@@ -189,7 +200,7 @@ const VideoItem = memo(({ item, isVisible, height, shouldCache = false }) => {
     }
   }, [isVisible, isFocused, userPaused, videoLoaded, videoId]);
 
-  // FIXED: Debounced playback state updates - prevents rapid changes
+  // Update playback state when dependencies change
   useEffect(() => {
     const timeoutId = setTimeout(updatePlaybackState, 100);
     return () => clearTimeout(timeoutId);
@@ -202,7 +213,7 @@ const VideoItem = memo(({ item, isVisible, height, shouldCache = false }) => {
     }
   }, [isFocused]);
 
-  // Background caching - unchanged but using stable source
+  // Background caching
   const cacheVideoInBackground = async (videoUrl) => {
     if (!shouldCache || cacheAttemptedRef.current || !componentMountedRef.current) return;
     cacheAttemptedRef.current = true;
@@ -223,7 +234,6 @@ const VideoItem = memo(({ item, isVisible, height, shouldCache = false }) => {
 
         const fileInfo = await FileSystem.getInfoAsync(localUri);
         if (fileInfo.exists && componentMountedRef.current) {
-          // FIXED: Update local URI without changing stable source during playback
           setLocalVideoUri(localUri);
           return localUri;
         }
@@ -277,18 +287,24 @@ const VideoItem = memo(({ item, isVisible, height, shouldCache = false }) => {
     }
   }, [isPlaying, hasError]);
 
-  // FIXED: User pause/play toggle without state conflicts
-  const handleTogglePlayback = useCallback(() => {
+  // FIXED: Better user pause/play toggle
+  const handleTogglePlayback = useCallback(async () => {
     if (!componentMountedRef.current || !videoLoaded) return;
     
     const newUserPaused = !userPaused;
     setUserPaused(newUserPaused);
     setShowPlayIcon(true);
     
-    // Update will be handled by updatePlaybackState
-  }, [userPaused, videoLoaded]);
+    if (newUserPaused) {
+      // User wants to pause
+      await globalVideoManager.pauseVideo(videoId);
+    } else {
+      // User wants to play
+      await globalVideoManager.setActiveVideo(videoRef, videoId, true);
+    }
+  }, [userPaused, videoLoaded, videoId]);
 
-  // FIXED: Video load handler - ensures stable loaded state
+  // Video load handler
   const handleVideoLoad = useCallback(() => {
     if (!componentMountedRef.current) return;
     
@@ -301,7 +317,7 @@ const VideoItem = memo(({ item, isVisible, height, shouldCache = false }) => {
     setTimeout(updatePlaybackState, 50);
   }, [updatePlaybackState]);
 
-  // FIXED: Better error handling without source switching during playback
+  // Error handling
   const handleVideoError = useCallback((error) => {
     if (!componentMountedRef.current) return;
     
@@ -309,7 +325,7 @@ const VideoItem = memo(({ item, isVisible, height, shouldCache = false }) => {
     
     const errorString = error?.toString() || '';
     
-    // Handle corrupted cache - but don't switch source if playing
+    // Handle corrupted cache
     if (localVideoUri && (errorString.includes('j7.x$b') || errorString.includes('could read'))) {
       if (!isPlaying) {
         setLocalVideoUri(null);
@@ -323,7 +339,7 @@ const VideoItem = memo(({ item, isVisible, height, shouldCache = false }) => {
     setIsPlaying(false);
     setVideoLoaded(false);
     
-    // Reduced retry attempts to prevent restart loops
+    // Retry logic
     if (retryCountRef.current < 1) {
       retryCountRef.current += 1;
       setTimeout(() => {
@@ -334,7 +350,7 @@ const VideoItem = memo(({ item, isVisible, height, shouldCache = false }) => {
     }
   }, [localVideoUri, isPlaying, item.videoUrl]);
 
-  // FIXED: Stable playback status handler
+  // Playback status handler
   const handlePlaybackStatusUpdate = useCallback((status) => {
     if (!componentMountedRef.current) return;
     
@@ -347,7 +363,7 @@ const VideoItem = memo(({ item, isVisible, height, shouldCache = false }) => {
         setHasError(false);
       }
       
-      // Auto-replay when finished - but check if still should be playing
+      // Auto-replay when finished
       if (status.didJustFinish && !status.isLooping && videoRef.current) {
         const shouldStillPlay = isVisible && isFocused && !userPaused;
         if (shouldStillPlay) {
@@ -393,7 +409,11 @@ const VideoItem = memo(({ item, isVisible, height, shouldCache = false }) => {
           <Icon name="videocam-off" size={60} color="#666" />
           <Text style={styles.errorText}>Invalid video</Text>
         </View>
-        <VideoInfo video={{ username: item.user, description: item.description }} />
+        <VideoInfo video={{ 
+          username: item.username || item.user, 
+          description: item.description,
+          userId: item.user_id || item.id
+        }} />
       </View>
     );
   }
@@ -406,7 +426,6 @@ const VideoItem = memo(({ item, isVisible, height, shouldCache = false }) => {
           source={{ uri: videoSource }}
           style={styles.videoPlayer}
           resizeMode="cover"
-          // FIXED: Remove shouldPlay prop - use manual control only
           isLooping={true}
           isMuted={false}
           onLoad={handleVideoLoad}
@@ -415,7 +434,6 @@ const VideoItem = memo(({ item, isVisible, height, shouldCache = false }) => {
           progressUpdateIntervalMillis={500}
           rate={1.0}
           volume={1.0}
-          // FIXED: Optimized buffer config for stability
           bufferConfig={{
             minBufferMs: 2000,
             maxBufferMs: 10000,
@@ -456,6 +474,7 @@ const VideoItem = memo(({ item, isVisible, height, shouldCache = false }) => {
             stableVideoSourceRef.current = item.videoUrl;
             setHasError(false);
             setIsLoading(true);
+            setUserPaused(false); // Reset user pause state
             retryLoadVideo();
           }}>
             <Icon name="refresh" size={20} color="white" />
@@ -463,7 +482,12 @@ const VideoItem = memo(({ item, isVisible, height, shouldCache = false }) => {
           </TouchableOpacity>
         )}
 
-        <VideoInfo video={{ username: item.user, description: item.description }} />
+        {/* ENHANCED VIDEO INFO - Pass more user data for navigation */}
+        <VideoInfo video={{ 
+          username: item.username || item.user, 
+          description: item.description,
+          userId: item.user_id || item.id
+        }} />
       </View>
     </TouchableWithoutFeedback>
   );

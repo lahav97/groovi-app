@@ -165,16 +165,16 @@ const userProfileManager = ({
     }, [autoLoad, loadProfile]);
     
     // Reload profile when screen comes into focus if loadOnFocus is true
-    useEffect(() => {
-      if (isFocused && loadOnFocus) {
-        // Only reload if it's been at least 1 second since the last focus
-        const now = Date.now();
-        if (now - lastFocusTimeRef.current > 1000) {
-          lastFocusTimeRef.current = now;
-          loadProfile(false); // Don't force reload, use cache if available
-        }
-      }
-    }, [isFocused, loadOnFocus, loadProfile]);
+  useEffect(() => {
+      return () => {
+          // Cleanup on unmount
+          profileRef.current = null;
+          isLoadingRef.current = false;
+          lastFocusTimeRef.current = 0;
+          
+          console.log('✅ userProfileManager cleanup complete');
+      };
+  }, []);
     
     return {
       profile,
