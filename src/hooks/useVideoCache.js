@@ -329,4 +329,41 @@ export const useVideoCache = (videos = []) => {
   };
 };
 
+/**
+ * Standalone video cache clearing function for memory management
+ * Can be called from AppNavigator or other components for emergency cleanup
+ */
+export const clearVideoCache = () => {
+  console.log('🧹 Global video cache clear triggered');
+  
+  try {
+    // Try to clear any global video references if they exist
+    if (global.videoCache) {
+      global.videoCache.clear();
+    }
+    
+    // Clear any global video refs
+    if (global.videoRefs) {
+      Object.values(global.videoRefs).forEach(ref => {
+        if (ref && ref.pauseAsync) {
+          ref.pauseAsync().catch(() => {});
+        }
+      });
+      global.videoRefs = {};
+    }
+    
+    console.log('✅ Global video cache cleared');
+  } catch (error) {
+    console.warn('⚠️ Error clearing global video cache:', error);
+  }
+  
+  // Force garbage collection if available
+  if (global.gc) {
+    setTimeout(() => {
+      global.gc();
+      console.log('♻️ Forced GC after video cache clear');
+    }, 100);
+  }
+};
+
 export default useVideoCache;

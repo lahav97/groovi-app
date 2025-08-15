@@ -320,6 +320,43 @@ class AppMemoryManager {
         await this.performEmergencyCleanup(reason);
     }
 
+    /**
+     * PUBLIC: Clear all memory and caches - used by AppNavigator
+     */
+    async clearAll(reason = 'navigation') {
+        console.log(`🧹 AppMemoryManager.clearAll triggered: ${reason}`);
+        
+        try {
+            // 1. Cancel all background requests first
+            BackgroundDataService.cancelAllRequests?.();
+            
+            // 2. Trigger video cleanup through all listeners
+            this.navigationListeners.forEach(listener => {
+                try {
+                    listener('clear_all');
+                } catch (error) {
+                    console.warn('Listener error during clearAll:', error);
+                }
+            });
+            
+            // 3. Clear all caches
+            await clearAllCaches();
+            
+            // 4. Force garbage collection multiple times
+            if (global.gc) {
+                for (let i = 0; i < 3; i++) {
+                    setTimeout(() => {
+                        global.gc();
+                        if (i === 2) console.log('♻️ AppMemoryManager.clearAll - GC completed');
+                    }, i * 100);
+                }
+            }
+            
+        } catch (error) {
+            console.error('❌ AppMemoryManager.clearAll failed:', error);
+        }
+    }
+
     shutdown() {
         console.log('💥 Shutting down AppMemoryManager');
 

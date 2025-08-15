@@ -1,7 +1,7 @@
 /**
  * @module BackgroundDataService
- * ENHANCED VERSION - Loads discover + profile videos simultaneously
- * Fixed function references and added parallel loading capability
+ * ENHANCED VERSION - Memory leak prevention with video decoder cleanup
+ * Fixed function references and added parallel loading capability + memory management
  */
 
 import { fetchVideos, resetVideoState } from './videoService';
@@ -12,7 +12,8 @@ import {
   getFeedCache,
   cacheFeedVideos,
   getProfileCache,
-  cacheUserProfile
+  cacheUserProfile,
+  forceMemoryCleanup
 } from '../utils/cacheManager';
 
 class BackgroundDataService {
@@ -26,6 +27,10 @@ class BackgroundDataService {
     this.abortControllers = new Map();
     this.maxConcurrentRequests = 2; // INCREASED for parallel loading
     this.requestDelay = 500; // Reduced delay for faster loading
+    
+    // VIDEO DECODER TRACKING - Critical for memory leak prevention
+    this.activeVideoDecoders = new Set();
+    this.videoDecoderCleanupCallbacks = new Set();
     
     this.stages = {
       PARALLEL_LOADING: 1, // NEW: Load both simultaneously
@@ -49,7 +54,68 @@ class BackgroundDataService {
   }
 
   /**
-   * CANCEL ALL REQUESTS - Prevents crashes during navigation
+   * CRITICAL: Register video decoder for cleanup tracking
+   */
+  registerVideoDecoder(decoderId, cleanupCallback) {
+    this.activeVideoDecoders.add(decoderId);
+    if (cleanupCallback) {
+      this.videoDecoderCleanupCallbacks.add(cleanupCallback);
+    }
+    console.log(`📹 Registered video decoder: ${decoderId} (total: ${this.activeVideoDecoders.size})`);
+  }
+
+  /**
+   * CRITICAL: Unregister video decoder
+   */
+  unregisterVideoDecoder(decoderId) {
+    this.activeVideoDecoders.delete(decoderId);
+    console.log(`📹 Unregistered video decoder: ${decoderId} (total: ${this.activeVideoDecoders.size})`);
+  }
+
+  /**
+   * CRITICAL: Emergency video decoder cleanup - prevents 2GB memory leaks
+   */
+  async emergencyVideoCleanup(reason = 'unknown') {
+    console.log(`🚨 EMERGENCY VIDEO CLEANUP - ${reason} (${this.activeVideoDecoders.size} decoders)`);
+
+    try {
+      // 1. Execute all cleanup callbacks
+      const cleanupPromises = Array.from(this.videoDecoderCleanupCallbacks).map(callback => {
+        try {
+          return Promise.resolve(callback());
+        } catch (error) {
+          console.warn('Video cleanup callback error:', error);
+          return Promise.resolve();
+        }
+      });
+
+      await Promise.allSettled(cleanupPromises);
+
+      // 2. Clear all tracking
+      this.activeVideoDecoders.clear();
+      this.videoDecoderCleanupCallbacks.clear();
+
+      // 3. Force memory cleanup in cache manager
+      forceMemoryCleanup(reason);
+
+      // 4. Cancel all requests that might be loading videos
+      this.cancelAllRequests();
+
+      // 5. Force garbage collection
+      if (global.gc) {
+        global.gc();
+        console.log('♻️ Forced GC after video cleanup');
+      }
+
+      console.log('✅ Emergency video cleanup completed');
+
+    } catch (error) {
+      console.error('❌ Emergency video cleanup failed:', error);
+    }
+  }
+
+  /**
+   * CANCEL ALL REQUESTS - Enhanced with video cleanup
    */
   cancelAllRequests() {
     console.log('🛑 BackgroundDataService: Cancelling all requests for safe navigation');
@@ -64,6 +130,12 @@ class BackgroundDataService {
     
     this.abortControllers.clear();
     this.activeRequests.clear();
+
+    // Also trigger video cleanup
+    if (this.activeVideoDecoders.size > 0) {
+      console.log('🎬 Triggering video cleanup due to request cancellation');
+      setTimeout(() => this.emergencyVideoCleanup('request_cancellation'), 100);
+    }
   }
 
   /**
@@ -107,7 +179,7 @@ class BackgroundDataService {
   }
 
   /**
-   * ENHANCED: PARALLEL LOADING - Load both discover and profile simultaneously
+   * ENHANCED: PARALLEL LOADING with memory monitoring
    */
   async startParallelLoading(userData) {
     if (this.isLoading) {
@@ -121,6 +193,12 @@ class BackgroundDataService {
     this.loadingStage = this.stages.PARALLEL_LOADING;
 
     try {
+      // Check memory before starting
+      const memoryBefore = global.performance?.memory?.usedJSHeapSize;
+      if (memoryBefore) {
+        console.log(`📊 Memory before loading: ${Math.round(memoryBefore / 1024 / 1024)}MB`);
+      }
+
       // ✨ NEW: Load BOTH systems in parallel for instant app experience
       const [feedResult, profileResult] = await Promise.allSettled([
         this.loadFeedSystemSafe(),
@@ -138,6 +216,19 @@ class BackgroundDataService {
         console.log('✅ Profile loading completed successfully');
       } else {
         console.error('❌ Profile loading failed:', profileResult.reason);
+      }
+
+      // Check memory after loading
+      const memoryAfter = global.performance?.memory?.usedJSHeapSize;
+      if (memoryBefore && memoryAfter) {
+        const memoryIncrease = (memoryAfter - memoryBefore) / 1024 / 1024;
+        console.log(`📊 Memory after loading: ${Math.round(memoryAfter / 1024 / 1024)}MB (+${memoryIncrease.toFixed(1)}MB)`);
+        
+        // Trigger cleanup if memory increase is too high
+        if (memoryIncrease > 100) {
+          console.log('⚠️ High memory increase detected, triggering cleanup');
+          setTimeout(() => this.emergencyVideoCleanup('high_memory_increase'), 1000);
+        }
       }
 
       // Background optimization stage
@@ -304,12 +395,15 @@ class BackgroundDataService {
   }
 
   /**
-   * FORCE REFRESH with safety
+   * FORCE REFRESH with video cleanup
    */
   async forceRefreshFeedOnly() {
     console.log('🔄 BackgroundDataService: Safe feed refresh...');
     
     try {
+      // Cleanup videos before refresh
+      await this.emergencyVideoCleanup('feed_refresh');
+      
       this.separatedSystems.feed.loaded = false;
       this.separatedSystems.feed.error = null;
       resetVideoState();
@@ -322,6 +416,9 @@ class BackgroundDataService {
 
   async forceRefreshProfileOnly() {
     try {
+      // Cleanup videos before refresh
+      await this.emergencyVideoCleanup('profile_refresh');
+      
       this.separatedSystems.profile.loaded = false;
       this.separatedSystems.profile.error = null;
       await this.loadProfileSystemSafe();
@@ -333,6 +430,9 @@ class BackgroundDataService {
 
   async forceRefreshAll() {
     try {
+      // Emergency cleanup before refresh
+      await this.emergencyVideoCleanup('force_refresh_all');
+      
       // Cancel any ongoing requests first
       this.cancelAllRequests();
       
@@ -350,7 +450,25 @@ class BackgroundDataService {
   }
 
   /**
-   * GET SYSTEM STATUS
+   * PUBLIC: Get video decoder stats for debugging
+   */
+  getVideoDecoderStats() {
+    return {
+      activeDecoders: this.activeVideoDecoders.size,
+      cleanupCallbacks: this.videoDecoderCleanupCallbacks.size,
+      activeRequests: this.activeRequests.size
+    };
+  }
+
+  /**
+   * PUBLIC: Manual video cleanup trigger
+   */
+  async cleanupVideos(reason = 'manual') {
+    await this.emergencyVideoCleanup(reason);
+  }
+
+  /**
+   * GET SYSTEM STATUS - Enhanced with video info
    */
   getSeparatedSystemStatus() {
     return {
@@ -372,6 +490,10 @@ class BackgroundDataService {
         independentCaches: true,
         independentAPIs: true,
         parallelLoading: true
+      },
+      video: {
+        activeDecoders: this.activeVideoDecoders.size,
+        cleanupCallbacks: this.videoDecoderCleanupCallbacks.size
       }
     };
   }
@@ -398,7 +520,8 @@ class BackgroundDataService {
       totalFeedVideos: separatedStatus.feed.videoCount,
       totalProfileVideos: separatedStatus.profile.videoCount,
       systemsSeparated: true,
-      parallelLoadingEnabled: true
+      parallelLoadingEnabled: true,
+      videoDecoderStats: this.getVideoDecoderStats()
     };
   }
 }

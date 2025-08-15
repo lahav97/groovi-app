@@ -82,3 +82,11 @@ export const LAYOUT = {
   contentSpacing: 20,
   cornerRadius: 12,
 };
+
+// Backward compatibility export
+export const colors = {
+  primary: '#ff6ec4',
+  gray: '#666',
+  background: '#000',
+  border: '#333',
+};

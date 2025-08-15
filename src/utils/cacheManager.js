@@ -15,20 +15,23 @@ const CACHE_EXPIRY = {
     PROFILE_VIDEOS: 60 * 60 * 1000,
 };
 
-// INSTANT MEMORY CACHE - TikTok/Instagram style
+// REDUCED MEMORY CACHE - Much smaller to prevent 2GB leaks
 const memoryCache = new Map();
 const memoryCacheExpiry = new Map();
-const MEMORY_CACHE_TTL = 5 * 60 * 1000; // 5 minutes in memory
+const MEMORY_CACHE_TTL = 2 * 60 * 1000; // Reduced to 2 minutes
+const MAX_MEMORY_CACHE_SIZE = 5; // Reduced from 20 to 5 items
+const MAX_MEMORY_CACHE_MB = 10; // Max 10MB in memory cache
 
 let writeQueue = [];
 let isProcessing = false;
 let activeWrites = 0;
 let cleanupTimer = null;
 let isShuttingDown = false;
+let currentMemoryCacheSizeMB = 0;
 
-const MAX_QUEUE_SIZE = 3;
+const MAX_QUEUE_SIZE = 2; // Reduced from 3
 const MAX_WRITE_OPERATIONS = 1;
-const OPERATION_TIMEOUT = 3000;
+const OPERATION_TIMEOUT = 2000; // Reduced timeout
 
 const log = (level, message, data = null) => {
     const timestamp = new Date().toISOString().slice(11, 23);
@@ -45,9 +48,19 @@ const log = (level, message, data = null) => {
     }
 };
 
+/**
+ * ENHANCED: Memory cache with size tracking
+ */
 const getFromMemoryCache = (key) => {
     const expiry = memoryCacheExpiry.get(key);
     if (expiry && Date.now() > expiry) {
+        const oldData = memoryCache.get(key);
+        if (oldData) {
+            // Estimate and subtract size
+            const estimatedSize = (JSON.stringify(oldData).length * 2) / 1024 / 1024;
+            currentMemoryCacheSizeMB = Math.max(0, currentMemoryCacheSizeMB - estimatedSize);
+        }
+        
         memoryCache.delete(key);
         memoryCacheExpiry.delete(key);
         return null;
@@ -55,15 +68,64 @@ const getFromMemoryCache = (key) => {
     return memoryCache.get(key) || null;
 };
 
+/**
+ * ENHANCED: Memory cache with aggressive size limits
+ */
 const setMemoryCache = (key, data) => {
-    memoryCache.set(key, data);
-    memoryCacheExpiry.set(key, Date.now() + MEMORY_CACHE_TTL);
+    // Estimate data size in MB
+    const estimatedSizeMB = (JSON.stringify(data).length * 2) / 1024 / 1024;
+    
+    // Check if data is too large for cache
+    if (estimatedSizeMB > 5) {
+        log('warn', `Data too large for memory cache: ${estimatedSizeMB.toFixed(2)}MB`, key);
+        return;
+    }
 
-    // Keep memory cache size reasonable
-    if (memoryCache.size > 20) {
+    // Clean cache if at limits
+    while ((memoryCache.size >= MAX_MEMORY_CACHE_SIZE || 
+           currentMemoryCacheSizeMB + estimatedSizeMB > MAX_MEMORY_CACHE_MB) && 
+           memoryCache.size > 0) {
+        
         const oldestKey = memoryCache.keys().next().value;
+        const oldData = memoryCache.get(oldestKey);
+        
+        if (oldData) {
+            const oldSize = (JSON.stringify(oldData).length * 2) / 1024 / 1024;
+            currentMemoryCacheSizeMB = Math.max(0, currentMemoryCacheSizeMB - oldSize);
+        }
+        
         memoryCache.delete(oldestKey);
         memoryCacheExpiry.delete(oldestKey);
+        
+        log('info', `Evicted from memory cache: ${oldestKey}`);
+    }
+
+    // Add new data
+    memoryCache.set(key, data);
+    memoryCacheExpiry.set(key, Date.now() + MEMORY_CACHE_TTL);
+    currentMemoryCacheSizeMB += estimatedSizeMB;
+    
+    log('perf', `Memory cache: ${memoryCache.size} items, ${currentMemoryCacheSizeMB.toFixed(2)}MB`);
+};
+
+/**
+ * ENHANCED: Aggressive memory cache cleanup
+ */
+const forceMemoryCacheCleanup = (reason = 'unknown') => {
+    log('warn', `Force cleaning memory cache: ${reason}`);
+    
+    const sizeBefore = memoryCache.size;
+    const mbBefore = currentMemoryCacheSizeMB;
+    
+    memoryCache.clear();
+    memoryCacheExpiry.clear();
+    currentMemoryCacheSizeMB = 0;
+    
+    log('perf', `Memory cache cleared: ${sizeBefore} items (${mbBefore.toFixed(2)}MB) → 0`);
+    
+    // Force garbage collection if available
+    if (global.gc) {
+        setTimeout(() => global.gc(), 100);
     }
 };
 
@@ -98,18 +160,18 @@ const processWriteQueue = async () => {
                 activeWrites--;
             }
 
-            await new Promise(resolve => setTimeout(resolve, 10));
+            await new Promise(resolve => setTimeout(resolve, 5)); // Reduced delay
         }
     } finally {
         isProcessing = false;
 
         if (writeQueue.length > 0 && !isShuttingDown) {
-            setTimeout(processWriteQueue, 25);
+            setTimeout(processWriteQueue, 15); // Faster processing
         }
     }
 };
 
-const readCacheInstant = async (key, timeout = 800) => {
+const readCacheInstant = async (key, timeout = 500) => { // Reduced timeout
     const startTime = Date.now();
 
     // STEP 1: Check memory cache first (instant)
@@ -129,8 +191,11 @@ const readCacheInstant = async (key, timeout = 800) => {
         const result = await Promise.race([promise, timeoutPromise]);
 
         if (result) {
-            // Cache in memory for next time
-            setMemoryCache(key, result);
+            // Only cache in memory if not too large
+            const dataSize = (result.length * 2) / 1024 / 1024;
+            if (dataSize < 3) { // Only cache items under 3MB
+                setMemoryCache(key, result);
+            }
             log('perf', `Disk cache HIT: ${key}`, `${Date.now() - startTime}ms`);
         } else {
             log('info', `Cache MISS: ${key}`);
@@ -150,7 +215,7 @@ const queueWriteOperation = (operation, operationId = null) => {
     }
 
     if (writeQueue.length >= MAX_QUEUE_SIZE) {
-        writeQueue = writeQueue.slice(-2);
+        writeQueue = writeQueue.slice(-1); // Keep only 1 operation
         log('warn', `Write queue full, trimmed to ${writeQueue.length} operations`);
     }
 
@@ -203,16 +268,19 @@ const setCacheTimestamp = (key, timestamp = getCurrentTimestamp()) => {
             parsed[key] = timestamp;
 
             const keys = Object.keys(parsed);
-            if (keys.length > 15) {
+            if (keys.length > 10) { // Reduced from 15
                 const sorted = keys.sort((a, b) => parsed[a] - parsed[b]);
-                sorted.slice(0, 3).forEach(k => delete parsed[k]);
-                log('info', `Cleaned old timestamps: ${sorted.slice(0, 3).join(', ')}`);
+                sorted.slice(0, 5).forEach(k => delete parsed[k]); // More aggressive cleanup
+                log('info', `Cleaned old timestamps: ${sorted.slice(0, 5).join(', ')}`);
             }
 
             await AsyncStorage.setItem(CACHE_KEYS.CACHE_TIMESTAMPS, JSON.stringify(parsed));
 
-            // Update memory cache too
-            setMemoryCache(CACHE_KEYS.CACHE_TIMESTAMPS, JSON.stringify(parsed));
+            // Only cache if small
+            const dataSize = (JSON.stringify(parsed).length * 2) / 1024 / 1024;
+            if (dataSize < 1) {
+                setMemoryCache(CACHE_KEYS.CACHE_TIMESTAMPS, JSON.stringify(parsed));
+            }
 
         } catch (error) {
             log('error', 'Error setting cache timestamp', error.message);
@@ -227,7 +295,7 @@ export const cacheFeedVideos = (feedVideos, metadata = {}) => {
 
     return queueWriteOperation(async () => {
         try {
-            const videosToCache = feedVideos.slice(0, 12);
+            const videosToCache = feedVideos.slice(0, 8); // Reduced from 12
 
             const minimalVideos = videosToCache.map(v => ({
                 id: v.id,
@@ -249,13 +317,16 @@ export const cacheFeedVideos = (feedVideos, metadata = {}) => {
             await AsyncStorage.setItem(CACHE_KEYS.FEED_VIDEOS, videoData);
             await AsyncStorage.setItem(CACHE_KEYS.FEED_METADATA, JSON.stringify(metadataObj));
 
-            // Update memory cache immediately
-            setMemoryCache(CACHE_KEYS.FEED_VIDEOS, videoData);
-            setMemoryCache(CACHE_KEYS.FEED_METADATA, JSON.stringify(metadataObj));
+            // Only cache in memory if reasonable size
+            const dataSize = (videoData.length * 2) / 1024 / 1024;
+            if (dataSize < 3) {
+                setMemoryCache(CACHE_KEYS.FEED_VIDEOS, videoData);
+                setMemoryCache(CACHE_KEYS.FEED_METADATA, JSON.stringify(metadataObj));
+            }
 
             setCacheTimestamp(CACHE_KEYS.FEED_VIDEOS);
 
-            log('perf', `Feed videos cached successfully: ${minimalVideos.length} videos`);
+            log('perf', `Feed videos cached successfully: ${minimalVideos.length} videos (${dataSize.toFixed(2)}MB)`);
 
         } catch (error) {
             log('error', 'Error caching feed videos', error.message);
@@ -344,21 +415,28 @@ export const cacheUserProfile = (profileData, userEmail) => {
             const profileData_str = JSON.stringify(minimalProfile);
             await AsyncStorage.setItem(profileCacheKey, profileData_str);
 
-            // Update memory cache immediately
-            setMemoryCache(profileCacheKey, profileData_str);
+            // Only cache in memory if reasonable size
+            const profileSize = (profileData_str.length * 2) / 1024 / 1024;
+            if (profileSize < 1) {
+                setMemoryCache(profileCacheKey, profileData_str);
+            }
 
             if (profileData.videos && profileData.videos.length > 0) {
-                const videosToCache = profileData.videos.slice(0, 6);
+                const videosToCache = profileData.videos.slice(0, 4); // Reduced from 6
                 const profileVideosCacheKey = `${CACHE_KEYS.PROFILE_VIDEOS}_${userEmail}`;
                 const videosData = JSON.stringify(videosToCache);
 
                 await AsyncStorage.setItem(profileVideosCacheKey, videosData);
-                setMemoryCache(profileVideosCacheKey, videosData);
+                
+                const videoSize = (videosData.length * 2) / 1024 / 1024;
+                if (videoSize < 2) {
+                    setMemoryCache(profileVideosCacheKey, videosData);
+                }
                 setCacheTimestamp(profileVideosCacheKey);
             }
 
             setCacheTimestamp(profileCacheKey);
-            log('perf', `Profile cached for: ${userEmail}`);
+            log('perf', `Profile cached for: ${userEmail} (${profileSize.toFixed(2)}MB)`);
 
         } catch (error) {
             log('error', `Error caching profile for ${userEmail}`, error.message);
@@ -436,8 +514,11 @@ export const clearProfileCache = (userEmail) => {
     }, `clear_profile_${userEmail}`);
 };
 
+/**
+ * ENHANCED: Emergency cache clearing with memory cleanup
+ */
 export const clearAllCaches = async () => {
-    log('warn', 'Clearing ALL caches');
+    log('warn', 'Clearing ALL caches (emergency)');
     isShuttingDown = true;
 
     if (cleanupTimer) {
@@ -449,9 +530,8 @@ export const clearAllCaches = async () => {
     activeWrites = 0;
     isProcessing = false;
 
-    // Clear memory cache immediately
-    memoryCache.clear();
-    memoryCacheExpiry.clear();
+    // Force clear memory cache first
+    forceMemoryCacheCleanup('clear_all_caches');
 
     try {
         const allKeys = await AsyncStorage.getAllKeys();
@@ -463,11 +543,29 @@ export const clearAllCaches = async () => {
             await AsyncStorage.multiRemove(cacheKeys);
             log('perf', `Cleared ${cacheKeys.length} cache entries`);
         }
+
+        // Clear video cache directory
+        const videoCacheDir = `${FileSystem.cacheDirectory}videos`;
+        try {
+            const dirInfo = await FileSystem.getInfoAsync(videoCacheDir);
+            if (dirInfo.exists) {
+                await FileSystem.deleteAsync(videoCacheDir, { idempotent: true });
+                log('perf', 'Cleared video cache directory');
+            }
+        } catch (videoCacheError) {
+            log('warn', 'Error clearing video cache directory:', videoCacheError);
+        }
+
     } catch (error) {
         log('error', 'Error clearing all caches', error.message);
     }
 
     isShuttingDown = false;
+    
+    // Force garbage collection
+    if (global.gc) {
+        global.gc();
+    }
 };
 
 export const getCacheStats = async () => {
@@ -476,10 +574,10 @@ export const getCacheStats = async () => {
         const cacheKeys = allKeys.filter(key => key.includes('_cache'));
 
         let totalSize = 0;
-        const sampleKeys = cacheKeys.slice(0, 5);
+        const sampleKeys = cacheKeys.slice(0, 3); // Reduced sample
 
         for (const key of sampleKeys) {
-            const value = await readCacheInstant(key, 1000);
+            const value = await readCacheInstant(key, 500);
             if (value) {
                 totalSize += value.length;
             }
@@ -488,6 +586,12 @@ export const getCacheStats = async () => {
         return {
             totalKeys: cacheKeys.length,
             approximateSize: `${(totalSize / 1024).toFixed(2)} KB`,
+            memoryCache: {
+                items: memoryCache.size,
+                sizeMB: currentMemoryCacheSizeMB.toFixed(2),
+                maxItems: MAX_MEMORY_CACHE_SIZE,
+                maxSizeMB: MAX_MEMORY_CACHE_MB
+            },
             queueStatus: {
                 pending: writeQueue.length,
                 active: activeWrites
@@ -498,8 +602,10 @@ export const getCacheStats = async () => {
     }
 };
 
-export const manageCacheSize = async (maxCacheSizeMB = 50) => {
-    // FIXED: Use correct function name
+/**
+ * ENHANCED: More aggressive video cache management
+ */
+export const manageCacheSize = async (maxCacheSizeMB = 30) => { // Reduced default
     return queueWriteOperation(async () => {
         try {
             const maxCacheBytes = maxCacheSizeMB * 1024 * 1024;
@@ -509,13 +615,13 @@ export const manageCacheSize = async (maxCacheSizeMB = 50) => {
             if (!dirInfo.exists) return;
 
             const files = await FileSystem.readDirectoryAsync(videoCacheDir);
+            
+            if (files.length === 0) return;
 
-            const batchSize = 8;
-            for (let i = 0; i < files.length; i += batchSize) {
-                const batch = files.slice(i, i + batchSize);
-
-                const fileInfoPromises = batch.map(async (filename) => {
-                    const fileUri = `${videoCacheDir}/${filename}`;
+            // Get all file info at once
+            const fileInfoPromises = files.map(async (filename) => {
+                const fileUri = `${videoCacheDir}/${filename}`;
+                try {
                     const info = await FileSystem.getInfoAsync(fileUri);
                     return {
                         uri: fileUri,
@@ -523,30 +629,54 @@ export const manageCacheSize = async (maxCacheSizeMB = 50) => {
                         modTime: info.modificationTime || 0,
                         size: info.size || 0
                     };
-                });
+                } catch (error) {
+                    return null;
+                }
+            });
 
-                const filesWithInfo = await Promise.all(fileInfoPromises);
-                const totalSize = filesWithInfo.reduce((sum, file) => sum + file.size, 0);
+            const filesWithInfo = (await Promise.all(fileInfoPromises)).filter(Boolean);
+            const totalSize = filesWithInfo.reduce((sum, file) => sum + file.size, 0);
 
-                if (totalSize > maxCacheBytes) {
-                    const sortedFiles = filesWithInfo.sort((a, b) => a.modTime - b.modTime);
-                    const toDelete = sortedFiles.slice(0, Math.floor(sortedFiles.length / 3));
+            log('perf', `Video cache: ${files.length} files, ${(totalSize / 1024 / 1024).toFixed(2)}MB`);
 
-                    for (const file of toDelete) {
-                        try {
-                            await FileSystem.deleteAsync(file.uri);
-                        } catch (deleteError) {
-                            // Continue cleanup
-                        }
+            if (totalSize > maxCacheBytes) {
+                // Sort by modification time (oldest first)
+                const sortedFiles = filesWithInfo.sort((a, b) => a.modTime - b.modTime);
+                
+                // Delete older files until under limit
+                let currentSize = totalSize;
+                let deletedCount = 0;
+                
+                for (const file of sortedFiles) {
+                    if (currentSize <= maxCacheBytes) break;
+                    
+                    try {
+                        await FileSystem.deleteAsync(file.uri);
+                        currentSize -= file.size;
+                        deletedCount++;
+                    } catch (deleteError) {
+                        log('warn', `Failed to delete ${file.name}:`, deleteError);
                     }
                 }
+                
+                log('perf', `Deleted ${deletedCount} old video files, saved ${((totalSize - currentSize) / 1024 / 1024).toFixed(2)}MB`);
             }
         } catch (error) {
-            console.error('Error managing cache size:', error);
+            log('error', 'Error managing cache size:', error.message);
         }
     }, 'manage_cache_size');
 };
 
+/**
+ * NEW: Force memory cleanup - called from AppMemoryManager
+ */
+export const forceMemoryCleanup = (reason = 'unknown') => {
+    forceMemoryCacheCleanup(reason);
+};
+
+/**
+ * ENHANCED: More frequent cleanup
+ */
 const startPeriodicCleanup = () => {
     if (cleanupTimer) {
         clearTimeout(cleanupTimer);
@@ -554,26 +684,21 @@ const startPeriodicCleanup = () => {
 
     cleanupTimer = setTimeout(() => {
         if (!isShuttingDown) {
-            // Clean write queue
+            // Clean write queue more aggressively
             if (writeQueue.length > MAX_QUEUE_SIZE) {
                 const removed = writeQueue.length - MAX_QUEUE_SIZE;
                 writeQueue = writeQueue.slice(-MAX_QUEUE_SIZE);
                 log('warn', `Queue cleanup: removed ${removed} old operations`);
             }
 
-            // Clean memory cache if too large
-            if (memoryCache.size > 25) {
-                const oldestKeys = Array.from(memoryCache.keys()).slice(0, 5);
-                oldestKeys.forEach(key => {
-                    memoryCache.delete(key);
-                    memoryCacheExpiry.delete(key);
-                });
-                log('info', `Memory cache cleanup: removed ${oldestKeys.length} old entries`);
+            // Clean memory cache more aggressively
+            if (memoryCache.size > MAX_MEMORY_CACHE_SIZE || currentMemoryCacheSizeMB > MAX_MEMORY_CACHE_MB) {
+                forceMemoryCacheCleanup('periodic_cleanup');
             }
 
             startPeriodicCleanup();
         }
-    }, 20000);
+    }, 10000); // Reduced from 20 seconds to 10 seconds
 };
 
 export const shutdownCacheManager = () => {
@@ -589,9 +714,7 @@ export const shutdownCacheManager = () => {
     activeWrites = 0;
     isProcessing = false;
 
-    memoryCache.clear();
-    memoryCacheExpiry.clear();
-
+    forceMemoryCacheCleanup('shutdown');
     clearAllCaches();
 };
 
