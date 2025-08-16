@@ -27,8 +27,8 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useIsFocused } from '@react-navigation/native';
 
 import {
-    fetchInitialMusicians,
-    loadMusicianWithoutFilters,
+    fetchInitialMusiciansForMatch,
+    loadMoreMusiciansForMatch,
     resetVideoState,
     forceResetHasMoreVideos
 } from '../../services/videoService';
@@ -46,14 +46,14 @@ import {
 const { width, height } = Dimensions.get('window');
 
 const CARD_WIDTH = width - 32;
-const CARD_HEIGHT = height * 0.75;
+const CARD_HEIGHT = height * 0.75; // Reduced from 0.8 to 0.75 for better screen positioning
 const VIDEO_HEIGHT = CARD_HEIGHT * 0.55;
 
 // Card deck configuration
 const DECK_SIZE = 4;
-const CARD_SCALE_OFFSET = 0.04;
+const CARD_SCALE_OFFSET = 0.007;
 const CARD_Y_OFFSET = 6;
-const CARD_X_OFFSET = 25;
+const CARD_X_OFFSET = 7;
 
 const MatchScreen = () => {
     const navigation = useNavigation();
@@ -98,9 +98,9 @@ const MatchScreen = () => {
         try {
             setLoading(true);
             setError(null);
-            console.log('Loading initial musicians...');
+            console.log('Loading initial musicians with complete profiles from MATCH API...');
 
-            const newMusicians = await fetchInitialMusicians(currentUser, INITIAL_BATCH_SIZE);
+            const newMusicians = await fetchInitialMusiciansForMatch(currentUser, INITIAL_BATCH_SIZE);
 
             if (!mountedRef.current) return;
 
@@ -109,16 +109,17 @@ const MatchScreen = () => {
                 return;
             }
 
-            // Transform musicians for card format
+            // Transform musicians for card format - NOW WITH COMPLETE DATA FROM MATCH API
             const transformedMusicians = newMusicians.map((musician, index) => ({
                 ...musician,
                 id: musician.id || `musician-${index}-${Date.now()}`,
                 username: musician.username || `user_${index}`,
                 videos: musician.videos || [],
-                bio: musician.bio || 'Music enthusiast looking to connect!',
-                location: musician.location || 'Unknown',
-                age: musician.age || null,
-                rating: musician.rating || null,
+                // ✅ NOW THESE ARE REAL VALUES FROM MATCH API WITH COMPLETE DATABASE DATA!
+                bio: musician.bio, // Real bio from complete profile
+                location: musician.location, // Real location from complete profile
+                age: musician.age,
+                rating: musician.rating,
                 instruments: musician.instruments || 'Guitar',
                 genres: musician.genres || 'Music',
                 currentVideoIndex: 0,
@@ -146,43 +147,44 @@ const MatchScreen = () => {
             }
         }
     };
-
     // Load additional musicians using working videoService function
     const loadAdditionalMusicians = async () => {
         if (isPreloading || !mountedRef.current) {
             console.log('Preload skipped - already loading or component unmounted');
             return;
         }
-        
+
         try {
             setIsPreloading(true);
-            console.log('Loading additional musicians...');
-            
-            const moreMusicians = await loadMusicianWithoutFilters(currentUser, LOAD_MORE_BATCH_SIZE);
-            
-            console.log('Received additional musicians:', {
+            console.log('Loading additional musicians with complete profiles from MATCH API...');
+
+            const moreMusicians = await loadMoreMusiciansForMatch(currentUser, LOAD_MORE_BATCH_SIZE);
+
+            console.log('Received additional musicians from MATCH API:', {
                 count: moreMusicians?.length || 0,
-                usernames: moreMusicians?.map(m => m.username) || []
+                usernames: moreMusicians?.map(m => m.username) || [],
+                hasCompleteData: moreMusicians?.every(m => m.bio && m.location) || false
             });
-            
+
             if (moreMusicians && moreMusicians.length > 0 && mountedRef.current) {
-                // Transform additional musicians
+                // Transform additional musicians - NOW WITH COMPLETE DATA FROM MATCH API
                 const transformedMusicians = moreMusicians.map((musician, index) => ({
                     ...musician,
                     id: musician.id || `musician-more-${musicians.length + index}-${Date.now()}`,
                     username: musician.username || `user_more_${index}`,
                     videos: musician.videos || [],
-                    bio: musician.bio || 'Music enthusiast looking to connect!',
-                    location: musician.location || 'Unknown',
-                    age: musician.age || null,
-                    rating: musician.rating || null,
+                    // FIXED: Keep actual database values (don't override with defaults)
+                    bio: musician.bio,
+                    location: musician.location,
+                    age: musician.age,
+                    rating: musician.rating,
                     instruments: musician.instruments || 'Guitar',
                     genres: musician.genres || 'Music',
                     currentVideoIndex: 0,
                     cardPosition: musicians.length + index,
                     loadedAt: Date.now(),
                 }));
-                
+
                 // Update state with new musicians
                 setMusicians(prevMusicians => {
                     const newList = [...prevMusicians, ...transformedMusicians];
@@ -193,7 +195,7 @@ const MatchScreen = () => {
                     });
                     return newList;
                 });
-                
+
                 setPreloadedMusicians(prev => [...prev, ...transformedMusicians]);
                 console.log(`Successfully loaded ${transformedMusicians.length} additional musicians`);
             } else {
@@ -207,6 +209,7 @@ const MatchScreen = () => {
             }
         }
     };
+
 
     // Component mount and cleanup
     useEffect(() => {
@@ -291,7 +294,7 @@ const MatchScreen = () => {
         translateX.value = withTiming(0, { duration: 100 });
         translateY.value = withTiming(0, { duration: 100 });
         rotate.value = withTiming(0, { duration: 100 });
-        scale.value = withTiming(1, { duration: 100 });
+        // Removed scale reset since we're not using scale transforms anymore
     }, [currentIndex]);
 
     // Navigation functions
@@ -400,7 +403,7 @@ const MatchScreen = () => {
     // Gesture handler for swipe animations
     const gestureHandler = useAnimatedGestureHandler({
         onStart: () => {
-            scale.value = withSpring(0.95, { damping: 15, stiffness: 300 });
+            // Removed scale animation to prevent card size changes during interactions
         },
         onActive: (event) => {
             translateX.value = event.translationX;
@@ -438,7 +441,7 @@ const MatchScreen = () => {
                 translateX.value = withSpring(0, { damping: 20, stiffness: 400 });
                 translateY.value = withSpring(0, { damping: 20, stiffness: 400 });
                 rotate.value = withSpring(0, { damping: 20, stiffness: 400 });
-                scale.value = withSpring(1, { damping: 20, stiffness: 400 });
+                // Removed scale reset to prevent card size changes
             }
         },
     });
@@ -449,7 +452,7 @@ const MatchScreen = () => {
                 { translateX: translateX.value },
                 { translateY: translateY.value },
                 { rotate: `${rotate.value}deg` },
-                { scale: scale.value },
+                // Removed scale transform to prevent any card size changes
             ],
         };
     });
@@ -536,6 +539,15 @@ const MatchScreen = () => {
             );
         }
 
+        // DEBUG: Log what data we have for this musician
+        console.log('🔍 Rendering musician:', {
+            username: musician.username,
+            bio: musician.bio,
+            address: musician.address,
+            location: musician.location,
+            instruments: musician.instruments
+        });
+
         return (
             <View style={styles.profileSection}>
                 <ScrollView
@@ -559,16 +571,19 @@ const MatchScreen = () => {
                         {musician.rating && renderStarRating(musician.rating)}
                     </View>
 
-                    {musician.bio && (
-                        <View style={styles.infoCard}>
-                            <View style={styles.infoHeader}>
-                                <Icon name="chatbubble-ellipses" size={20} color={COLORS?.static?.background || '#ff6ec4'} />
-                                <Text style={styles.infoLabel}>About</Text>
-                            </View>
-                            <Text style={styles.bioText}>{String(musician.bio)}</Text>
+                    {/* 1. BIO SECTION */}
+                    <View style={styles.infoCard}>
+                        <View style={styles.infoHeader}>
+                            <Icon name="information-circle" size={20} color={COLORS?.static?.background || '#ff6ec4'} />
+                            <Text style={styles.infoLabel}>Bio</Text>
                         </View>
-                    )}
+                        <Text style={styles.bioText}>
+                            {/* Check multiple possible bio fields */}
+                            {musician.bio || musician.description || musician.about || 'I love to play music!'}
+                        </Text>
+                    </View>
 
+                    {/* 2. INSTRUMENTS SECTION */}
                     <View style={styles.infoCard}>
                         <View style={styles.infoHeader}>
                             <Icon name="musical-notes" size={20} color={COLORS?.static?.background || '#ff6ec4'} />
@@ -577,15 +592,17 @@ const MatchScreen = () => {
                         <Text style={styles.infoText}>{formatInstruments(musician)}</Text>
                     </View>
 
-                    {musician.location && (
-                        <View style={styles.infoCard}>
-                            <View style={styles.infoHeader}>
-                                <Icon name="location" size={20} color={COLORS?.static?.background || '#ff6ec4'} />
-                                <Text style={styles.infoLabel}>Location</Text>
-                            </View>
-                            <Text style={styles.infoText}>{String(musician.location)}</Text>
+                    {/* 3. LOCATION SECTION */}
+                    <View style={styles.infoCard}>
+                        <View style={styles.infoHeader}>
+                            <Icon name="location" size={20} color={COLORS?.static?.background || '#ff6ec4'} />
+                            <Text style={styles.infoLabel}>Location</Text>
                         </View>
-                    )}
+                        <Text style={styles.infoText}>
+                            {/* Prioritize location field over address for consistency with ProfileScreen */}
+                            {musician.location || musician.address || musician.city || 'No location specified'}
+                        </Text>
+                    </View>
 
                     <View style={styles.scrollPadding} />
                 </ScrollView>
@@ -600,6 +617,7 @@ const MatchScreen = () => {
             </View>
         );
     };
+
 
     const renderVideoContainer = (musician = currentMusician, videoIndex = currentVideoIndex, isActive = true) => {
         const videoUrl = musician?.videos?.[videoIndex];
@@ -894,6 +912,7 @@ const styles = StyleSheet.create({
         backgroundColor: '#f8f9fa',
         justifyContent: 'center',
         alignItems: 'center',
+        paddingTop: 60,
     },
     cardDeckContainer: {
         width: '100%',
@@ -901,7 +920,8 @@ const styles = StyleSheet.create({
         justifyContent: 'center',
         alignItems: 'center',
         position: 'relative',
-        marginBottom: LAYOUT.navHeight + 60,
+        flex: 1, // Make it flexible to take available space
+        marginBottom: 10, // Minimal margin for spacing from bottom nav
     },
     card: {
         width: CARD_WIDTH,
@@ -1100,7 +1120,7 @@ const styles = StyleSheet.create({
         marginLeft: 8,
     },
     bioText: {
-        fontSize: 15,
+    fontSize: 15,
         lineHeight: 22,
         color: '#555',
         fontStyle: 'italic',
@@ -1124,26 +1144,6 @@ const styles = StyleSheet.create({
         color: '#999',
         fontWeight: '500',
         textAlign: 'center',
-    },
-    floatingCounter: {
-        position: 'absolute',
-        top: 100,
-        right: 30,
-        backgroundColor: 'rgba(0,0,0,0.8)',
-        paddingHorizontal: 14,
-        paddingVertical: 8,
-        borderRadius: 20,
-        zIndex: 1000,
-        shadowColor: '#000',
-        shadowOffset: { width: 0, height: 2 },
-        shadowOpacity: 0.3,
-        shadowRadius: 4,
-        elevation: 5,
-    },
-    floatingCounterText: {
-        color: '#fff',
-        fontSize: 12,
-        fontWeight: '600',
     },
     loadingContainer: {
         flex: 1,

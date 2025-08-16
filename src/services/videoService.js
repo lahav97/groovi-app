@@ -3,7 +3,8 @@ import * as FileSystem from 'expo-file-system';
 import * as VideoThumbnails from 'expo-video-thumbnails';
 import { handleError } from '../utils/errors';
 
-const MUSICIAN_API_URL = 'https://yflgdontu1.execute-api.us-east-1.amazonaws.com/groovi/discover';
+const MUSICIAN_API_URL = 'https://yflgdontu1.execute-api.us-east-1.amazonaws.com/groovi/discover'; // For DiscoverScreen
+const MATCH_API_URL = 'https://g25kk1qcgi.execute-api.us-east-1.amazonaws.com/groovi/match'; // For MatchScreen
 const DELETE_API_URL = 'https://9u6y4sfrn2.execute-api.us-east-1.amazonaws.com/groovi/build_profile/delete';
 
 // ✅ ADD THIS HERE - AFTER THE API URLS, BEFORE OTHER VARIABLES
@@ -40,24 +41,115 @@ let currentOffset = 0;
 let hasReachedActualEnd = false;
 
 /**
- * Helper function to transform API response to expected format
+ * Helper function for DISCOVER API (limited data)
+ * Used by DiscoverScreen - keeps existing functionality
+ * @param {Array} apiData - Raw data from discover API
+ * @returns {Array} - Transformed musician objects with limited data
+ */
+const formatDiscoverResponse = (apiData) => {
+    const musicians = apiData.map(musician => {
+        console.log('🔍 Raw musician data from DISCOVER API:', {
+            username: musician.username,
+            bio: musician.bio,
+            location: musician.location,
+            hasLimitedData: !musician.bio || !musician.location
+        });
+
+        return {
+            id: musician.user_id || musician.id,
+            username: musician.username,
+            videos: [musician.video_url],
+
+            // DISCOVER API has limited data
+            bio: musician.bio || null,
+            location: musician.location || musician.address || null,
+            age: musician.age || null,
+            rating: musician.rating || null,
+            instruments: musician.instruments || [],
+            genres: musician.genres || [],
+
+            // Keep any other fields from the API response
+            ...musician
+        };
+    });
+
+    return musicians;
+};
+
+/**
+ * Helper function for MATCH API (complete data)
+ * Used by MatchScreen - gets complete user data
+ * @param {Array} apiData - Raw data from match API (complete user objects)
+ * @returns {Array} - Transformed musician objects with complete data
+ */
+const formatMatchResponse = (apiData) => {
+    console.log('🔄 Processing MATCH API response with', apiData.length, 'musicians');
+    
+    const musicians = apiData.map((musician, index) => {
+        console.log(`🔍 Processing musician ${index + 1}:`, {
+            username: musician.username,
+            bio: musician.bio ? 'Has bio' : 'No bio',
+            location: musician.location ? 'Has location' : 'No location',
+            age: musician.age || 'No age',
+            rating: musician.rating || 'No rating',
+            videosCount: musician.videos?.length || 0,
+            hasCompleteData: !!(musician.bio && musician.location)
+        });
+
+        // Pick a random video from the user's videos array
+        const randomVideo = musician.videos && musician.videos.length > 0 
+            ? musician.videos[Math.floor(Math.random() * musician.videos.length)]
+            : null;
+
+        const formattedMusician = {
+            id: musician.id || musician.user_id || `match-${index}-${Date.now()}`,
+            username: musician.username || `unknown_${index}`,
+            videos: musician.videos || [],
+            video_url: randomVideo, // For compatibility
+
+            // ✅ COMPLETE DATA FROM MATCH API!
+            bio: musician.bio || null,
+            location: musician.location || null,
+            age: musician.age || null,
+            rating: musician.rating || null,
+            instruments: musician.instruments || [],
+            genres: musician.genres || [],
+            
+            // All other complete profile fields
+            followers: musician.followers || 0,
+            following: musician.following || 0,
+            likes: musician.likes || 0,
+            socialLink: musician.sociallink || null,
+            email: musician.email || null,
+            gender: musician.gender || null,
+            profile_picture: musician.profile_picture || null,
+
+            // Keep all other fields
+            ...musician
+        };
+
+        console.log(`✅ Formatted musician ${index + 1}:`, {
+            username: formattedMusician.username,
+            hasBio: !!formattedMusician.bio,
+            hasLocation: !!formattedMusician.location,
+            hasAge: !!formattedMusician.age,
+            hasRating: !!formattedMusician.rating
+        });
+
+        return formattedMusician;
+    });
+
+    console.log(`✅ Formatted ${musicians.length} musicians with COMPLETE data from MATCH API`);
+    return musicians;
+};
+
+/**
+ * Legacy function - keep for backward compatibility with DiscoverScreen
  * @param {Array} apiData - Raw data from API
  * @returns {Array} - Transformed musician objects
  */
 const formatMusicianResponse = (apiData) => {
-    const musicians = apiData.map(musician => ({
-        id: musician.user_id || musician.id,
-        username: musician.username,
-        videos: [musician.video_url],
-        instruments: musician.instruments || [],
-        bio: `Music enthusiast playing ${(musician.instruments || []).slice(0, 2).join(', ')}`,
-        location: 'Unknown',
-        genres: [],
-        age: null,
-        rating: Math.floor(Math.random() * 5) + 1,
-    }));
-
-    return musicians;
+    return formatDiscoverResponse(apiData); // Use discover formatter for backward compatibility
 };
 
 /**
@@ -736,4 +828,87 @@ export const resetVideoState = () => {
 export const forceResetHasMoreVideos = () => {
     hasReachedActualEnd = false;
     console.log('🔁 Force reset hasReachedActualEnd');
+};
+
+/**
+ * NEW: Fetch initial musicians for MATCH SCREEN (complete data)
+ * Gets complete user profiles for swiping/matching
+ */
+export const fetchInitialMusiciansForMatch = async (currentUser, limit = 5) => {
+    try {
+        console.log('🎵 Fetching initial musicians for MATCH SCREEN...');
+
+        const url = `${MATCH_API_URL}?type=initial`;
+        console.log('🎵 GET request to MATCH API:', url);
+
+        const response = await axios.get(url);
+
+        console.log('✅ MATCH API Response received:', {
+            status: response.status,
+            dataType: Array.isArray(response.data),
+            dataLength: response.data?.length || 0
+        });
+
+        if (!response.data || !Array.isArray(response.data)) {
+            console.log('❌ Invalid API response format from MATCH API');
+            return [];
+        }
+
+        console.log(`✅ Fetched ${response.data.length} initial musicians with complete data from MATCH API`);
+        console.log('🔍 Sample raw data from MATCH API:', response.data[0]);
+        
+        return formatMatchResponse(response.data);
+    } catch (error) {
+        console.error('❌ Error fetching initial musicians from MATCH API:', error);
+        throw error;
+    }
+};
+
+/**
+ * NEW: Load more musicians for MATCH SCREEN (complete data)
+ * Gets additional complete user profiles for swiping/matching
+ */
+export const loadMoreMusiciansForMatch = async (currentUser, limit = 3) => {
+    try {
+        console.log('🎵 Loading more musicians for MATCH SCREEN...');
+
+        // Build query parameters for GET request
+        const params = new URLSearchParams();
+        params.append('type', 'filter');
+        params.append('username', currentUser);
+        
+        const url = `${MATCH_API_URL}?${params.toString()}`;
+        console.log('🔗 MATCH API URL:', url);
+        
+        const response = await axios.get(url);
+
+        console.log('✅ MATCH API Response received:', {
+            status: response.status,
+            dataType: Array.isArray(response.data),
+            dataLength: response.data?.length || 0
+        });
+
+        if (!response.data || !Array.isArray(response.data)) {
+            console.log('❌ Invalid API response format from MATCH API');
+            return [];
+        }
+
+        console.log(`✅ Loaded ${response.data.length} musicians with complete data from MATCH API`);
+        console.log('🔍 Sample raw data from MATCH API:', response.data[0]);
+        
+        return formatMatchResponse(response.data);
+    } catch (error) {
+        console.error('❌ Error loading more musicians from MATCH API:', error);
+        console.error('❌ Error details:', {
+            status: error.response?.status,
+            statusText: error.response?.statusText,
+            data: error.response?.data,
+            url: error.config?.url,
+            method: error.config?.method
+        });
+        
+        // Return empty array instead of throwing to prevent infinite loops
+        console.log('🔄 Returning empty array to prevent infinite loop');
+        return [];
+    }
 };

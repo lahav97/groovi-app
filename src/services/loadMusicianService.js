@@ -26,7 +26,7 @@ let processedUsernames = new Set();
 let videoPageOffset = 0;
 
 /**
- * FIXED: Safe field formatter to prevent object rendering errors
+ * Safe field formatter to prevent object rendering errors
  */
 const formatFieldSafely = (value, defaultValue = '') => {
   if (!value || value === null || value === undefined) return defaultValue;
