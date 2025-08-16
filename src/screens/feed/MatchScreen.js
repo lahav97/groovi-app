@@ -1,4 +1,4 @@
-import React, { useState, useRef, useEffect } from 'react';
+import React, { useState, useRef, useEffect, useCallback } from 'react';
 import {
     View,
     Text,
@@ -6,11 +6,19 @@ import {
     Dimensions,
     TouchableOpacity,
     ActivityIndicator,
-    Alert,
     ScrollView,
 } from 'react-native';
 import { Video } from 'expo-av';
-// FIXED: Use consistent icon library with navigation components
+import { PanGestureHandler } from 'react-native-gesture-handler';
+import Animated, {
+    useSharedValue,
+    useAnimatedStyle,
+    useAnimatedGestureHandler,
+    runOnJS,
+    withSpring,
+    withTiming,
+    interpolate,
+} from 'react-native-reanimated';
 import Icon from 'react-native-vector-icons/Ionicons';
 import FontAwesome from 'react-native-vector-icons/FontAwesome';
 import { LinearGradient } from 'expo-linear-gradient';
@@ -19,15 +27,16 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useIsFocused } from '@react-navigation/native';
 
 import {
-    loadMusiciansForCards,
-    loadMoreMusicians,
-} from '../../services/loadMusicianService';
+    fetchInitialMusicians,
+    loadMusicianWithoutFilters,
+    resetVideoState,
+    forceResetHasMoreVideos
+} from '../../services/videoService';
 
 import BottomNavigation from '../../components/navigationBar/BottomNavigation';
 import { LAYOUT } from '../../styles/theme';
 import { COLORS } from '../../styles/theme';
 
-// FIXED: Import error handling system
 import {
     handleError,
     createNetworkError,
@@ -37,58 +46,61 @@ import {
 const { width, height } = Dimensions.get('window');
 
 const CARD_WIDTH = width - 32;
-const CARD_HEIGHT = height * 0.78;
+const CARD_HEIGHT = height * 0.75;
 const VIDEO_HEIGHT = CARD_HEIGHT * 0.55;
 
-// CARD DECK CONSTANTS FOR PHASE 3
-const DECK_SIZE = 3; // Show 3 cards in deck
-const CARD_SCALE_OFFSET = -0.005; // More visible scaling difference
-const CARD_Y_OFFSET = 3; // More visible offset
-const CARD_X_OFFSET = 6; // Slight horizontal offset for depth
+// Card deck configuration
+const DECK_SIZE = 4;
+const CARD_SCALE_OFFSET = 0.04;
+const CARD_Y_OFFSET = 6;
+const CARD_X_OFFSET = 25;
 
 const MatchScreen = () => {
     const navigation = useNavigation();
     const insets = useSafeAreaInsets();
     const isFocused = useIsFocused();
 
-    // MINIMAL STATE - Keep exactly as working version
+    // State management
     const [musicians, setMusicians] = useState([]);
     const [currentIndex, setCurrentIndex] = useState(0);
     const [loading, setLoading] = useState(true);
     const [currentVideoIndex, setCurrentVideoIndex] = useState(0);
     const [paused, setPaused] = useState(false);
     const [error, setError] = useState(null);
+    const [isPreloading, setIsPreloading] = useState(false);
+    const [preloadedMusicians, setPreloadedMusicians] = useState([]);
+    const [isSwipeInProgress, setIsSwipeInProgress] = useState(false);
 
+    // Refs
     const videoRef = useRef(null);
-    const mountedRef = useRef(true); // FIXED: Added mount tracking
-    const currentUser = 'lahav97';
+    const mountedRef = useRef(true);
+    const stabilityTimeoutRef = useRef(null);
 
-    // Keep current musician logic
+    // Configuration
+    const currentUser = 'lahav97';
+    const INITIAL_BATCH_SIZE = 5;
+    const LOAD_MORE_BATCH_SIZE = 3;
+    const MIN_SWIPE_DELAY = 300;
+    const SWIPE_THRESHOLD = width * 0.2;
+
+    // Animation values
+    const translateX = useSharedValue(0);
+    const translateY = useSharedValue(0);
+    const rotate = useSharedValue(0);
+    const scale = useSharedValue(1);
+
     const currentMusician = musicians[currentIndex];
 
-    // Only log if we have current musician to avoid spam
-    if (currentMusician) {
-        console.log('🚨 MATCH SCREEN RENDER:', {
-            hasCurrentMusician: !!currentMusician,
-            currentIndex,
-            musiciansLength: musicians.length,
-            username: currentMusician?.username,
-        });
-    }
-
-    // SIMPLE LOAD FUNCTION - Keep exactly as working + add data validation + FIXED error handling
-    const loadMusicians = async () => {
+    // Load initial musicians using working videoService function
+    const loadInitialMusicians = async () => {
         if (!mountedRef.current) return;
 
         try {
             setLoading(true);
             setError(null);
-            console.log('🎵 Loading musicians...');
+            console.log('Loading initial musicians...');
 
-            const newMusicians = await loadMusiciansForCards(currentUser, {
-                batchSize: 5,
-                resetData: true
-            });
+            const newMusicians = await fetchInitialMusicians(currentUser, INITIAL_BATCH_SIZE);
 
             if (!mountedRef.current) return;
 
@@ -97,49 +109,36 @@ const MatchScreen = () => {
                 return;
             }
 
-            // VALIDATE DATA TO PREVENT CACHE ISSUES
-            const validatedMusicians = newMusicians.map((musician, index) => {
-                console.log(`🔍 Validating musician ${index}:`, {
-                    username: musician.username,
-                    instrumentsType: typeof musician.instruments,
-                    instruments: musician.instruments,
-                    genresType: typeof musician.genres,
-                    genres: musician.genres,
-                });
-
-                return {
-                    ...musician,
-                    // Ensure critical fields are never objects when they should be strings
-                    username: formatField(musician.username, `musician_${index}`),
-                    bio: musician.bio, // Keep as-is, we handle in render
-                    location: musician.location, // Keep as-is, we handle in render
-                    age: musician.age, // Keep as-is, we handle in render
-                    rating: musician.rating,
-                    instruments: musician.instruments, // Keep as-is, formatInstruments handles it
-                    genres: musician.genres, // Keep as-is, formatField handles it
-                    videos: musician.videos || [],
-                };
-            });
+            // Transform musicians for card format
+            const transformedMusicians = newMusicians.map((musician, index) => ({
+                ...musician,
+                id: musician.id || `musician-${index}-${Date.now()}`,
+                username: musician.username || `user_${index}`,
+                videos: musician.videos || [],
+                bio: musician.bio || 'Music enthusiast looking to connect!',
+                location: musician.location || 'Unknown',
+                age: musician.age || null,
+                rating: musician.rating || null,
+                instruments: musician.instruments || 'Guitar',
+                genres: musician.genres || 'Music',
+                currentVideoIndex: 0,
+                cardPosition: index,
+                loadedAt: Date.now(),
+            }));
 
             if (mountedRef.current) {
-                setMusicians(validatedMusicians);
+                setMusicians(transformedMusicians);
+                setPreloadedMusicians(transformedMusicians);
                 setCurrentIndex(0);
                 setCurrentVideoIndex(0);
 
-                console.log(`✅ Loaded ${validatedMusicians.length} musicians:`, validatedMusicians.map(m => ({
-                    username: m.username,
-                    hasAge: !!m.age,
-                    hasBio: !!m.bio,
-                    hasRating: !!m.rating,
-                    instrumentsType: typeof m.instruments,
-                })));
+                console.log(`Successfully loaded ${transformedMusicians.length} musicians`);
             }
 
         } catch (error) {
-            console.error('❌ Error loading musicians:', error);
+            console.error('Error loading musicians:', error);
             if (mountedRef.current) {
-                // FIXED: Use centralized error handling
-                setError(handleError(error, 'MatchScreen/loadMusicians') || ERROR_MESSAGES.NETWORK.LOAD_FAILED);
+                setError(handleError(error, 'MatchScreen/loadInitialMusicians') || ERROR_MESSAGES.NETWORK.LOAD_FAILED);
             }
         } finally {
             if (mountedRef.current) {
@@ -148,85 +147,244 @@ const MatchScreen = () => {
         }
     };
 
-    // FIXED: Enhanced mount tracking and cleanup
+    // Load additional musicians using working videoService function
+    const loadAdditionalMusicians = async () => {
+        if (isPreloading || !mountedRef.current) {
+            console.log('Preload skipped - already loading or component unmounted');
+            return;
+        }
+        
+        try {
+            setIsPreloading(true);
+            console.log('Loading additional musicians...');
+            
+            const moreMusicians = await loadMusicianWithoutFilters(currentUser, LOAD_MORE_BATCH_SIZE);
+            
+            console.log('Received additional musicians:', {
+                count: moreMusicians?.length || 0,
+                usernames: moreMusicians?.map(m => m.username) || []
+            });
+            
+            if (moreMusicians && moreMusicians.length > 0 && mountedRef.current) {
+                // Transform additional musicians
+                const transformedMusicians = moreMusicians.map((musician, index) => ({
+                    ...musician,
+                    id: musician.id || `musician-more-${musicians.length + index}-${Date.now()}`,
+                    username: musician.username || `user_more_${index}`,
+                    videos: musician.videos || [],
+                    bio: musician.bio || 'Music enthusiast looking to connect!',
+                    location: musician.location || 'Unknown',
+                    age: musician.age || null,
+                    rating: musician.rating || null,
+                    instruments: musician.instruments || 'Guitar',
+                    genres: musician.genres || 'Music',
+                    currentVideoIndex: 0,
+                    cardPosition: musicians.length + index,
+                    loadedAt: Date.now(),
+                }));
+                
+                // Update state with new musicians
+                setMusicians(prevMusicians => {
+                    const newList = [...prevMusicians, ...transformedMusicians];
+                    console.log('Updated musicians list:', {
+                        previousCount: prevMusicians.length,
+                        newCount: newList.length,
+                        addedCount: transformedMusicians.length
+                    });
+                    return newList;
+                });
+                
+                setPreloadedMusicians(prev => [...prev, ...transformedMusicians]);
+                console.log(`Successfully loaded ${transformedMusicians.length} additional musicians`);
+            } else {
+                console.log('No additional musicians received');
+            }
+        } catch (error) {
+            console.error('Error loading additional musicians:', error);
+        } finally {
+            if (mountedRef.current) {
+                setIsPreloading(false);
+            }
+        }
+    };
+
+    // Component mount and cleanup
     useEffect(() => {
         mountedRef.current = true;
-        loadMusicians();
-    }, []);
+        loadInitialMusicians();
 
-    // FIXED: Enhanced cleanup with proper mount checking
-    useEffect(() => {
         return () => {
             mountedRef.current = false;
 
-            // Clean up video when leaving screen
+            // Clear stability timeout
+            if (stabilityTimeoutRef.current) {
+                clearTimeout(stabilityTimeoutRef.current);
+                stabilityTimeoutRef.current = null;
+            }
+
+            // Reset video service state
+            try {
+                resetVideoState();
+                forceResetHasMoreVideos();
+                console.log('Video service state reset');
+            } catch (resetError) {
+                console.warn('Video service reset error:', resetError);
+            }
+
+            // Clean up video
             if (videoRef.current) {
                 try {
                     videoRef.current.pauseAsync?.();
                     videoRef.current.unloadAsync?.();
                 } catch (cleanupError) {
-                    console.warn('⚠️ Video cleanup error:', cleanupError);
+                    console.warn('Video cleanup error:', cleanupError);
                 }
                 videoRef.current = null;
             }
 
-            // Clear musicians data to free memory
+            // Clear state
             setMusicians([]);
             setCurrentIndex(0);
             setCurrentVideoIndex(0);
 
-            console.log('✅ MatchScreen cleanup complete');
+            console.log('MatchScreen cleanup complete');
         };
     }, []);
 
-    // FIXED: Enhanced focus handling
+    // Preload trigger with stability timeout
+    useEffect(() => {
+        if (stabilityTimeoutRef.current) {
+            clearTimeout(stabilityTimeoutRef.current);
+        }
+
+        stabilityTimeoutRef.current = setTimeout(() => {
+            if (mountedRef.current) {
+                const remainingCards = musicians.length - currentIndex;
+                
+                if (remainingCards <= 4 && !isPreloading && musicians.length > 0 && currentIndex >= 0) {
+                    console.log('Triggering preload for additional musicians');
+                    loadAdditionalMusicians();
+                }
+            }
+        }, 300);
+
+        return () => {
+            if (stabilityTimeoutRef.current) {
+                clearTimeout(stabilityTimeoutRef.current);
+            }
+        };
+    }, [currentIndex, musicians.length, isPreloading]);
+
+    // Focus handling for video playback
     useEffect(() => {
         if (!isFocused && videoRef.current) {
-            // Pause video when screen loses focus
             try {
                 videoRef.current.pauseAsync?.();
             } catch (pauseError) {
-                console.warn('⚠️ Video pause error:', pauseError);
+                console.warn('Video pause error:', pauseError);
             }
         }
     }, [isFocused]);
 
+    // Reset animations when card changes
+    useEffect(() => {
+        translateX.value = withTiming(0, { duration: 100 });
+        translateY.value = withTiming(0, { duration: 100 });
+        rotate.value = withTiming(0, { duration: 100 });
+        scale.value = withTiming(1, { duration: 100 });
+    }, [currentIndex]);
+
+    // Navigation functions
+    const moveToNextMusician = useCallback(() => {
+        if (!mountedRef.current || isSwipeInProgress) return;
+
+        console.log('Moving to next musician...', {
+            currentIndex,
+            musiciansLength: musicians.length,
+            hasNext: currentIndex < musicians.length - 1
+        });
+
+        if (currentIndex < musicians.length - 1) {
+            // Move to next existing musician
+            const nextIndex = currentIndex + 1;
+            setCurrentIndex(nextIndex);
+            setCurrentVideoIndex(0);
+            setPaused(false);
+            
+            console.log(`Moved to index ${nextIndex}`);
+            
+            setTimeout(() => {
+                if (mountedRef.current) {
+                    setIsSwipeInProgress(false);
+                }
+            }, MIN_SWIPE_DELAY);
+            
+        } else {
+            // Load more musicians
+            console.log('Loading more musicians...');
+            setIsSwipeInProgress(true);
+            
+            if (!isPreloading) {
+                loadAdditionalMusicians().then(() => {
+                    setTimeout(() => {
+                        if (mountedRef.current) {
+                            setMusicians(currentMusicians => {
+                                if (currentMusicians.length > currentIndex + 1) {
+                                    const nextIndex = currentIndex + 1;
+                                    setCurrentIndex(nextIndex);
+                                    setCurrentVideoIndex(0);
+                                    setPaused(false);
+                                    console.log(`Moved to index ${nextIndex} after loading`);
+                                } else {
+                                    console.log('No more musicians available');
+                                    setError('No more musicians available. Try adjusting your filters!');
+                                }
+                                return currentMusicians;
+                            });
+                        }
+                    }, 200);
+                }).catch((error) => {
+                    console.error('Failed to load more musicians:', error);
+                    if (mountedRef.current) {
+                        setError('Failed to load more musicians. Please try again.');
+                    }
+                }).finally(() => {
+                    setTimeout(() => {
+                        if (mountedRef.current) {
+                            setIsSwipeInProgress(false);
+                        }
+                    }, MIN_SWIPE_DELAY);
+                });
+            }
+        }
+    }, [currentIndex, musicians.length, isSwipeInProgress, isPreloading]);
+
+    // Swipe handlers
     const handleSwipeLeft = () => {
-        console.log('❌ Swiped LEFT on:', currentMusician?.username);
-        moveToNext();
+        if (isSwipeInProgress || !mountedRef.current) return;
+        console.log('Swiped LEFT on:', currentMusician?.username);
+        setIsSwipeInProgress(true);
+        moveToNextMusician();
     };
 
     const handleSwipeRight = () => {
-        console.log('💕 Swiped RIGHT on:', currentMusician?.username);
-        moveToNext();
+        if (isSwipeInProgress || !mountedRef.current) return;
+        console.log('Swiped RIGHT on:', currentMusician?.username);
+        setIsSwipeInProgress(true);
+        moveToNextMusician();
     };
 
-    const moveToNext = () => {
-        if (!mountedRef.current) return;
-
-        console.log('➡️ Moving to next musician...');
-
-        if (currentIndex < musicians.length - 1) {
-            setCurrentIndex(prev => prev + 1);
-            setCurrentVideoIndex(0);
-            setPaused(false);
-            console.log(`✅ Moved to index ${currentIndex + 1}`);
-        } else {
-            console.log('🔄 No more musicians, reloading...');
-            loadMusicians();
-        }
-    };
-
+    // Video controls
     const toggleVideoPlayback = () => {
         if (!mountedRef.current) return;
+        console.log('Toggle video playback:', !paused ? 'PAUSE' : 'PLAY');
         setPaused(!paused);
     };
 
-    // SIMPLE VIDEO NAVIGATION - Keep exactly as working
-    const handleVideoTap = (side) => {
+    const handleVideoNavigation = (direction) => {
         if (!currentMusician?.videos || currentMusician.videos.length <= 1 || !mountedRef.current) return;
 
-        if (side === 'left') {
+        if (direction === 'left') {
             setCurrentVideoIndex(prev =>
                 prev > 0 ? prev - 1 : currentMusician.videos.length - 1
             );
@@ -236,34 +394,94 @@ const MatchScreen = () => {
             );
         }
 
-        console.log(`🎥 Video ${side} -> ${currentVideoIndex + 1}/${currentMusician.videos.length}`);
+        console.log(`Video ${direction} -> ${currentVideoIndex + 1}/${currentMusician.videos.length}`);
     };
 
-    // HELPER: Format instruments safely - Handle ALL data formats
+    // Gesture handler for swipe animations
+    const gestureHandler = useAnimatedGestureHandler({
+        onStart: () => {
+            scale.value = withSpring(0.95, { damping: 15, stiffness: 300 });
+        },
+        onActive: (event) => {
+            translateX.value = event.translationX;
+            translateY.value = event.translationY;
+            
+            const rotation = interpolate(
+                event.translationX,
+                [-width, width],
+                [-20, 20]
+            );
+            rotate.value = rotation;
+        },
+        onEnd: (event) => {
+            'worklet';
+            const isSwipeRight = event.translationX > SWIPE_THRESHOLD;
+            const isSwipeLeft = event.translationX < -SWIPE_THRESHOLD;
+            
+            if (isSwipeRight || isSwipeLeft) {
+                translateX.value = withSpring(
+                    isSwipeRight ? width * 1.8 : -width * 1.8,
+                    { damping: 25, stiffness: 300 }
+                );
+                translateY.value = withSpring(
+                    event.translationY + (isSwipeRight ? -80 : 80),
+                    { damping: 25, stiffness: 300 }
+                );
+                
+                if (isSwipeRight) {
+                    runOnJS(handleSwipeRight)();
+                } else {
+                    runOnJS(handleSwipeLeft)();
+                }
+                
+            } else {
+                translateX.value = withSpring(0, { damping: 20, stiffness: 400 });
+                translateY.value = withSpring(0, { damping: 20, stiffness: 400 });
+                rotate.value = withSpring(0, { damping: 20, stiffness: 400 });
+                scale.value = withSpring(1, { damping: 20, stiffness: 400 });
+            }
+        },
+    });
+
+    const animatedCardStyle = useAnimatedStyle(() => {
+        return {
+            transform: [
+                { translateX: translateX.value },
+                { translateY: translateY.value },
+                { rotate: `${rotate.value}deg` },
+                { scale: scale.value },
+            ],
+        };
+    });
+
+    // Utility functions
+    const getTotalVideoCount = () => {
+        if (!currentMusician?.videos || !Array.isArray(currentMusician.videos)) {
+            return 0;
+        }
+        return currentMusician.videos.length;
+    };
+
     const formatInstruments = (musician) => {
         if (!musician?.instruments) return 'Guitar, Acoustic Guitar';
 
         const instruments = musician.instruments;
 
-        // Handle object like {Trumpet: true, "Lead Vocals": true}
         if (typeof instruments === 'object' && !Array.isArray(instruments) && instruments !== null) {
             const keys = Object.keys(instruments);
             if (keys.length === 0) return 'No instruments listed';
             return keys.join(', ');
         }
 
-        // Handle array
         if (Array.isArray(instruments)) {
             if (instruments.length === 0) return 'No instruments listed';
             return instruments.join(', ');
         }
 
-        // Handle string or convert to string
         const stringValue = String(instruments).trim();
         return stringValue || 'No instruments listed';
     };
 
-    // HELPER: Format any field safely to prevent object rendering
     const formatField = (value, defaultValue = 'Not specified') => {
         if (!value) return defaultValue;
 
@@ -280,7 +498,6 @@ const MatchScreen = () => {
         return stringValue || defaultValue;
     };
 
-    // HELPER: Render star rating
     const renderStarRating = (rating) => {
         if (!rating) return null;
 
@@ -294,11 +511,11 @@ const MatchScreen = () => {
             <View style={styles.starsContainer}>
                 {[...Array(5)].map((_, i) => {
                     if (i < fullStars) {
-                        return <FontAwesome key={i} name="star" size={16} color="#FFD700" />;
+                        return <FontAwesome key={`star-${i}`} name="star" size={16} color="#FFD700" />;
                     } else if (i === fullStars && hasHalfStar) {
-                        return <FontAwesome key={i} name="star-half-o" size={16} color="#FFD700" />;
+                        return <FontAwesome key={`star-${i}`} name="star-half-o" size={16} color="#FFD700" />;
                     } else {
-                        return <FontAwesome key={i} name="star-o" size={16} color="#DDD" />;
+                        return <FontAwesome key={`star-${i}`} name="star-o" size={16} color="#DDD" />;
                     }
                 })}
                 <Text style={styles.ratingText}>{numRating.toFixed(1)}</Text>
@@ -306,7 +523,7 @@ const MatchScreen = () => {
         );
     };
 
-    // ENHANCED PROFILE SECTION with Phase 2 styling
+    // Render functions
     const renderProfileSection = (musician = currentMusician, isActive = true) => {
         if (!musician) {
             return (
@@ -319,13 +536,6 @@ const MatchScreen = () => {
             );
         }
 
-        console.log('🎨 RENDERING PROFILE FOR:', formatField(musician.username, 'Unknown'), {
-            age: musician.age,
-            bio: musician.bio,
-            rating: musician.rating,
-            instruments: musician.instruments
-        });
-
         return (
             <View style={styles.profileSection}>
                 <ScrollView
@@ -333,9 +543,8 @@ const MatchScreen = () => {
                     contentContainerStyle={styles.profileContent}
                     showsVerticalScrollIndicator={false}
                     bounces={true}
-                    scrollEnabled={isActive} // Only scroll on active card
+                    scrollEnabled={isActive}
                 >
-                    {/* HEADER: USERNAME + AGE */}
                     <View style={styles.profileHeader}>
                         <View style={styles.usernameRow}>
                             <Icon name="person-circle" size={24} color={COLORS?.static?.background || '#ff6ec4'} />
@@ -347,11 +556,9 @@ const MatchScreen = () => {
                             )}
                         </View>
 
-                        {/* RATING */}
                         {musician.rating && renderStarRating(musician.rating)}
                     </View>
 
-                    {/* BIO SECTION */}
                     {musician.bio && (
                         <View style={styles.infoCard}>
                             <View style={styles.infoHeader}>
@@ -362,7 +569,6 @@ const MatchScreen = () => {
                         </View>
                     )}
 
-                    {/* INSTRUMENTS SECTION */}
                     <View style={styles.infoCard}>
                         <View style={styles.infoHeader}>
                             <Icon name="musical-notes" size={20} color={COLORS?.static?.background || '#ff6ec4'} />
@@ -371,7 +577,6 @@ const MatchScreen = () => {
                         <Text style={styles.infoText}>{formatInstruments(musician)}</Text>
                     </View>
 
-                    {/* LOCATION SECTION */}
                     {musician.location && (
                         <View style={styles.infoCard}>
                             <View style={styles.infoHeader}>
@@ -382,44 +587,20 @@ const MatchScreen = () => {
                         </View>
                     )}
 
-                    {/* RATING SECTION if not already shown */}
-                    {!musician.rating && (
-                        <View style={styles.infoCard}>
-                            <View style={styles.infoHeader}>
-                                <Icon name="star" size={20} color={COLORS?.static?.background || '#ff6ec4'} />
-                                <Text style={styles.infoLabel}>Rating</Text>
-                            </View>
-                            <Text style={styles.infoText}>No rating yet</Text>
-                        </View>
-                    )}
-
-                    {/* SCROLL PADDING */}
                     <View style={styles.scrollPadding} />
                 </ScrollView>
 
-                {/* SWIPE BUTTONS - Only show on active card */}
                 {isActive && (
-                    <View style={styles.buttonRow}>
-                        <TouchableOpacity style={styles.passButton} onPress={handleSwipeLeft}>
-                            <Icon name="close" size={24} color="#fff" />
-                        </TouchableOpacity>
-                        <TouchableOpacity style={styles.likeButton} onPress={handleSwipeRight}>
-                            <LinearGradient
-                                colors={COLORS?.primaryGradient || ['#ff6ec4', '#ffc93c', '#1c92d2']}
-                                start={{ x: 0, y: 0 }}
-                                end={{ x: 1, y: 1 }}
-                                style={styles.likeGradient}
-                            >
-                                <Icon name="heart" size={24} color="#fff" />
-                            </LinearGradient>
-                        </TouchableOpacity>
+                    <View style={styles.swipeInstructions}>
+                        <Text style={styles.swipeInstructionsText}>
+                            ← Swipe left to pass • Swipe right to like →
+                        </Text>
                     </View>
                 )}
             </View>
         );
     };
 
-    // ENHANCED VIDEO CONTAINER with Phase 2 styling
     const renderVideoContainer = (musician = currentMusician, videoIndex = currentVideoIndex, isActive = true) => {
         const videoUrl = musician?.videos?.[videoIndex];
 
@@ -437,7 +618,6 @@ const MatchScreen = () => {
                             isMuted={false}
                         />
 
-                        {/* VIDEO OVERLAY GRADIENT */}
                         <LinearGradient
                             colors={['transparent', 'rgba(0,0,0,0.3)']}
                             style={styles.videoOverlay}
@@ -451,12 +631,11 @@ const MatchScreen = () => {
                     </View>
                 )}
 
-                {/* VIDEO TAP ZONES - Only on active card */}
                 {isActive && musician?.videos && musician.videos.length > 1 && (
                     <>
                         <TouchableOpacity
                             style={styles.leftTapZone}
-                            onPress={() => handleVideoTap('left')}
+                            onPress={() => handleVideoNavigation('left')}
                         >
                             <View style={styles.tapIndicator}>
                                 <Icon name="chevron-back" size={24} color="rgba(255,255,255,0.8)" />
@@ -464,7 +643,7 @@ const MatchScreen = () => {
                         </TouchableOpacity>
                         <TouchableOpacity
                             style={styles.rightTapZone}
-                            onPress={() => handleVideoTap('right')}
+                            onPress={() => handleVideoNavigation('right')}
                         >
                             <View style={styles.tapIndicator}>
                                 <Icon name="chevron-forward" size={24} color="rgba(255,255,255,0.8)" />
@@ -473,7 +652,6 @@ const MatchScreen = () => {
                     </>
                 )}
 
-                {/* PLAY/PAUSE - Only on active card */}
                 {isActive && (
                     <TouchableOpacity
                         style={styles.centerTapZone}
@@ -487,7 +665,6 @@ const MatchScreen = () => {
                     </TouchableOpacity>
                 )}
 
-                {/* VIDEO COUNTER - Only on active card */}
                 {isActive && musician?.videos && musician.videos.length > 1 && (
                     <View style={styles.videoCounter}>
                         <Text style={styles.videoCounterText}>
@@ -499,25 +676,61 @@ const MatchScreen = () => {
         );
     };
 
-    // PHASE 3: RENDER SINGLE CARD with better stacking visibility
     const renderCard = (musician, index, isActive = false) => {
         if (!musician) return null;
 
         const cardIndex = index - currentIndex;
         const scale = 1 - (cardIndex * CARD_SCALE_OFFSET);
         const translateY = cardIndex * CARD_Y_OFFSET;
-        const translateX = cardIndex * CARD_X_OFFSET + 30; // Add horizontal offset
-        const opacity = cardIndex === 0 ? 1 : 0.6; // More contrast between cards
+        const translateX = cardIndex === 0 ? 0 : cardIndex * CARD_X_OFFSET;
+        const opacity = cardIndex === 0 ? 1 : Math.max(0.75, 1 - (cardIndex * 0.1));
+
+        const uniqueKey = `card-${musician.username}-${index}-${cardIndex}`;
+
+        if (isActive) {
+            return (
+                <PanGestureHandler 
+                    key={uniqueKey}
+                    onGestureEvent={gestureHandler}
+                    minPointers={1}
+                    maxPointers={1}
+                >
+                    <Animated.View
+                        style={[
+                            styles.card,
+                            {
+                                position: 'absolute',
+                                top: 0,
+                                left: '50%',
+                                marginLeft: -CARD_WIDTH / 2,
+                                transform: [
+                                    { scale },
+                                    { translateY },
+                                    { translateX },
+                                ],
+                                opacity,
+                                zIndex: DECK_SIZE - cardIndex,
+                            },
+                            animatedCardStyle,
+                        ]}
+                    >
+                        {renderVideoContainer(musician, currentVideoIndex, true)}
+                        {renderProfileSection(musician, true)}
+                    </Animated.View>
+                </PanGestureHandler>
+            );
+        }
 
         return (
             <View
-                key={`${musician.username}-${index}-${cardIndex}`}
+                key={uniqueKey}
                 style={[
                     styles.card,
                     {
                         position: 'absolute',
                         top: 0,
-                        left: 0,
+                        left: '50%',
+                        marginLeft: -CARD_WIDTH / 2,
                         transform: [
                             { scale },
                             { translateY },
@@ -527,62 +740,65 @@ const MatchScreen = () => {
                         zIndex: DECK_SIZE - cardIndex,
                     }
                 ]}
-                pointerEvents={isActive ? 'auto' : 'none'} // Only active card responds to touches
+                pointerEvents="none"
             >
-                {renderVideoContainer(musician, isActive ? currentVideoIndex : 0, isActive)}
-                {renderProfileSection(musician, isActive)}
+                {renderVideoContainer(musician, 0, false)}
+                {renderProfileSection(musician, false)}
             </View>
         );
     };
 
-    // PHASE 3: RENDER CARD DECK with debugging
     const renderCardDeck = () => {
         const visibleCards = [];
-
-        console.log('🃏 Rendering card deck:', {
-            currentIndex,
-            musiciansLength: musicians.length,
-            deckSize: DECK_SIZE
-        });
-
-        // Show current card + next cards in deck
         for (let i = 0; i < DECK_SIZE && (currentIndex + i) < musicians.length; i++) {
             const musicianIndex = currentIndex + i;
             const musician = musicians[musicianIndex];
-            const isActive = i === 0; // Only first card is active
-
-            console.log(`🃏 Card ${i}: ${musician?.username}, active: ${isActive}`);
+            const isActive = i === 0;
 
             if (musician) {
-                visibleCards.push(
-                    renderCard(musician, musicianIndex, isActive)
-                );
+                visibleCards.push(renderCard(musician, musicianIndex, isActive));
             }
         }
 
-        console.log(`🃏 Total visible cards: ${visibleCards.length}`);
         return visibleCards;
     };
 
-    // FIXED: Enhanced retry function with proper error handling
     const handleRetry = () => {
         if (!mountedRef.current) return;
 
+        console.log('Retrying with service reset...');
+        
         setError(null);
         setMusicians([]);
         setCurrentIndex(0);
         setCurrentVideoIndex(0);
-        loadMusicians();
+        setIsPreloading(false);
+        
+        try {
+            resetVideoState();
+            forceResetHasMoreVideos();
+            console.log('Video service state reset for retry');
+        } catch (resetError) {
+            console.warn('Reset error:', resetError);
+        }
+        
+        setTimeout(() => {
+            if (mountedRef.current) {
+                loadInitialMusicians();
+            }
+        }, 100);
     };
 
-    // LOADING STATE - Keep as working version but enhance styling
+    // Render states
     if (loading) {
         return (
             <View style={styles.loadingContainer}>
                 <View style={styles.loadingCard}>
                     <ActivityIndicator size="large" color="#ff6ec4" />
                     <Text style={styles.loadingText}>Loading musicians...</Text>
-                    <Text style={styles.loadingSubtext}>Discover your next musical connection</Text>
+                    <Text style={styles.loadingSubtext}>
+                        Preparing {INITIAL_BATCH_SIZE} profiles for instant browsing
+                    </Text>
                 </View>
                 <View style={[styles.bottomNavContainer, { height: LAYOUT.navHeight, bottom: insets.bottom }]}>
                     <BottomNavigation />
@@ -591,7 +807,6 @@ const MatchScreen = () => {
         );
     }
 
-    // ERROR STATE - Keep as working version but enhance styling
     if (error) {
         return (
             <View style={styles.errorContainer}>
@@ -616,7 +831,6 @@ const MatchScreen = () => {
         );
     }
 
-    // NO MUSICIANS - Keep as working version
     if (!musicians || musicians.length === 0) {
         return (
             <View style={styles.errorContainer}>
@@ -641,7 +855,6 @@ const MatchScreen = () => {
         );
     }
 
-    // NO CURRENT MUSICIAN - Keep as working version
     if (!currentMusician) {
         return (
             <View style={styles.errorContainer}>
@@ -656,18 +869,15 @@ const MatchScreen = () => {
         );
     }
 
-    // MAIN RENDER - Phase 3: Card deck instead of single card
     return (
         <View style={styles.container}>
-            {/* PHASE 3: CARD DECK */}
             <View style={styles.cardDeckContainer}>
                 {renderCardDeck()}
             </View>
 
-            {/* FLOATING COUNTER */}
             <View style={styles.floatingCounter}>
                 <Text style={styles.floatingCounterText}>
-                    {currentIndex + 1} of {musicians.length}
+                    {getTotalVideoCount() > 0 ? `${currentVideoIndex + 1} of ${getTotalVideoCount()}` : 'No videos'}
                 </Text>
             </View>
 
@@ -684,31 +894,29 @@ const styles = StyleSheet.create({
         backgroundColor: '#f8f9fa',
         justifyContent: 'center',
         alignItems: 'center',
-        paddingTop: 40, // Add top padding to see cards better
     },
-
-    // PHASE 3: CARD DECK CONTAINER - Better positioning
     cardDeckContainer: {
-        width: CARD_WIDTH + 60, // Extra space for stacked cards
-        height: CARD_HEIGHT + 60, // Extra space for stacked cards
-        justifyContent: 'flex-start',
+        width: '100%',
+        height: CARD_HEIGHT,
+        justifyContent: 'center',
         alignItems: 'center',
         position: 'relative',
+        marginBottom: LAYOUT.navHeight + 60,
     },
-
     card: {
         width: CARD_WIDTH,
         height: CARD_HEIGHT,
         backgroundColor: '#fff',
-        borderRadius: 40, // Enhanced radius
+        borderRadius: 40,
         shadowColor: '#000',
-        shadowOffset: { width: 0, height: 20 }, // Enhanced shadow
+        shadowOffset: { width: 0, height: 20 },
         shadowOpacity: 0.25,
         shadowRadius: 25,
         elevation: 25,
         overflow: 'hidden',
+        borderWidth: 1,
+        borderColor: 'rgba(0,0,0,0.05)',
     },
-
     videoContainer: {
         height: VIDEO_HEIGHT,
         position: 'relative',
@@ -717,13 +925,10 @@ const styles = StyleSheet.create({
         borderTopRightRadius: 28,
         overflow: 'hidden',
     },
-
     video: {
         width: '100%',
         height: '100%',
     },
-
-    // PHASE 2: VIDEO OVERLAY
     videoOverlay: {
         position: 'absolute',
         bottom: 0,
@@ -731,22 +936,19 @@ const styles = StyleSheet.create({
         right: 0,
         height: 60,
     },
-
     noVideoContainer: {
         width: '100%',
         height: '100%',
         justifyContent: 'center',
         alignItems: 'center',
-        backgroundColor: '#f5f5f5', // Enhanced color
+        backgroundColor: '#f5f5f5',
     },
-
     noVideoText: {
         marginTop: 10,
         fontSize: 16,
         color: '#999',
         fontWeight: '500',
     },
-
     leftTapZone: {
         position: 'absolute',
         left: 0,
@@ -757,7 +959,6 @@ const styles = StyleSheet.create({
         alignItems: 'flex-start',
         paddingLeft: 20,
     },
-
     rightTapZone: {
         position: 'absolute',
         right: 0,
@@ -768,7 +969,6 @@ const styles = StyleSheet.create({
         alignItems: 'flex-end',
         paddingRight: 20,
     },
-
     centerTapZone: {
         position: 'absolute',
         left: '30%',
@@ -778,8 +978,6 @@ const styles = StyleSheet.create({
         justifyContent: 'center',
         alignItems: 'center',
     },
-
-    // PHASE 2: ENHANCED TAP INDICATORS
     tapIndicator: {
         backgroundColor: 'rgba(0,0,0,0.4)',
         borderRadius: 20,
@@ -788,7 +986,6 @@ const styles = StyleSheet.create({
         justifyContent: 'center',
         alignItems: 'center',
     },
-
     playButton: {
         backgroundColor: 'rgba(0,0,0,0.6)',
         borderRadius: 40,
@@ -802,7 +999,6 @@ const styles = StyleSheet.create({
         shadowRadius: 8,
         elevation: 8,
     },
-
     videoCounter: {
         position: 'absolute',
         bottom: 15,
@@ -812,60 +1008,48 @@ const styles = StyleSheet.create({
         paddingVertical: 6,
         borderRadius: 20,
     },
-
     videoCounterText: {
         color: '#fff',
         fontSize: 12,
         fontWeight: '600',
     },
-
-    // PROFILE SECTION - ENHANCED WITH SCROLLING
     profileSection: {
         flex: 1,
-        backgroundColor: '#FFFFFF', // FORCE WHITE - Keep as working
+        backgroundColor: '#FFFFFF',
         position: 'relative',
     },
-
     profileScrollView: {
         flex: 1,
         paddingHorizontal: 24,
     },
-
     profileContent: {
         paddingTop: 20,
         paddingBottom: 20,
     },
-
     errorContent: {
         flex: 1,
         justifyContent: 'center',
         alignItems: 'center',
         padding: 40,
     },
-
     noDataText: {
         marginTop: 12,
         fontSize: 16,
         color: '#999',
         fontWeight: '500',
     },
-
     scrollPadding: {
-        height: 80, // Space for buttons
+        height: 80,
     },
-
-    // PHASE 2: PROFILE HEADER
     profileHeader: {
         marginBottom: 20,
     },
-
     usernameRow: {
         flexDirection: 'row',
         alignItems: 'center',
         marginBottom: 8,
         flexWrap: 'wrap',
     },
-
     username: {
         fontSize: 24,
         fontWeight: 'bold',
@@ -873,7 +1057,6 @@ const styles = StyleSheet.create({
         marginLeft: 8,
         flex: 1,
     },
-
     ageBadge: {
         backgroundColor: '#ff6ec4',
         paddingHorizontal: 12,
@@ -881,28 +1064,22 @@ const styles = StyleSheet.create({
         borderRadius: 15,
         marginLeft: 8,
     },
-
     ageText: {
         color: '#fff',
         fontSize: 14,
         fontWeight: '600',
     },
-
-    // PHASE 2: STAR RATING
     starsContainer: {
         flexDirection: 'row',
         alignItems: 'center',
         gap: 2,
     },
-
     ratingText: {
         marginLeft: 8,
         fontSize: 16,
         fontWeight: '600',
         color: '#333',
     },
-
-    // PHASE 2: INFO CARDS
     infoCard: {
         backgroundColor: '#f8f9fa',
         borderRadius: 16,
@@ -911,82 +1088,47 @@ const styles = StyleSheet.create({
         borderLeftWidth: 4,
         borderLeftColor: '#ff6ec4',
     },
-
     infoHeader: {
         flexDirection: 'row',
         alignItems: 'center',
         marginBottom: 8,
     },
-
     infoLabel: {
         fontSize: 16,
         fontWeight: '600',
         color: '#333',
         marginLeft: 8,
     },
-
     bioText: {
         fontSize: 15,
         lineHeight: 22,
         color: '#555',
         fontStyle: 'italic',
     },
-
     infoText: {
         fontSize: 15,
         lineHeight: 20,
         color: '#555',
         fontWeight: '500',
     },
-
-    buttonRow: {
-        flexDirection: 'row',
-        justifyContent: 'space-around',
-        paddingHorizontal: 20,
-        paddingVertical: 15,
+    swipeInstructions: {
         backgroundColor: '#FFFFFF',
+        paddingVertical: 12,
+        paddingHorizontal: 20,
         borderTopWidth: 1,
         borderTopColor: '#f0f0f0',
-    },
-
-    passButton: {
-        backgroundColor: '#ff4757',
-        width: 60,
-        height: 60,
-        borderRadius: 30,
-        justifyContent: 'center',
-        alignItems: 'center',
-        shadowColor: '#ff4757',
-        shadowOffset: { width: 0, height: 8 },
-        shadowOpacity: 0.3,
-        shadowRadius: 12,
-        elevation: 12,
-    },
-
-    likeButton: {
-        width: 60,
-        height: 60,
-        borderRadius: 30,
-        overflow: 'hidden',
-        shadowColor: '#ff6ec4',
-        shadowOffset: { width: 0, height: 8 },
-        shadowOpacity: 0.3,
-        shadowRadius: 12,
-        elevation: 12,
-    },
-
-    likeGradient: {
-        width: '100%',
-        height: '100%',
-        justifyContent: 'center',
         alignItems: 'center',
     },
-
-    // FLOATING COUNTER - Repositioned for smaller cards
+    swipeInstructionsText: {
+        fontSize: 12,
+        color: '#999',
+        fontWeight: '500',
+        textAlign: 'center',
+    },
     floatingCounter: {
         position: 'absolute',
-        top: 40,
-        right: 40,
+        top: 100,
+        right: 30,
         backgroundColor: 'rgba(0,0,0,0.8)',
         paddingHorizontal: 14,
         paddingVertical: 8,
@@ -998,21 +1140,17 @@ const styles = StyleSheet.create({
         shadowRadius: 4,
         elevation: 5,
     },
-
     floatingCounterText: {
         color: '#fff',
         fontSize: 12,
         fontWeight: '600',
     },
-
-    // LOADING STATES
     loadingContainer: {
         flex: 1,
         justifyContent: 'center',
         alignItems: 'center',
         backgroundColor: '#f8f9fa',
     },
-
     loadingCard: {
         backgroundColor: '#fff',
         padding: 40,
@@ -1025,29 +1163,24 @@ const styles = StyleSheet.create({
         elevation: 10,
         minWidth: 200,
     },
-
     loadingText: {
         marginTop: 16,
         fontSize: 18,
         fontWeight: '600',
         color: '#333',
     },
-
     loadingSubtext: {
         marginTop: 6,
         fontSize: 14,
         color: '#999',
         textAlign: 'center',
     },
-
-    // ERROR STATES
     errorContainer: {
         flex: 1,
         justifyContent: 'center',
         alignItems: 'center',
         backgroundColor: '#f8f9fa',
     },
-
     errorCard: {
         backgroundColor: '#fff',
         padding: 40,
@@ -1060,7 +1193,6 @@ const styles = StyleSheet.create({
         elevation: 10,
         minWidth: 250,
     },
-
     errorText: {
         fontSize: 18,
         fontWeight: '600',
@@ -1069,7 +1201,6 @@ const styles = StyleSheet.create({
         marginTop: 16,
         marginBottom: 8,
     },
-
     retryButton: {
         borderRadius: 25,
         overflow: 'hidden',
@@ -1079,18 +1210,15 @@ const styles = StyleSheet.create({
         shadowRadius: 10,
         elevation: 8,
     },
-
     retryGradient: {
         paddingHorizontal: 32,
         paddingVertical: 14,
     },
-
     retryButtonText: {
         color: '#fff',
         fontSize: 16,
         fontWeight: 'bold',
     },
-
     bottomNavContainer: {
         position: 'absolute',
         left: 0,
