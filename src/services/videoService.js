@@ -838,7 +838,7 @@ export const fetchInitialMusiciansForMatch = async (currentUser, limit = 5) => {
     try {
         console.log('🎵 Fetching initial musicians for MATCH SCREEN...');
 
-        const url = `${MATCH_API_URL}?type=initial`;
+        const url = `${MATCH_API_URL}?type=initial&currentUser=${encodeURIComponent(currentUser)}&limit=${limit}`;
         console.log('🎵 GET request to MATCH API:', url);
 
         const response = await axios.get(url);

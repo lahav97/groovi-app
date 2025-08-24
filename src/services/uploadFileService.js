@@ -6,14 +6,17 @@
 
 import * as FileSystem from 'expo-file-system';
 import axios from 'axios';
-import { 
-  validateVideoFile, 
-  processVideoAsset, 
-  processBatchVideos, 
+import {
+  validateVideoFile,
+  processVideoAsset,
+  processBatchVideos,
   generateVideoThumbnail,
-  createVideoKey 
+  createVideoKey
 } from './videoService';
 import { handleError } from '../utils/errors';
+import Logger from '../utils/Logger';
+
+const logger = Logger.createLogger('UploadFileService');
 
 /**
  * Configuration for upload endpoints
@@ -29,7 +32,7 @@ const UPLOAD_CONFIG = {
 
 /**
  * @class UploadFileService
- * Handles file uploads with user context and progress tracking
+ * Handles file uploads with user context and progress atracking
  */
 class UploadFileService {
   constructor(user) {
@@ -76,7 +79,7 @@ class UploadFileService {
         fileInfo: { sizeBytes, sizeMB }
       };
     } catch (error) {
-      console.error('❌ Error validating image file:', handleError(error, 'UploadFileService/validateImageFile'));
+      logger.error('Error validating image file:', handleError(error, 'UploadFileService/validateImageFile'));
       return {
         success: false,
         error: handleError(error, 'UploadFileService/validateImageFile') || 'Failed to validate image file.'
@@ -90,10 +93,10 @@ class UploadFileService {
    */
   generateFileName(originalFileName, fileType = 'video', index = null) {
     const userIdentifier = this.getUserIdentifier();
-    const fileExtension = originalFileName ? 
-      originalFileName.split('.').pop() : 
+    const fileExtension = originalFileName ?
+      originalFileName.split('.').pop() :
       (fileType === 'video' ? 'mp4' : 'jpg');
-    
+
     const indexSuffix = index !== null ? `_${index + 1}` : `_${++this.uploadCounter}`;
     return `${userIdentifier}${indexSuffix}.${fileExtension}`;
   }
@@ -112,29 +115,29 @@ class UploadFileService {
    */
   async uploadToLambda(fileData, index, onProgress = null, options = {}) {
     const { maxRetries = UPLOAD_CONFIG.MAX_RETRIES, retryDelay = UPLOAD_CONFIG.RETRY_DELAY_MS } = options;
-    
+
     for (let attempt = 1; attempt <= maxRetries; attempt++) {
       try {
-        console.log(`🚀 Upload attempt ${attempt}/${maxRetries} for file ${index + 1}`);
+        logger.info(`Upload attempt ${attempt}/${maxRetries} for file ${index + 1}`);
 
         const customFileName = this.generateFileName(fileData.fileName, 'video', index);
-        console.log(`📁 Using filename: ${customFileName}`);
+        logger.info(`Using filename: ${customFileName}`);
 
         // Create the upload promise
         const uploadResult = await new Promise((resolve, reject) => {
           const xhr = new XMLHttpRequest();
-          
+
           xhr.open('PUT', UPLOAD_CONFIG.VIDEO_UPLOAD_URL);
           xhr.setRequestHeader('file-name', customFileName);
           xhr.setRequestHeader('Content-Type', fileData.mimeType || 'video/mp4');
-          
+
           // Track upload progress
           xhr.upload.onprogress = (event) => {
             if (event.lengthComputable && onProgress) {
               const progress = Math.round((event.loaded / event.total) * 100);
-              onProgress({ 
-                progress, 
-                loaded: event.loaded, 
+              onProgress({
+                progress,
+                loaded: event.loaded,
                 total: event.total,
                 stage: 'uploading',
                 attempt,
@@ -142,15 +145,15 @@ class UploadFileService {
               });
             }
           };
-          
+
           xhr.onload = () => {
             if (xhr.status >= 200 && xhr.status < 300) {
-              console.log(`✅ File ${index + 1} uploaded successfully on attempt ${attempt}!`);
-              
+              logger.info(`File ${index + 1} uploaded successfully on attempt ${attempt}!`);
+
               try {
                 const response = JSON.parse(xhr.responseText);
                 const fileUrl = response.url || `${UPLOAD_CONFIG.S3_BUCKET_BASE_URL}${customFileName}`;
-                
+
                 resolve({
                   success: true,
                   url: fileUrl,
@@ -170,11 +173,11 @@ class UploadFileService {
               reject(new Error(`Upload failed with status ${xhr.status}`));
             }
           };
-          
+
           xhr.onerror = () => {
             reject(new Error('Network error during upload'));
           };
-          
+
           // Get the blob from the URI and send it
           fetch(fileData.uri)
             .then(res => res.blob())
@@ -185,15 +188,15 @@ class UploadFileService {
         return uploadResult;
 
       } catch (error) {
-        console.error(`❌ Upload attempt ${attempt} failed:`, handleError(error, 'UploadFileService/uploadToLambda'));
-        
+        logger.error(`Upload attempt ${attempt} failed:`, handleError(error, 'UploadFileService/uploadToLambda'));
+
         if (attempt === maxRetries) {
           return {
             success: false,
             error: handleError(error, 'UploadFileService/uploadToLambda') || error.message || 'Upload failed after all retry attempts'
           };
         }
-        
+
         if (attempt < maxRetries) {
           await this.sleep(retryDelay * attempt);
         }
@@ -208,12 +211,12 @@ class UploadFileService {
   async uploadVideo(videoAsset, existingKeys = new Set(), index = null, onProgress = null, options = {}) {
     try {
       this.isUploading = true;
-      
+
       if (onProgress) onProgress({ stage: 'processing', progress: 0, index });
 
       // Process video using videoService
       const processResult = await processVideoAsset(videoAsset, existingKeys, options);
-      
+
       if (!processResult.success) {
         throw new Error(processResult.error);
       }
@@ -222,24 +225,24 @@ class UploadFileService {
 
       // Upload the processed video
       const uploadResult = await this.uploadToLambda(
-        processResult.videoData, 
-        index || 0, 
+        processResult.videoData,
+        index || 0,
         (uploadProgress) => {
           if (onProgress) {
             const scaledProgress = 30 + (uploadProgress.progress * 0.7);
-            onProgress({ 
-              stage: 'uploading', 
-              progress: Math.round(scaledProgress), 
+            onProgress({
+              stage: 'uploading',
+              progress: Math.round(scaledProgress),
               index
             });
           }
-        }, 
+        },
         options
       );
 
       if (uploadResult.success) {
         if (onProgress) onProgress({ stage: 'complete', progress: 100, index });
-        
+
         return {
           success: true,
           videoUrl: uploadResult.url,
@@ -252,7 +255,7 @@ class UploadFileService {
       }
 
     } catch (error) {
-      console.error(`❌ Error uploading video:`, handleError(error, 'UploadFileService/uploadVideo'));
+      logger.error(`Error uploading video:`, handleError(error, 'UploadFileService/uploadVideo'));
       if (onProgress) onProgress({ stage: 'error', progress: 0, index, error: handleError(error, 'UploadFileService/uploadVideo') });
       return {
         success: false,
@@ -269,13 +272,13 @@ class UploadFileService {
    */
   async uploadMultipleVideos(videoAssets, existingKeys = new Set(), onProgress = null, onSingleComplete = null, options = {}) {
     try {
-      console.log(`🚀 Starting batch upload of ${videoAssets.length} videos...`);
+      logger.info(`Starting batch upload of ${videoAssets.length} videos...`);
       this.isUploading = true;
 
       // First, process all videos using videoService
       const batchProcessResult = await processBatchVideos(
-        videoAssets, 
-        existingKeys, 
+        videoAssets,
+        existingKeys,
         options,
         (progressData) => {
           if (onProgress) {
@@ -301,7 +304,7 @@ class UploadFileService {
       // Upload each processed video
       for (let i = 0; i < processedVideos.length; i++) {
         const videoData = processedVideos[i];
-        
+
         if (onProgress) {
           onProgress({
             stage: 'uploading',
@@ -312,8 +315,8 @@ class UploadFileService {
         }
 
         const uploadResult = await this.uploadToLambda(
-          videoData, 
-          i, 
+          videoData,
+          i,
           (uploadProgress) => {
             if (onProgress) {
               const baseProgress = 30 + Math.round((i / processedVideos.length) * 70);
@@ -328,9 +331,9 @@ class UploadFileService {
           },
           options
         );
-        
+
         uploadResults.push(uploadResult);
-        
+
         if (uploadResult.success) {
           uploadedUrls.push(uploadResult.url);
           successCount++;
@@ -343,7 +346,7 @@ class UploadFileService {
         }
       }
 
-      console.log(`🏁 Batch upload complete! ${successCount}/${processedVideos.length} videos uploaded`);
+      logger.info(`Batch upload complete! ${successCount}/${processedVideos.length} videos uploaded`);
 
       return {
         success: successCount > 0,
@@ -362,7 +365,7 @@ class UploadFileService {
       };
 
     } catch (error) {
-      console.error('💥 Batch upload process failed:', handleError(error, 'UploadFileService/uploadMultipleVideos'));
+      logger.error('Batch upload process failed:', handleError(error, 'UploadFileService/uploadMultipleVideos'));
       return {
         success: false,
         error: handleError(error, 'UploadFileService/uploadMultipleVideos') || 'Batch upload failed',
@@ -387,7 +390,7 @@ class UploadFileService {
   async uploadImage(imageAsset, imageType = 'profile', onProgress = null) {
     try {
       this.isUploading = true;
-      
+
       if (onProgress) onProgress({ stage: 'validating', progress: 0 });
 
       // Validate image file
@@ -411,7 +414,7 @@ class UploadFileService {
 
       if (uploadResult.success) {
         if (onProgress) onProgress({ stage: 'complete', progress: 100 });
-        
+
         return {
           success: true,
           imageUrl: uploadResult.url,
@@ -422,7 +425,7 @@ class UploadFileService {
       }
 
     } catch (error) {
-      console.error(`❌ Error uploading image:`, handleError(error, 'UploadFileService/uploadImage'));
+      logger.error(`Error uploading image:`, handleError(error, 'UploadFileService/uploadImage'));
       if (onProgress) onProgress({ stage: 'error', progress: 0, error: handleError(error, 'UploadFileService/uploadImage') });
       return {
         success: false,
@@ -439,13 +442,13 @@ class UploadFileService {
    */
   async deleteFile(fileName) {
     try {
-      console.log(`🗑️ Deleting file from S3: ${fileName}`);
-      
+      logger.info(`Deleting file from S3: ${fileName}`);
+
       const deleteUrl = `${UPLOAD_CONFIG.VIDEO_DELETE_URL}?filename=${encodeURIComponent(fileName)}`;
       const response = await axios.delete(deleteUrl);
 
       if (response.status === 200) {
-        console.log(`✅ File ${fileName} deleted successfully from S3`);
+        logger.info(`File ${fileName} deleted successfully from S3`);
         return {
           success: true,
           message: `File ${fileName} deleted successfully`
@@ -457,7 +460,7 @@ class UploadFileService {
         };
       }
     } catch (error) {
-      console.error(`❌ Error deleting file ${fileName}:`, handleError(error, 'UploadFileService/deleteFile'));
+      logger.error(`Error deleting file ${fileName}:`, handleError(error, 'UploadFileService/deleteFile'));
       return {
         success: false,
         error: handleError(error, 'UploadFileService/deleteFile') || error.response?.data?.message || error.message || 'Failed to delete file'
@@ -500,26 +503,4 @@ class UploadFileService {
   }
 }
 
-/**
- * Export factory function to create service instance
- */
-export const createUploadService = (user) => {
-  return new UploadFileService(user);
-};
-
-/**
- * Export singleton instance for global use
- */
-let globalUploadService = null;
-
-export const getUploadService = (user = null) => {
-  if (!globalUploadService || (user && globalUploadService.user !== user)) {
-    globalUploadService = new UploadFileService(user);
-  }
-  return globalUploadService;
-};
-
-/**
- * Export the service class for direct instantiation
- */
 export default UploadFileService;

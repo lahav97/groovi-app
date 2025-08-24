@@ -17,8 +17,6 @@ class AppMemoryManager {
         if (this.isInitialized) return;
         this.isInitialized = true;
 
-        console.log('🚀 AppMemoryManager initialized with video memory management');
-
         // Monitor app state changes
         this.appStateSubscription = AppState.addEventListener('change', (nextAppState) => {
             if (nextAppState === 'background') {
@@ -42,12 +40,10 @@ class AppMemoryManager {
      */
     addNavigationListener(listener) {
         this.navigationListeners.add(listener);
-        console.log(`📱 Added navigation listener (total: ${this.navigationListeners.size})`);
     }
 
     removeNavigationListener(listener) {
         this.navigationListeners.delete(listener);
-        console.log(`📱 Removed navigation listener (total: ${this.navigationListeners.size})`);
     }
 
     /**
@@ -59,8 +55,6 @@ class AppMemoryManager {
         // Prevent too frequent cleanup calls
         if (now - this.lastNavigationCleanup < 500) return;
         this.lastNavigationCleanup = now;
-
-        console.log(`🔄 Navigation: ${from} → ${to} - triggering video cleanup`);
 
         try {
             // 1. Immediately notify all listeners to clean up videos
@@ -79,7 +73,6 @@ class AppMemoryManager {
             if (global.gc) {
                 setTimeout(() => {
                     global.gc();
-                    console.log('♻️ Forced GC after navigation');
                 }, 200);
             }
 
@@ -120,11 +113,8 @@ class AppMemoryManager {
 
                     // Trigger emergency cleanup if pressure increased
                     if (this.memoryPressureLevel === 'critical' && oldLevel !== 'critical') {
-                        console.log(`🚨 CRITICAL memory pressure detected: ${heapMB.toFixed(0)}MB`);
                         this.performEmergencyCleanup('memory_pressure');
                     }
-
-                    console.log(`📊 Memory: ${heapMB.toFixed(0)}MB (${(usage * 100).toFixed(1)}%) - ${this.memoryPressureLevel}`);
                 }
             } catch (error) {
                 console.warn('Memory monitoring error:', error);
@@ -136,8 +126,6 @@ class AppMemoryManager {
      * EMERGENCY CLEANUP - For critical memory situations
      */
     async performEmergencyCleanup(reason = 'unknown') {
-        console.log(`🚨 EMERGENCY CLEANUP - ${reason}`);
-
         try {
             // 1. Clear all video caches immediately
             await clearAllCaches();
@@ -164,16 +152,12 @@ class AppMemoryManager {
                 }
             }
 
-            console.log('✅ Emergency cleanup completed');
-
         } catch (error) {
             console.error('❌ Emergency cleanup failed:', error);
         }
     }
 
     async performBackgroundCleanup() {
-        console.log('🧹 App backgrounded - aggressive video cleanup');
-
         try {
             // AGGRESSIVE cleanup when backgrounded
             await this.performEmergencyCleanup('app_background');
@@ -186,7 +170,6 @@ class AppMemoryManager {
 
             // Get simple cache stats
             const stats = this.getSimpleCacheStats();
-            console.log('📊 Background cache stats:', stats);
 
         } catch (error) {
             console.error('❌ Background cleanup error:', error);
@@ -216,8 +199,6 @@ class AppMemoryManager {
                     });
                 }
 
-                console.log(`✅ Active cleanup completed (cache limit: ${maxCacheSize}MB)`);
-
             } catch (error) {
                 console.error('❌ Active cleanup error:', error);
             }
@@ -225,8 +206,6 @@ class AppMemoryManager {
     }
 
     async performPeriodicCleanup() {
-        console.log('🧹 Periodic cleanup (aggressive)');
-
         try {
             // Check system status
             const systemStatus = BackgroundDataService.getSeparatedSystemStatus();

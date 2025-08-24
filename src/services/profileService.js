@@ -1,4 +1,7 @@
 import axios from 'axios';
+import Logger from '../utils/Logger';
+
+const logger = Logger.createLogger('ProfileService');
 
 const PROFILE_API_URL = 'https://lynqhqnijd.execute-api.us-east-1.amazonaws.com/groovi/load_profile';
 
@@ -116,7 +119,7 @@ const cleanProfileData = (profileData) => {
   };
 
   // FIXED: Log what we're returning for debugging
-  console.log(`🧼 Profile cleaned for ${cleanedData.username}:`, {
+  logger.debug(`Profile cleaned for ${cleanedData.username}:`, {
     hasAge: !!cleanedData.age,
     hasBio: !!cleanedData.bio,
     hasRating: !!cleanedData.rating,
@@ -136,7 +139,7 @@ export const fetchUserProfile = async (field, value) => {
   try {
     const url = `${PROFILE_API_URL}?field=${encodeURIComponent(field)}&value=${encodeURIComponent(value)}`;
     
-    console.log(`🔍 Fetching profile: ${field}=${value}`);
+    logger.info(`Fetching profile: ${field}=${value}`);
     
     const response = await axios.get(url, {
       headers: {
@@ -144,17 +147,17 @@ export const fetchUserProfile = async (field, value) => {
       }
     });
     
-    console.log('✅ Raw response received:', response.status);
+    logger.info('Raw response received:', response.status);
     
     // FIXED: Clean the response data to handle NULL values while preserving everything
     const cleanedData = cleanProfileData(response.data);
     
     if (!cleanedData) {
-      console.warn('⚠️ No valid profile data after cleaning');
+      logger.warn('No valid profile data after cleaning');
       return null;
     }
     
-    console.log(`✅ Profile cleaned and ready: ${cleanedData.username} (${Object.keys(cleanedData).length} fields)`);
+    logger.info(`Profile cleaned and ready: ${cleanedData.username} (${Object.keys(cleanedData).length} fields)`);
     
     // FIXED: Return in the format expected by loadMusicianService
     return {
@@ -164,28 +167,28 @@ export const fetchUserProfile = async (field, value) => {
     };
     
   } catch (error) {
-    console.error('❌ Error fetching profile:', error.message);
+    logger.error('Error fetching profile:', error.message);
     
     if (error.response) {
-      console.error('Response data:', error.response.data);
-      console.error('Response status:', error.response.status);
-      console.error('Response headers:', error.response.headers);
+      logger.error('Response data:', error.response.data);
+      logger.error('Response status:', error.response.status);
+      logger.error('Response headers:', error.response.headers);
       
       if (error.response.status === 400 && 
           error.response.data?.error?.includes('JSON serializable')) {
-        console.error('❌ Backend has NULL data causing JSON serialization error');
+        logger.error('Backend has NULL data causing JSON serialization error');
         throw new Error('Profile data contains invalid values. Please contact support.');
       }
       
       if (error.response.status === 400 && 
           error.response.data?.message?.includes('error checking')) {
-        console.error('❌ Backend database NULL data error');
+        logger.error('Backend database NULL data error');
         throw new Error('Profile lookup failed due to data issues.');
       }
     } else if (error.request) {
-      console.error('No response received:', error.request);
+      logger.error('No response received:', error.request);
     } else {
-      console.error('Error setting up request:', error.message);
+      logger.error('Error setting up request:', error.message);
     }
     
     throw error;
@@ -197,7 +200,7 @@ export const fetchUserProfile = async (field, value) => {
  */
 export const searchUsers = async (query, limit = 20) => {
   try {
-    console.log(`🔍 Searching users: "${query}" (limit: ${limit})`);
+    logger.info(`Searching users: "${query}" (limit: ${limit})`);
     
     const response = await axios.post(`${PROFILE_API_URL}/search`, {
       query,
@@ -214,23 +217,23 @@ export const searchUsers = async (query, limit = 20) => {
         .map(profile => cleanProfileData(profile))
         .filter(profile => profile !== null && profile.username);
       
-      console.log(`✅ Search results: ${cleanedResults.length} valid profiles found`);
+      logger.info(`Search results: ${cleanedResults.length} valid profiles found`);
       return cleanedResults;
     }
     
-    console.log('✅ Search completed - returning raw data');
+    logger.info('Search completed - returning raw data');
     return response.data || [];
     
   } catch (error) {
-    console.error('❌ Error searching users:', error.message);
-    
+    logger.error('Error searching users:', error.message);
+
     if (error.response) {
-      console.error('Search response data:', error.response.data);
-      console.error('Search response status:', error.response.status);
-      
+      logger.error('Search response data:', error.response.data);
+      logger.error('Search response status:', error.response.status);
+
       if (error.response.status === 400 && 
           error.response.data?.error?.includes('JSON serializable')) {
-        console.error('❌ Search failed due to NULL data in database');
+        logger.error('Search failed due to NULL data in database');
         return [];
       }
     }
@@ -239,7 +242,78 @@ export const searchUsers = async (query, limit = 20) => {
   }
 };
 
+/**
+ * Get user profile by user ID (convenience wrapper)
+ */
+export const getProfile = async (userId) => {
+  try {
+    logger.info(`Getting profile for user ID: ${userId}`);
+
+    // First, try to fetch by email (most common case for user IDs)
+    try {
+      const emailResult = await fetchUserProfile('email', userId);
+      if (emailResult && emailResult.profile) {
+        return emailResult.profile;
+      }
+    } catch (emailError) {
+      logger.debug(`Failed to fetch by email: ${emailError.message}`);
+    }
+
+    // If email fails, try by username (in case userId is actually a username)
+    try {
+      const usernameResult = await fetchUserProfile('username', userId);
+      if (usernameResult && usernameResult.profile) {
+        return usernameResult.profile;
+      }
+    } catch (usernameError) {
+      logger.debug(`Failed to fetch by username: ${usernameError.message}`);
+    }
+
+    // If both fail, try by user ID field (if your backend supports it)
+    try {
+      const idResult = await fetchUserProfile('id', userId);
+      if (idResult && idResult.profile) {
+        return idResult.profile;
+      }
+    } catch (idError) {
+      logger.debug(`Failed to fetch by id: ${idError.message}`);
+    }
+
+    // If all attempts fail, throw an error
+    throw new Error(`User profile not found for ID: ${userId}`);
+
+  } catch (error) {
+    logger.error(`Failed to get profile for ${userId}:`, error.message);
+    throw error;
+  }
+};
+
+/**
+ * Get just the username for chat purposes (lightweight version)
+ */
+export const getUsernameForChat = async (userEmail) => {
+  try {
+    logger.info(`Getting username for chat: ${userEmail}`);
+
+    const result = await fetchUserProfile('email', userEmail);
+
+    if (result && result.profile && result.profile.username) {
+      return result.profile.username;
+    } else if (result && result.username) {
+      return result.username;
+    }
+
+    return null;
+
+  } catch (error) {
+    logger.error(`Failed to get username for chat: ${error.message}`);
+    return null;
+  }
+};
+
 export default {
   fetchUserProfile,
-  searchUsers
+  searchUsers,
+  getProfile,
+  getUsernameForChat
 };
