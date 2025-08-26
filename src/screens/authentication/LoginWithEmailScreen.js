@@ -15,6 +15,12 @@ import { useNavigation, CommonActions } from '@react-navigation/native';
 import Button from '../../components/common/Button';
 import { useAuth } from '../../context/AuthContext';
 import { saveUserEmail } from '../../utils/userUtils';
+import { COLORS } from '../../styles/theme';
+import {
+  ERROR_MESSAGES,
+  createValidationError,
+  handleError
+} from '../../utils/errors';
 
 const LoginWithEmailScreen = () => {
   const [email, setEmail] = useState('');
@@ -33,73 +39,61 @@ const LoginWithEmailScreen = () => {
    * @returns {boolean} True if inputs are valid
    */
   const validateForm = () => {
-    // Clear any previous errors
     setAuthError('');
-    
-    // Validate password
+
     if (!password) {
-      setAuthError('Please enter a password');
+      setAuthError(ERROR_MESSAGES.VALIDATION.PASSWORD_REQUIRED || 'Please enter a password');
       return false;
     }
 
-    // Validate email format
     const isValidEmail = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
     if (!isValidEmail) {
-      setAuthError('Please enter a valid email address');
+      setAuthError(ERROR_MESSAGES.VALIDATION.EMAIL_INVALID || 'Please enter a valid email address');
       return false;
     }
-    
+
     return true;
   };
 
-/**
- * @function handleContinue
- * @description Validates user input, checks if user exists, and signs in if valid.
- */
-const handleContinue = async () => {
-  if (!validateForm()) {
-    return;
-  }
-  
-  setIsLoading(true); 
-  
-  try {
-    // User exists, proceed with sign in
-    console.log('📧 Email is valid, attempting sign in:', email);
-    
-    const result = await signIn(email, password);
+  /**
+   * @function handleContinue
+   * @description Validates user input, checks if user exists, and signs in if valid.
+   */
+  const handleContinue = async () => {
+    if (!validateForm()) {
+      return;
+    }
 
-    if (result.success) {
-      console.log('Sign in successful, userData:', result.userData);
-      console.log('Onboarding completed:', result.hasCompletedOnboarding);
-      
-      // Save the email to AsyncStorage for later use
-      await saveUserEmail(email);
-      console.log('Email saved to AsyncStorage:', email);
-    } else {
-      console.log('❌ Sign in failed:', result.error);
-      setAuthError(result.error || 'Failed to sign in. Please try again.');
+    setIsLoading(true);
+
+    try {
+      // User exists, proceed with sign in
+      console.log('📧 Email is valid, attempting sign in:', email);
+
+      const result = await signIn(email, password);
+
+      if (result.success) {
+        console.log('Sign in successful, userData:', result.userData);
+        console.log('Onboarding completed:', result.hasCompletedOnboarding);
+
+        // Save the email to AsyncStorage for later use
+        await saveUserEmail(email);
+        console.log('cStorage:', email);
+      } else {
+        setAuthError(handleError(result.error, 'LoginWithEmailScreen/handleContinue'));
+      }
+    } catch (error) {
+      setAuthError(handleError(error, 'LoginWithEmailScreen/handleContinue'));
+    } finally {
+      setIsLoading(false);
     }
-  } catch (error) {
-    console.error('Error signing in with email:', error);
-    
-    if (error.code === 'UserNotFoundException') {
-      setAuthError('Account not found. Please check your email.');
-    } else if (error.code === 'NotAuthorizedException') {
-      setAuthError('Incorrect password. Please try again.');
-    } else {
-      setAuthError(error.message || 'Failed to sign in. Please try again.');
-    }
-  } finally {
-    setIsLoading(false);
-  }
-};
+  };
 
   return (
     <LinearGradient
-      colors={['#ff6ec4', '#ffc93c', '#1c92d2']}
-      start={{ x: 0, y: 1 }}
-      end={{ x: 0, y: 0 }}
+      colors={COLORS.static.primaryGradient} 
+      start={{ x: 1, y: 0 }}
+      end={{ x: 0, y: 1 }}
       style={styles.container}
     >
       <TouchableOpacity 

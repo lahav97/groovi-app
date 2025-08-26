@@ -25,6 +25,12 @@ import { useSignupBuilder } from '../../context/SignupFlowContext';
 import { useAuth } from '../../context/AuthContext';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import Button from '../../components/common/Button';
+import { COLORS } from '../../styles/theme';
+import {
+  ERROR_MESSAGES,
+  createValidationError,
+  handleError
+} from '../../utils/errors';
 
 if (Platform.OS === 'android' && UIManager.setLayoutAnimationEnabledExperimental) {
   UIManager.setLayoutAnimationEnabledExperimental(true);
@@ -64,7 +70,6 @@ const InstrumentsScreen = () => {
     const loadUserFromStorage = async () => {
       try {
         const stored = await AsyncStorage.getItem('signupBuilderBackup');
-        console.log('📦 InstrumentsScreen: Attempting to read signupBuilderBackup from AsyncStorage...');
 
         if (stored) {
           const parsedUser = JSON.parse(stored);
@@ -190,18 +195,21 @@ const InstrumentsScreen = () => {
    * @description Proceeds to the next screen after selecting instruments.
    */
   const handleContinue = async () => {
-    if (Object.keys(instrumentLevels).length === 0) {
-      Alert.alert('Selection Required', 'Please select at least one instrument and its level.');
-      return;
+    try {
+      if (Object.keys(instrumentLevels).length === 0) {
+        throw createValidationError('REQUIRED_FIELD', 'instruments');
+      }
+
+      // Ensure builder has the latest instruments
+      builder.setInstruments(instrumentLevels);
+
+      await saveUserToStorage(instrumentLevels);
+
+      // Navigate to next screen
+      navigation.navigate('Profile Setup');
+    } catch (error) {
+      Alert.alert('Selection Required', handleError(error, 'InstrumentsScreen/handleContinue'));
     }
-
-    // Ensure builder has the latest instruments
-    builder.setInstruments(instrumentLevels);
-
-    await saveUserToStorage(instrumentLevels);
-
-    // Navigate to next screen
-    navigation.navigate('Profile Setup');
   };
 
   const allInstruments = Object.values(instrumentCategories).flat().filter(i => i !== 'Other');
@@ -218,7 +226,7 @@ const InstrumentsScreen = () => {
    */
   const getCategoryStyle = (category, instruments) => {
     const isSelected = instruments.some(i => selectedInstruments.includes(i));
-    return isSelected ? [styles.categoryTitle, { color: '#e91e63' }] : [styles.categoryTitle, { color: textColor }];
+    return isSelected ? [styles.categoryTitle, { color: COLORS.ui.checkbox }] : [styles.categoryTitle, { color: textColor }];
   };
 
   return (
@@ -227,7 +235,7 @@ const InstrumentsScreen = () => {
         <TouchableOpacity onPress={() => navigation.goBack()} style={styles.backIcon}>
           <Ionicons name="arrow-back" size={28} color={textColor} />
         </TouchableOpacity>
-        <Text style={[styles.title, { color: textColor }]}>Instruments</Text>
+        <Text style={[styles.title, { color: textColor }]}>Pick Your Instruments</Text>
         <View style={{ width: 28 }} />
       </View>
 
@@ -251,8 +259,7 @@ const InstrumentsScreen = () => {
                   <Ionicons
                     name={selectedInstruments.includes(instrument) ? 'checkbox' : 'square-outline'}
                     size={24}
-                    color={selectedInstruments.includes(instrument) ? '#e91e63' : '#999'}
-                  />
+                    color={selectedInstruments.includes(instrument) ? COLORS.ui.checkbox : '#999'}/>
                   <Text style={[styles.instrumentLabel, { color: textColor }]}>{instrument}</Text>
                 </TouchableOpacity>
               </View>
@@ -284,7 +291,7 @@ const InstrumentsScreen = () => {
                     <Ionicons
                       name={selectedInstruments.includes(instrument) ? 'checkbox' : 'square-outline'}
                       size={24}
-                      color={selectedInstruments.includes(instrument) ? '#e91e63' : '#999'}
+                      color={selectedInstruments.includes(instrument) ? COLORS.ui.checkbox : '#999'}
                     />
                     <Text style={[styles.instrumentLabel, { color: textColor }]}>{instrument}</Text>
                   </TouchableOpacity>
@@ -296,7 +303,7 @@ const InstrumentsScreen = () => {
                         const gradientColors =
                           level === 'Beginner' ? ['#a1c4fd', '#c2e9fb'] :
                           level === 'Intermediate' ? ['#f6d365', '#fda085'] :
-                          ['#ff6ec4', '#ffc93c', '#1c92d2'];
+                          [COLORS.static.primaryGradient[0], COLORS.static.primaryGradient[1]];
 
                         return (
                           <TouchableOpacity
@@ -307,8 +314,8 @@ const InstrumentsScreen = () => {
                             {isSelected ? (
                               <LinearGradient
                                 colors={gradientColors}
-                                start={{ x: 0, y: 1 }}
-                                end={{ x: 1, y: 0 }}
+                                start={{ x: 0, y: 0 }}
+                                end={{ x: 1, y: 1 }}
                                 style={styles.levelGradient}
                               >
                                 <Text style={styles.levelTextSelected}>{level}</Text>
@@ -344,9 +351,9 @@ const InstrumentsScreen = () => {
           style={[styles.continueButton, selectedInstruments.length === 0 && styles.disabledButton]}
         >
           <LinearGradient
-            colors={['#ff6ec4', '#ffc93c', '#1c92d2']}
-            start={{ x: 0, y: 1 }}
-            end={{ x: 1, y: 0 }}
+            colors={[COLORS.static.primaryGradient[0], COLORS.static.primaryGradient[1]]}
+            start={{ x: 0, y: 0 }}
+            end={{ x: 1, y: 1 }}
             style={styles.gradient}
           >
             <Text style={styles.continueText}>CONTINUE</Text>

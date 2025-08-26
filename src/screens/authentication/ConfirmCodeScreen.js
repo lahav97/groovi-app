@@ -10,6 +10,11 @@ import Button from '../../components/common/Button';
 import { useAuth } from '../../context/AuthContext';
 import { useSignupBuilder } from '../../context/SignupFlowContext';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import { COLORS } from '../../styles/theme';
+import {
+  ERROR_MESSAGES,
+  handleError
+} from '../../utils/errors';
 
 /**
  * @function ConfirmCodeScreen
@@ -102,12 +107,12 @@ const ConfirmCodeScreen = () => {
    */
   const handleConfirm = useCallback(async () => {
     if (!username) {
-      setStatusMessage('Something went wrong. Missing username.', 'error');
+      setStatusMessage(ERROR_MESSAGES.AUTH.MISSING_USERNAME || 'Something went wrong. Missing username.', 'error');
       return;
     }
     
     if (!state.code.trim()) {
-      setStatusMessage('Please enter the verification code', 'error');
+      setStatusMessage(ERROR_MESSAGES.VALIDATION.CODE_REQUIRED || 'Please enter the verification code', 'error');
       return;
     }
 
@@ -119,7 +124,7 @@ const ConfirmCodeScreen = () => {
       
       if (!confirmResult.success) {
         console.log('❌ Confirmation failed:', confirmResult.error);
-        setStatusMessage(confirmResult.error || 'Failed to confirm your account', 'error');
+        setStatusMessage(handleError(confirmResult.error, 'ConfirmCodeScreen/handleConfirm'), 'error');
         return;
       }
       
@@ -156,7 +161,7 @@ const ConfirmCodeScreen = () => {
       }
     } catch (error) {
       console.error('❌ Error in confirmation process:', error);
-      setStatusMessage(error.message || 'Failed to complete the confirmation process', 'error');
+      setStatusMessage(handleError(error, 'ConfirmCodeScreen/handleConfirm'), 'error');
     } finally {
       setState(prev => ({ ...prev, isConfirming: false }));
     }
@@ -177,7 +182,7 @@ const ConfirmCodeScreen = () => {
         setStatusMessage('Verification code resent', 'success');
       } else {
         console.log('❌ Failed to resend code:', result.error);
-        setStatusMessage(result.error || 'Failed to resend verification code', 'error');
+        setStatusMessage(handleError(result.error, 'ConfirmCodeScreen/handleResendCode'), 'error');
       }
     } catch (error) {
       console.error('❌ Error resending code:', error);
@@ -195,9 +200,9 @@ const ConfirmCodeScreen = () => {
 
   return (
     <LinearGradient
-      colors={['#ff6ec4', '#ffc93c', '#1c92d2']}
-      start={{ x: 0, y: 1 }}
-      end={{ x: 0, y: 0 }}
+      colors={COLORS.static.primaryGradient}
+      start={{ x: 1, y: 0 }}
+      end={{ x: 0, y: 1 }}
       style={styles.container}
     >
       <View style={styles.inner}>

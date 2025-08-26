@@ -1,5 +1,6 @@
 import React, {createContext, useContext, useRef} from "react";
 import UserBuilder from "../Builders/UserBuilder";
+import { handleError } from "../utils/errors";
 
 const SignupFlowContext = createContext(null);
 
@@ -16,7 +17,7 @@ export const SignupFlowProvider = ({ children }) => {
   export const useSignupBuilder = () => {
     const context = useContext(SignupFlowContext);
     if (!context) {
-      throw new Error('useSignupBuilder must be used within a SignupFlowProvider');
+      throw new Error(handleError(new Error('useSignupBuilder must be used within a SignupFlowProvider'), 'SignupFlowContext/useSignupBuilder'));
     }
     return context;
   };

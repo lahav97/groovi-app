@@ -13,6 +13,9 @@ import * as Facebook from 'expo-auth-session/providers/facebook';
 import * as Google from 'expo-auth-session/providers/google';
 import * as WebBrowser from 'expo-web-browser';
 import Button from '../../components/common/Button';
+import {
+  handleError
+} from '../../utils/errors';
 
 WebBrowser.maybeCompleteAuthSession();
 
@@ -47,11 +50,14 @@ const LoginScreen = () => {
       const { accessToken, expiresIn } = googleResponse.authentication;
   
       (async () => {
-        const profile = await getGoogleProfile(accessToken);
-        await signInToCognito('google', accessToken, expiresIn, profile);
-  
-        navigation.navigate('Feed');
-      })().catch(console.error);
+        try {
+          const profile = await getGoogleProfile(accessToken);
+          await signInToCognito('google', accessToken, expiresIn, profile);
+          navigation.navigate('Feed');
+        } catch (error) {
+          console.error(handleError(error, 'LoginScreen/Google'));
+        }
+      })();
     }
   }, [googleResponse]);
 
@@ -61,18 +67,22 @@ const LoginScreen = () => {
       const { accessToken, expiresIn } = fbResponse.authentication;
   
       (async () => {
-        const profile = await getFacebookProfile(accessToken);
-        await signInToCognito('facebook', accessToken, expiresIn, profile);
-        navigation.navigate('Feed');
-      })().catch(console.error);
+        try {
+          const profile = await getFacebookProfile(accessToken);
+          await signInToCognito('facebook', accessToken, expiresIn, profile);
+          navigation.navigate('Feed');
+        } catch (error) {
+          console.error(handleError(error, 'LoginScreen/Facebook'));
+        }
+      })();
     }
   }, [fbResponse]);
 
   return (
     <LinearGradient
       colors={COLORS.static.primaryGradient}
-      start={{ x: 0, y: 1 }}
-      end={{ x: 0, y: 0 }}
+      start={{ x: 1, y: 0 }}
+      end={{ x: 0, y: 1 }}
       style={styles.container}
     >
       <Text style={[styles.logo, { color: COLORS.static.text }]}>GROOVI</Text>
@@ -85,21 +95,21 @@ const LoginScreen = () => {
       />
 
       <Button
-        title="Login with email"
+        title="Login With Email"
         onPress={() => navigation.navigate('LoginWithEmail')}
         style={[styles.buttonBase, styles.whiteButton]}
         textStyle={styles.blackText}
       />
 
       <Button
-        title="Continue with Google"
+        title="Continue With Google"
         onPress={() => promptGoogleLogin()}
         style={[styles.buttonBase, styles.googleButton]}
         textStyle={styles.googleText}
       />
 
       <Button
-        title="Continue with Facebook"
+        title="Continue With Facebook"
         onPress={() => promptFbLogin()}
         style={[styles.buttonBase, styles.fbButton]}
         textStyle={styles.fbText}

@@ -15,7 +15,6 @@ export const getCurrentUserEmail = async () => {
 export const saveUserEmail = async (email) => {
   try {
     await AsyncStorage.setItem('userEmail', email);
-    console.log('Email saved:', email);
     return true;
   } catch (error) {
     console.error('Error saving user email:', error);

@@ -5,6 +5,7 @@ import { fetchUserProfile } from '../services/profileService';
 import { getCurrentUserEmail } from '../utils/userUtils';
 import { useIsFocused } from '@react-navigation/native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import { handleError } from '../utils/errors';
 
 const PROFILE_CACHE_KEY = 'profileCache';
 const PROFILE_VIDEOS_KEY = 'profileVideos';
@@ -114,7 +115,7 @@ const userProfileManager = ({
         return profileData;
       } catch (err) {
         console.error('Failed to load profile:', err);
-        setError(err.message || 'Could not load profile data');
+        setError(handleError(err, 'userProfileManager/loadProfile') || err.message || 'Could not load profile data');
         
         // Try to use cached data as fallback if API fails
         try {
@@ -164,16 +165,16 @@ const userProfileManager = ({
     }, [autoLoad, loadProfile]);
     
     // Reload profile when screen comes into focus if loadOnFocus is true
-    useEffect(() => {
-      if (isFocused && loadOnFocus) {
-        // Only reload if it's been at least 1 second since the last focus
-        const now = Date.now();
-        if (now - lastFocusTimeRef.current > 1000) {
-          lastFocusTimeRef.current = now;
-          loadProfile(false); // Don't force reload, use cache if available
-        }
-      }
-    }, [isFocused, loadOnFocus, loadProfile]);
+  useEffect(() => {
+      return () => {
+          // Cleanup on unmount
+          profileRef.current = null;
+          isLoadingRef.current = false;
+          lastFocusTimeRef.current = 0;
+          
+          console.log('✅ userProfileManager cleanup complete');
+      };
+  }, []);
     
     return {
       profile,

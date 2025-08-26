@@ -18,7 +18,7 @@ const TopNavigation = () => {
         <Icon name="options-outline" size={ICON_SIZE} color={ICON_COLOR} />
       </TouchableOpacity>
 
-      <TouchableOpacity style={styles.navItem}>
+      <TouchableOpacity style={styles.navItem} onPress={() => navigation.navigate('Search')}>
         <Icon name="search-outline" size={ICON_SIZE} color={ICON_COLOR} />
       </TouchableOpacity>
     </View>

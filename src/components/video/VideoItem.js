@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, memo, useCallback } from 'react';
 import {
   View,
   Text,
@@ -8,6 +8,7 @@ import {
   Dimensions,
   useColorScheme,
   ActivityIndicator,
+  InteractionManager,
 } from 'react-native';
 import { Video } from 'expo-av';
 import Icon from 'react-native-vector-icons/Ionicons';
@@ -18,90 +19,263 @@ import * as FileSystem from 'expo-file-system';
 
 const { width, height: SCREEN_HEIGHT } = Dimensions.get('window');
 
-const VideoItem = ({ item, isVisible, height, shouldCache = false }) => {
+// SIMPLIFIED VIDEO MANAGER - More reliable state management
+class GlobalVideoManager {
+  constructor() {
+    this.currentActiveVideo = null;
+    this.allVideoRefs = new Map();
+    this.pausedVideos = new Set(); // Track manually paused videos
+  }
+
+  registerVideo(videoRef, videoId) {
+    this.allVideoRefs.set(videoId, videoRef);
+  }
+
+  unregisterVideo(videoId) {
+    this.allVideoRefs.delete(videoId);
+    this.pausedVideos.delete(videoId);
+  }
+
+  // FIXED: Better handling of manual pause/play
+  async setActiveVideo(videoRef, videoId, isManualPlay = false) {
+    try {
+      // If this video was manually paused, remove it from paused set
+      if (isManualPlay) {
+        this.pausedVideos.delete(videoId);
+      }
+
+      // Pause all other videos
+      for (const [id, ref] of this.allVideoRefs) {
+        if (id !== videoId && ref.current) {
+          try {
+            await ref.current.pauseAsync();
+          } catch (error) {
+            // Silent fail
+          }
+        }
+      }
+
+      this.currentActiveVideo = videoId;
+      
+      // Start the new video
+      if (videoRef.current) {
+        try {
+          await videoRef.current.playAsync();
+          console.log(`▶️ Video playing: ${videoId}`);
+        } catch (error) {
+          console.warn('Failed to play video:', error);
+        }
+      }
+    } catch (error) {
+      console.error('Error setting active video:', error);
+    }
+  }
+
+  async pauseVideo(videoId) {
+    try {
+      const ref = this.allVideoRefs.get(videoId);
+      if (ref && ref.current) {
+        await ref.current.pauseAsync();
+        this.pausedVideos.add(videoId); // Mark as manually paused
+        if (this.currentActiveVideo === videoId) {
+          this.currentActiveVideo = null;
+        }
+        console.log(`⏸️ Video paused: ${videoId}`);
+      }
+    } catch (error) {
+      console.error('Error pausing video:', error);
+    }
+  }
+
+  async pauseAllVideos() {
+    const pausePromises = [];
+    
+    for (const [id, ref] of this.allVideoRefs) {
+      if (ref.current) {
+        pausePromises.push(
+          ref.current.pauseAsync().catch(() => {})
+        );
+      }
+    }
+    
+    await Promise.all(pausePromises);
+    this.currentActiveVideo = null;
+  }
+
+  isActive(videoId) {
+    return this.currentActiveVideo === videoId;
+  }
+
+  isManuallyPaused(videoId) {
+    return this.pausedVideos.has(videoId);
+  }
+}
+
+const globalVideoManager = new GlobalVideoManager();
+
+// Background cache queue
+const cacheQueue = [];
+let isProcessingCacheQueue = false;
+
+const processCacheQueue = async () => {
+  if (isProcessingCacheQueue || cacheQueue.length === 0) return;
+  
+  isProcessingCacheQueue = true;
+  
+  while (cacheQueue.length > 0) {
+    const cacheOperation = cacheQueue.shift();
+    try {
+      await cacheOperation();
+    } catch (error) {
+      // Silent fail
+    }
+    await new Promise(resolve => setTimeout(resolve, 10));
+  }
+  
+  isProcessingCacheQueue = false;
+};
+
+// FIXED: Improved VideoItem with better pause/play handling
+const VideoItem = memo(({ item, isVisible, height, shouldCache = false }) => {
   const videoRef = useRef(null);
   const isFocused = useIsFocused();
-  const [paused, setPaused] = useState(false);
+  
+  // SIMPLIFIED state management
+  const [userPaused, setUserPaused] = useState(false);
   const [showPlayIcon, setShowPlayIcon] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
   const [hasError, setHasError] = useState(false);
   const [localVideoUri, setLocalVideoUri] = useState(null);
   const [isPlaying, setIsPlaying] = useState(false);
+  const [videoLoaded, setVideoLoaded] = useState(false);
+  
+  // Refs
   const retryCountRef = useRef(0);
+  const componentMountedRef = useRef(true);
+  const cacheAttemptedRef = useRef(false);
+  const stableVideoSourceRef = useRef(null);
+  
+  const videoId = useRef(`video-${item.id || 'unknown'}-${Date.now()}`).current;
+  
   const colorScheme = useColorScheme();
   const COLOR = colorScheme === 'dark' ? COLORS.dark : COLORS.light;
-  const cacheAttemptedRef = useRef(false);
-  
-  // Smart video caching - only for priority videos
-  const cacheVideo = async (videoUrl) => {
-    if (!shouldCache || cacheAttemptedRef.current) return null;
-    cacheAttemptedRef.current = true;
-    
-    try {
-      const filename = videoUrl.split('/').pop() || `video_${Date.now()}.mp4`;
-      const localUri = `${FileSystem.cacheDirectory}videos/${filename}`;
-      
-      // Check if directory exists, create if not
-      const dirInfo = await FileSystem.getInfoAsync(`${FileSystem.cacheDirectory}videos`);
-      if (!dirInfo.exists) {
-        await FileSystem.makeDirectoryAsync(`${FileSystem.cacheDirectory}videos`, { intermediates: true });
-      }
 
-      // Check if file already exists
-      const fileInfo = await FileSystem.getInfoAsync(localUri);
-      if (fileInfo.exists) {
-        setLocalVideoUri(localUri);
-        console.log('⚡ VideoItem: Using cached video');
-        return localUri;
-      }
-      
-      // Download only for priority videos (first 3)
-      if (shouldCache) {
-        console.log('📥 VideoItem: Caching priority video...');
-        const downloadResult = await FileSystem.downloadAsync(videoUrl, localUri);
-        
-        if (downloadResult.status === 200) {
-          setLocalVideoUri(localUri);
-          console.log('✅ VideoItem: Video cached successfully');
-          return localUri;
+  // Stable video source
+  const videoSource = stableVideoSourceRef.current || localVideoUri || item.videoUrl;
+  
+  // Initialize stable source
+  useEffect(() => {
+    if (!stableVideoSourceRef.current) {
+      stableVideoSourceRef.current = item.videoUrl;
+    }
+  }, [item.videoUrl]);
+
+  // Register with global video manager
+  useEffect(() => {
+    globalVideoManager.registerVideo(videoRef, videoId);
+    return () => {
+      globalVideoManager.unregisterVideo(videoId);
+    };
+  }, [videoId]);
+
+  // FIXED: Simplified playback control
+  const updatePlaybackState = useCallback(async () => {
+    if (!componentMountedRef.current || !videoLoaded) return;
+
+    const shouldPlay = isVisible && isFocused && !userPaused;
+    const isCurrentlyActive = globalVideoManager.isActive(videoId);
+
+    if (shouldPlay && !isCurrentlyActive) {
+      // Need to start playing
+      await globalVideoManager.setActiveVideo(videoRef, videoId, false);
+    } else if (!shouldPlay && isCurrentlyActive) {
+      // Need to stop playing (but don't mark as manually paused unless user did it)
+      if (videoRef.current) {
+        try {
+          await videoRef.current.pauseAsync();
+        } catch (error) {
+          // Silent fail
         }
       }
-      
-      return null;
-    } catch (error) {
-      console.error('❌ VideoItem: Cache error:', error);
-      return null;
     }
+  }, [isVisible, isFocused, userPaused, videoLoaded, videoId]);
+
+  // Update playback state when dependencies change
+  useEffect(() => {
+    const timeoutId = setTimeout(updatePlaybackState, 100);
+    return () => clearTimeout(timeoutId);
+  }, [updatePlaybackState]);
+
+  // Screen focus handling
+  useEffect(() => {
+    if (!isFocused) {
+      globalVideoManager.pauseAllVideos();
+    }
+  }, [isFocused]);
+
+  // Background caching
+  const cacheVideoInBackground = async (videoUrl) => {
+    if (!shouldCache || cacheAttemptedRef.current || !componentMountedRef.current) return;
+    cacheAttemptedRef.current = true;
+    
+    const cacheOperation = async () => {
+      try {
+        if (!videoUrl || typeof videoUrl !== 'string' || !videoUrl.startsWith('http')) {
+          return null;
+        }
+
+        const filename = videoUrl.split('/').pop() || `video_${Date.now()}.mp4`;
+        const localUri = `${FileSystem.cacheDirectory}videos/${filename}`;
+        
+        const dirInfo = await FileSystem.getInfoAsync(`${FileSystem.cacheDirectory}videos`);
+        if (!dirInfo.exists) {
+          await FileSystem.makeDirectoryAsync(`${FileSystem.cacheDirectory}videos`, { intermediates: true });
+        }
+
+        const fileInfo = await FileSystem.getInfoAsync(localUri);
+        if (fileInfo.exists && componentMountedRef.current) {
+          setLocalVideoUri(localUri);
+          return localUri;
+        }
+        
+        if (shouldCache && isVisible) {
+          const downloadResult = await FileSystem.downloadAsync(videoUrl, localUri);
+          
+          if (downloadResult.status === 200 && componentMountedRef.current) {
+            setLocalVideoUri(localUri);
+            return localUri;
+          }
+        }
+        
+        return null;
+      } catch (error) {
+        return null;
+      }
+    };
+    
+    cacheQueue.push(cacheOperation);
+    setTimeout(processCacheQueue, 0);
   };
 
-  // Load and cache only when needed
+  // Cache trigger
   useEffect(() => {
-    if (item.videoUrl && shouldCache) {
-      cacheVideo(item.videoUrl);
+    if (item.videoUrl && shouldCache && isVisible && componentMountedRef.current) {
+      cacheVideoInBackground(item.videoUrl);
     }
-  }, [item.videoUrl, shouldCache]);
+  }, [item.videoUrl, shouldCache, isVisible]);
 
-  // Simplified show play icon logic
+  // Play icon timeout
   useEffect(() => {
     if (showPlayIcon) {
-      const timeout = setTimeout(() => setShowPlayIcon(false), 1000);
+      const timeout = setTimeout(() => setShowPlayIcon(false), 800);
       return () => clearTimeout(timeout);
     }
   }, [showPlayIcon]);
 
-  // Simplified visibility handling
-  useEffect(() => {
-    if ((!isVisible || !isFocused) && videoRef.current) {
-      videoRef.current.pauseAsync();
-    } else if (isVisible && isFocused && videoRef.current && !paused) {
-      videoRef.current.playAsync();
-    }
-  }, [isVisible, isFocused, paused]);
-
-  // Simplified loading timeout
+  // Loading timeout
   useEffect(() => {
     if (isLoading && isPlaying) {
-      const timer = setTimeout(() => setIsLoading(false), 3000);
+      const timer = setTimeout(() => setIsLoading(false), 2000);
       return () => clearTimeout(timer);
     }
   }, [isLoading, isPlaying]);
@@ -113,159 +287,213 @@ const VideoItem = ({ item, isVisible, height, shouldCache = false }) => {
     }
   }, [isPlaying, hasError]);
 
-  const handleTogglePlayback = async () => {
-    try {
-      if (videoRef.current) {
-        if (paused) {
-          await videoRef.current.playAsync();
-        } else {
-          await videoRef.current.pauseAsync();
-        }
-        
-        setPaused(!paused);
-        setShowPlayIcon(true);
-      }
-    } catch (error) {
-      console.error('❌ VideoItem: Playback toggle error:', error);
+  // FIXED: Better user pause/play toggle
+  const handleTogglePlayback = useCallback(async () => {
+    if (!componentMountedRef.current || !videoLoaded) return;
+    
+    const newUserPaused = !userPaused;
+    setUserPaused(newUserPaused);
+    setShowPlayIcon(true);
+    
+    if (newUserPaused) {
+      // User wants to pause
+      await globalVideoManager.pauseVideo(videoId);
+    } else {
+      // User wants to play
+      await globalVideoManager.setActiveVideo(videoRef, videoId, true);
     }
-  };
+  }, [userPaused, videoLoaded, videoId]);
 
-  const handleVideoLoad = () => {
-    setTimeout(() => setIsLoading(false), 200);
+  // Video load handler
+  const handleVideoLoad = useCallback(() => {
+    if (!componentMountedRef.current) return;
+    
+    setVideoLoaded(true);
+    setIsLoading(false);
     setHasError(false);
     retryCountRef.current = 0;
-  };
+    
+    // Trigger playback state update after load
+    setTimeout(updatePlaybackState, 50);
+  }, [updatePlaybackState]);
 
-  const handleVideoError = (error) => {
-    console.error('❌ VideoItem: Video error:', error);
+  // Error handling
+  const handleVideoError = useCallback((error) => {
+    if (!componentMountedRef.current) return;
+    
+    console.warn('Video error:', error);
+    
+    const errorString = error?.toString() || '';
+    
+    // Handle corrupted cache
+    if (localVideoUri && (errorString.includes('j7.x$b') || errorString.includes('could read'))) {
+      if (!isPlaying) {
+        setLocalVideoUri(null);
+        cacheAttemptedRef.current = false;
+        stableVideoSourceRef.current = item.videoUrl;
+      }
+    }
+    
     setHasError(true);
     setIsLoading(false);
     setIsPlaying(false);
-    retryLoadVideo();
-  };
+    setVideoLoaded(false);
+    
+    // Retry logic
+    if (retryCountRef.current < 1) {
+      retryCountRef.current += 1;
+      setTimeout(() => {
+        if (componentMountedRef.current) {
+          retryLoadVideo();
+        }
+      }, 1000);
+    }
+  }, [localVideoUri, isPlaying, item.videoUrl]);
 
-  const handlePlaybackStatusUpdate = (status) => {
+  // Playback status handler
+  const handlePlaybackStatusUpdate = useCallback((status) => {
+    if (!componentMountedRef.current) return;
+    
     if (status.isLoaded) {
-      setIsPlaying(status.isPlaying && !status.isPaused);
+      const newIsPlaying = status.isPlaying && !status.isPaused;
+      setIsPlaying(newIsPlaying);
       
-      if (status.isPlaying) {
+      if (newIsPlaying) {
         setIsLoading(false);
         setHasError(false);
       }
       
-      // Auto-repeat when video ends
-      if (status.didJustFinish && !status.isLooping) {
-        videoRef.current?.replayAsync();
+      // Auto-replay when finished
+      if (status.didJustFinish && !status.isLooping && videoRef.current) {
+        const shouldStillPlay = isVisible && isFocused && !userPaused;
+        if (shouldStillPlay) {
+          videoRef.current.replayAsync();
+        }
       }
     }
-  };
+  }, [isVisible, isFocused, userPaused]);
 
-  const retryLoadVideo = async () => {
-    retryCountRef.current += 1;
-    const maxRetries = 3; // Reduced retry attempts
-    
-    if (retryCountRef.current > maxRetries) {
-      console.log('❌ VideoItem: Max retries exceeded');
-      setHasError(true);
-      setIsLoading(false);
-      return;
-    }
-    
-    setIsLoading(true);
+  const retryLoadVideo = useCallback(async () => {
+    if (!componentMountedRef.current || !item.videoUrl) return;
     
     try {
-      console.log(`🔄 VideoItem: Retry attempt ${retryCountRef.current}`);
-      
       if (videoRef.current) {
         await videoRef.current.unloadAsync();
-        
-        // Try cached version first, then original URL
-        const videoSource = localVideoUri || item.videoUrl;
-        await videoRef.current.loadAsync({ uri: videoSource }, {}, false);
-        await videoRef.current.playAsync();
+        await videoRef.current.loadAsync({ uri: stableVideoSourceRef.current }, {}, false);
       }
     } catch (e) {
-      console.error('❌ VideoItem: Retry failed:', e);
       setHasError(true);
       setIsLoading(false);
-      
-      if (retryCountRef.current < maxRetries) {
-        setTimeout(() => retryLoadVideo(), 1000);
-      }
     }
-  };
+  }, [item.videoUrl]);
 
-  // Auto-clear error after delay
+  // Component cleanup
   useEffect(() => {
-    if (hasError) {
-      const errorTimeout = setTimeout(() => {
-        if (retryCountRef.current >= 3) {
-          setHasError(false);
-        }
-      }, 2000);
-      return () => clearTimeout(errorTimeout);
-    }
-  }, [hasError]);
+    componentMountedRef.current = true;
+    
+    return () => {
+      componentMountedRef.current = false;
+      
+      if (videoRef.current) {
+        videoRef.current.pauseAsync().catch(() => {});
+        videoRef.current.unloadAsync().catch(() => {});
+      }
+    };
+  }, [videoId]);
+
+  // Validate video URL
+  if (!item.videoUrl || typeof item.videoUrl !== 'string' || !item.videoUrl.startsWith('http')) {
+    return (
+      <View style={[styles.videoContainer, { backgroundColor: COLOR.background, height }]}>
+        <View style={styles.centerOverlay}>
+          <Icon name="videocam-off" size={60} color="#666" />
+          <Text style={styles.errorText}>Invalid video</Text>
+        </View>
+        <VideoInfo video={{ 
+          username: item.username || item.user, 
+          description: item.description,
+          userId: item.user_id || item.id
+        }} />
+      </View>
+    );
+  }
 
   return (
     <TouchableWithoutFeedback onPress={handleTogglePlayback}>
       <View style={[styles.videoContainer, { backgroundColor: COLOR.background, height }]}>
         <Video
           ref={videoRef}
-          source={{ uri: localVideoUri || item.videoUrl }}
+          source={{ uri: videoSource }}
           style={styles.videoPlayer}
           resizeMode="cover"
-          shouldPlay={isVisible && isFocused && !paused}
           isLooping={true}
           isMuted={false}
           onLoad={handleVideoLoad}
           onError={handleVideoError}
           onPlaybackStatusUpdate={handlePlaybackStatusUpdate}
-          progressUpdateIntervalMillis={2000}
+          progressUpdateIntervalMillis={500}
           rate={1.0}
           volume={1.0}
-          // buffer config for smoother playback
           bufferConfig={{
-            minBufferMs: 10000,
-            maxBufferMs: 30000,
-            bufferForPlaybackMs: 2000,
-            bufferForPlaybackAfterRebufferMs: 3000
+            minBufferMs: 2000,
+            maxBufferMs: 10000,
+            bufferForPlaybackMs: 500,
+            bufferForPlaybackAfterRebufferMs: 1000
           }}
+          useNativeControls={false}
+          ignoreSilentSwitch="ignore"
         />
 
+        {/* Play/pause icon */}
         {showPlayIcon && (
           <View style={styles.centerOverlay}>
-            <Icon
-              name={paused ? 'play' : 'pause'}
-              size={70}
-              color={COLOR.icon}
-              style={styles.playIcon}
-            />
+            <View style={styles.playIconBackground}>
+              <Icon
+                name={userPaused ? 'play' : 'pause'}
+                size={50}
+                color="white"
+                style={styles.playIcon}
+              />
+            </View>
           </View>
         )}
 
-        {/* Show loading only when truly needed */}
+        {/* Loading indicator */}
         {isLoading && !isPlaying && !showPlayIcon && (
           <View style={styles.centerOverlay}>
             <ActivityIndicator size="large" color="white" />
           </View>
         )}
 
-        {/* Manual retry button for failed videos */}
-        {hasError && retryCountRef.current >= 3 && (
+        {/* Error with retry */}
+        {hasError && retryCountRef.current >= 1 && (
           <TouchableOpacity style={styles.retryButton} onPress={() => {
             retryCountRef.current = 0;
+            setLocalVideoUri(null);
+            cacheAttemptedRef.current = false;
+            stableVideoSourceRef.current = item.videoUrl;
+            setHasError(false);
+            setIsLoading(true);
+            setUserPaused(false); // Reset user pause state
             retryLoadVideo();
           }}>
+            <Icon name="refresh" size={20} color="white" />
             <Text style={styles.retryText}>Retry</Text>
           </TouchableOpacity>
         )}
 
-        <VideoInfo video={{ username: item.user, description: item.description }} />
+        {/* ENHANCED VIDEO INFO - Pass more user data for navigation */}
+        <VideoInfo video={{ 
+          username: item.username || item.user, 
+          description: item.description,
+          userId: item.user_id || item.id
+        }} />
       </View>
     </TouchableWithoutFeedback>
   );
-};
+});
+
+VideoItem.displayName = 'VideoItem';
 
 const styles = StyleSheet.create({
   videoContainer: {
@@ -280,31 +508,45 @@ const styles = StyleSheet.create({
   },
   centerOverlay: {
     position: 'absolute',
-    top: '45%',
-    left: '45%',
+    top: '50%',
+    left: '50%',
+    transform: [{ translateX: -35 }, { translateY: -35 }],
     zIndex: 10,
+    alignItems: 'center',
   },
-  videoInfo: {
-    position: 'absolute',
-    bottom: 40,
-    left: 18,
+  playIconBackground: {
+    width: 70,
+    height: 70,
+    borderRadius: 35,
+    backgroundColor: 'rgba(0, 0, 0, 0.5)',
+    justifyContent: 'center',
+    alignItems: 'center',
   },
   playIcon: {
     alignSelf: 'center',
   },
   retryButton: {
     position: 'absolute',
-    backgroundColor: 'rgba(0, 0, 0, 0.7)',
-    paddingHorizontal: 20,
+    backgroundColor: 'rgba(0, 0, 0, 0.8)',
+    paddingHorizontal: 16,
     paddingVertical: 10,
     borderRadius: 20,
     top: '50%',
     alignSelf: 'center',
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
   },
   retryText: {
     color: 'white',
-    fontWeight: 'bold',
-  }
+    fontWeight: '600',
+    fontSize: 14,
+  },
+  errorText: {
+    color: '#666',
+    fontSize: 14,
+    marginTop: 8,
+  },
 });
 
 export default VideoItem;

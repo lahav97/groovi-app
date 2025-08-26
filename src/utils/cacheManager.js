@@ -1,466 +1,702 @@
-/**
- * Enhanced cache manager with COMPLETELY SEPARATED feed and profile caches
- * This prevents feed and profile videos from interfering with each other
- */
-
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as FileSystem from 'expo-file-system';
+import Logger from './Logger';
 
-// SEPARATED cache keys - feed and profile are completely independent
+const logger = Logger.createLogger('CacheManager');
+
 const CACHE_KEYS = {
-  // FEED-ONLY caches
-  FEED_VIDEOS: 'feed_videos_cache_v3',
-  FEED_METADATA: 'feed_metadata_cache_v3',
-  FEED_TIMESTAMPS: 'feed_timestamps_v3',
-  
-  // PROFILE-ONLY caches (completely separate)
-  USER_PROFILE: 'user_profile_cache_v3',
-  PROFILE_VIDEOS: 'profile_videos_cache_v3',
-  PROFILE_TIMESTAMPS: 'profile_timestamps_v3',
-  
-  // General timestamps
-  CACHE_TIMESTAMPS: 'cache_timestamps_v3'
+    FEED_VIDEOS: 'feed_videos_cache',
+    FEED_METADATA: 'feed_metadata_cache',
+    USER_PROFILE: 'user_profile_cache',
+    PROFILE_VIDEOS: 'profile_videos_cache',
+    CACHE_TIMESTAMPS: 'cache_timestamps'
 };
 
-// Cache expiration times (in milliseconds)
 const CACHE_EXPIRY = {
-  FEED_VIDEOS: 10 * 60 * 1000,    // 10 minutes for feed
-  USER_PROFILE: 30 * 60 * 1000,   // 30 minutes for profile
-  PROFILE_VIDEOS: 60 * 60 * 1000, // 1 hour for profile videos (keep longer)
+    FEED_VIDEOS: 10 * 60 * 1000,
+    USER_PROFILE: 30 * 60 * 1000,
+    PROFILE_VIDEOS: 60 * 60 * 1000,
+};
+
+// REDUCED MEMORY CACHE - Much smaller to prevent 2GB leaks
+const memoryCache = new Map();
+const memoryCacheExpiry = new Map();
+const MEMORY_CACHE_TTL = 2 * 60 * 1000; // Reduced to 2 minutes
+const MAX_MEMORY_CACHE_SIZE = 5; // Reduced from 20 to 5 items
+const MAX_MEMORY_CACHE_MB = 10; // Max 10MB in memory cache
+
+let writeQueue = [];
+let isProcessing = false;
+let activeWrites = 0;
+let cleanupTimer = null;
+let isShuttingDown = false;
+let currentMemoryCacheSizeMB = 0;
+
+const MAX_QUEUE_SIZE = 2; // Reduced from 3
+const MAX_WRITE_OPERATIONS = 1;
+const OPERATION_TIMEOUT = 2000; // Reduced timeout
+
+/**
+ * ENHANCED: Memory cache with size tracking
+ */
+const getFromMemoryCache = (key) => {
+    const expiry = memoryCacheExpiry.get(key);
+    if (expiry && Date.now() > expiry) {
+        const oldData = memoryCache.get(key);
+        if (oldData) {
+            // Estimate and subtract size
+            const estimatedSize = (JSON.stringify(oldData).length * 2) / 1024 / 1024;
+            currentMemoryCacheSizeMB = Math.max(0, currentMemoryCacheSizeMB - estimatedSize);
+        }
+        
+        memoryCache.delete(key);
+        memoryCacheExpiry.delete(key);
+        return null;
+    }
+    return memoryCache.get(key) || null;
 };
 
 /**
- * Get current timestamp
- * @returns {number} Current timestamp
+ * ENHANCED: Memory cache with aggressive size limits
  */
+const setMemoryCache = (key, data) => {
+    // Estimate data size in MB
+    const estimatedSizeMB = (JSON.stringify(data).length * 2) / 1024 / 1024;
+    
+    // Check if data is too large for cache
+    if (estimatedSizeMB > 5) {
+        logger.warn(`Data too large for memory cache: ${estimatedSizeMB.toFixed(2)}MB`, { key });
+        return;
+    }
+
+    // Clean cache if at limits
+    while ((memoryCache.size >= MAX_MEMORY_CACHE_SIZE || 
+           currentMemoryCacheSizeMB + estimatedSizeMB > MAX_MEMORY_CACHE_MB) && 
+           memoryCache.size > 0) {
+        
+        const oldestKey = memoryCache.keys().next().value;
+        const oldData = memoryCache.get(oldestKey);
+        
+        if (oldData) {
+            const oldSize = (JSON.stringify(oldData).length * 2) / 1024 / 1024;
+            currentMemoryCacheSizeMB = Math.max(0, currentMemoryCacheSizeMB - oldSize);
+        }
+        
+        memoryCache.delete(oldestKey);
+        memoryCacheExpiry.delete(oldestKey);
+        
+        logger.info(`🗑️ Evicted from memory cache: ${oldestKey}`);
+    }
+
+    // Add new data
+    memoryCache.set(key, data);
+    memoryCacheExpiry.set(key, Date.now() + MEMORY_CACHE_TTL);
+    currentMemoryCacheSizeMB += estimatedSizeMB;
+    
+    if (__DEV__) {
+        logger.debug(`💾 Memory cache: ${memoryCache.size} items, ${currentMemoryCacheSizeMB.toFixed(2)}MB`);
+    }
+};
+
+/**
+ * ENHANCED: Aggressive memory cache cleanup
+ */
+const forceMemoryCacheCleanup = (reason = 'unknown') => {
+    logger.warn(`🧹 Force cleaning memory cache: ${reason}`);
+
+    const sizeBefore = memoryCache.size;
+    const mbBefore = currentMemoryCacheSizeMB;
+    
+    memoryCache.clear();
+    memoryCacheExpiry.clear();
+    currentMemoryCacheSizeMB = 0;
+    
+    logger.info(`✅ Memory cache cleared: ${sizeBefore} items (${mbBefore.toFixed(2)}MB) → 0`);
+
+    // Force garbage collection if available
+    if (global.gc) {
+        setTimeout(() => global.gc(), 100);
+    }
+};
+
+const processWriteQueue = async () => {
+    if (isProcessing || isShuttingDown || writeQueue.length === 0) {
+        return;
+    }
+
+    isProcessing = true;
+
+    try {
+        while (writeQueue.length > 0 && activeWrites < MAX_WRITE_OPERATIONS && !isShuttingDown) {
+            const operation = writeQueue.shift();
+            if (!operation) continue;
+
+            activeWrites++;
+
+            try {
+                await Promise.race([
+                    operation.fn(),
+                    new Promise((_, reject) =>
+                        setTimeout(() => reject(new Error('Write timeout')), OPERATION_TIMEOUT)
+                    )
+                ]);
+            } catch (error) {
+                logger.error(`❌ Write operation failed: ${operation.id}`, { error: error.message });
+            } finally {
+                activeWrites--;
+            }
+
+            await new Promise(resolve => setTimeout(resolve, 5));
+        }
+    } finally {
+        isProcessing = false;
+
+        if (writeQueue.length > 0 && !isShuttingDown) {
+            setTimeout(processWriteQueue, 15);
+        }
+    }
+};
+
+const readCacheInstant = async (key, timeout = 500) => {
+    // Check memory cache first
+    const memoryData = getFromMemoryCache(key);
+    if (memoryData) {
+        return memoryData;
+    }
+
+    // Read from disk
+    try {
+        const promise = AsyncStorage.getItem(key);
+        const timeoutPromise = new Promise((_, reject) =>
+            setTimeout(() => reject(new Error('Cache read timeout')), timeout)
+        );
+
+        const result = await Promise.race([promise, timeoutPromise]);
+
+        if (result) {
+            const dataSize = (result.length * 2) / 1024 / 1024;
+            if (dataSize < 3) {
+                setMemoryCache(key, result);
+            }
+        }
+
+        return result;
+    } catch (error) {
+        logger.warn(`⚠️ Cache read failed: ${key}`, { error: error.message });
+        return null;
+    }
+};
+
+const queueWriteOperation = (operation, operationId = null) => {
+    if (isShuttingDown) {
+        logger.warn('Write operation rejected - shutting down');
+        return Promise.reject(new Error('Cache manager shutting down'));
+    }
+
+    if (writeQueue.length >= MAX_QUEUE_SIZE) {
+        writeQueue = writeQueue.slice(-1);
+        logger.warn(`📦 Write queue full, trimmed to ${writeQueue.length} operations`);
+    }
+
+    const id = operationId || `write_${Date.now()}`;
+    writeQueue = writeQueue.filter(op => op.id !== id);
+
+    return new Promise((resolve, reject) => {
+        writeQueue.push({
+            id,
+            fn: async () => {
+                try {
+                    const result = await operation();
+                    resolve(result);
+                } catch (error) {
+                    reject(error);
+                }
+            }
+        });
+
+        if (__DEV__) {
+            logger.debug(`📝 Queued write operation: ${id} (Queue size: ${writeQueue.length})`);
+        }
+        processWriteQueue();
+    });
+};
+
 const getCurrentTimestamp = () => Date.now();
 
-/**
- * Check if cache is expired
- * @param {number} timestamp - Cache timestamp
- * @param {number} maxAge - Maximum age in milliseconds
- * @returns {boolean} True if expired
- */
 const isCacheExpired = (timestamp, maxAge) => {
-  return (getCurrentTimestamp() - timestamp) > maxAge;
+    return (getCurrentTimestamp() - timestamp) > maxAge;
 };
 
-/**
- * Get cache timestamp for a specific key
- * @param {string} key - Cache key
- * @returns {Promise<number|null>} Timestamp or null
- */
 const getCacheTimestamp = async (key) => {
-  try {
-    const timestamps = await AsyncStorage.getItem(CACHE_KEYS.CACHE_TIMESTAMPS);
-    if (timestamps) {
-      const parsed = JSON.parse(timestamps);
-      return parsed[key] || null;
-    }
-    return null;
-  } catch (error) {
-    console.error('❌ Error getting cache timestamp:', error);
-    return null;
-  }
-};
-
-/**
- * Set cache timestamp for a specific key
- * @param {string} key - Cache key
- * @param {number} timestamp - Timestamp to set
- */
-const setCacheTimestamp = async (key, timestamp = getCurrentTimestamp()) => {
-  try {
-    const timestamps = await AsyncStorage.getItem(CACHE_KEYS.CACHE_TIMESTAMPS);
-    const parsed = timestamps ? JSON.parse(timestamps) : {};
-    parsed[key] = timestamp;
-    await AsyncStorage.setItem(CACHE_KEYS.CACHE_TIMESTAMPS, JSON.stringify(parsed));
-  } catch (error) {
-    console.error('❌ Error setting cache timestamp:', error);
-  }
-};
-
-// ============================================================================
-// FEED CACHE MANAGEMENT (COMPLETELY SEPARATE FROM PROFILE)
-// ============================================================================
-
-/**
- * Cache FEED videos with metadata (independent of profile videos)
- * @param {Array} feedVideos - Array of FEED video objects
- * @param {Object} metadata - Additional metadata (page, hasMore, etc.)
- */
-export const cacheFeedVideos = async (feedVideos, metadata = {}) => {
-  try {
-    console.log(`💾 Caching ${feedVideos.length} FEED videos (separate from profile)`);
-    
-    // Cache FEED videos only
-    await AsyncStorage.setItem(CACHE_KEYS.FEED_VIDEOS, JSON.stringify(feedVideos));
-    
-    // Cache FEED metadata
-    const feedMetadata = {
-      videoCount: feedVideos.length,
-      lastUpdated: getCurrentTimestamp(),
-      type: 'feed_only', // Mark as feed-only cache
-      ...metadata
-    };
-    await AsyncStorage.setItem(CACHE_KEYS.FEED_METADATA, JSON.stringify(feedMetadata));
-    
-    // Set FEED timestamp
-    await setCacheTimestamp(CACHE_KEYS.FEED_VIDEOS);
-    
-    console.log('✅ FEED videos cached successfully (profile unaffected)');
-  } catch (error) {
-    console.error('❌ Error caching FEED videos:', error);
-  }
-};
-
-/**
- * Get cached FEED videos (independent of profile videos)
- * @returns {Promise<Array|null>} Cached FEED videos or null if expired/not found
- */
-export const getFeedCache = async () => {
-  try {
-    // Check if FEED cache exists and is not expired
-    const timestamp = await getCacheTimestamp(CACHE_KEYS.FEED_VIDEOS);
-    if (!timestamp || isCacheExpired(timestamp, CACHE_EXPIRY.FEED_VIDEOS)) {
-      console.log('⏰ FEED cache expired or not found');
-      return null;
-    }
-
-    // Get cached FEED videos
-    const cachedFeedVideos = await AsyncStorage.getItem(CACHE_KEYS.FEED_VIDEOS);
-    if (cachedFeedVideos) {
-      const feedVideos = JSON.parse(cachedFeedVideos);
-      console.log(`⚡ Retrieved ${feedVideos.length} cached FEED videos (separate from profile)`);
-      return feedVideos;
-    }
-
-    return null;
-  } catch (error) {
-    console.error('❌ Error getting FEED cache:', error);
-    return null;
-  }
-};
-
-/**
- * Get FEED cache metadata (independent of profile)
- * @returns {Promise<Object|null>} FEED metadata or null
- */
-export const getFeedMetadata = async () => {
-  try {
-    const metadata = await AsyncStorage.getItem(CACHE_KEYS.FEED_METADATA);
-    if (metadata) {
-      const parsed = JSON.parse(metadata);
-      console.log(`📊 FEED metadata: ${parsed.videoCount} videos, type: ${parsed.type}`);
-      return parsed;
-    }
-    return null;
-  } catch (error) {
-    console.error('❌ Error getting FEED metadata:', error);
-    return null;
-  }
-};
-
-/**
- * Clear FEED cache only (profile cache unaffected)
- */
-export const clearFeedCache = async () => {
-  try {
-    console.log('🧹 Clearing FEED cache only (profile cache preserved)...');
-    
-    await AsyncStorage.multiRemove([
-      CACHE_KEYS.FEED_VIDEOS,
-      CACHE_KEYS.FEED_METADATA
-    ]);
-    
-    console.log('✅ FEED cache cleared (profile cache untouched)');
-  } catch (error) {
-    console.error('❌ Error clearing FEED cache:', error);
-  }
-};
-
-// ============================================================================
-// PROFILE CACHE MANAGEMENT (COMPLETELY SEPARATE FROM FEED)
-// ============================================================================
-
-/**
- * Cache user profile data (independent of feed videos)
- * @param {Object} profileData - User profile data
- * @param {string} userEmail - User email for cache key
- */
-export const cacheUserProfile = async (profileData, userEmail) => {
-  try {
-    console.log(`💾 Caching profile for user: ${userEmail} (separate from feed)`);
-    
-    // Create PROFILE-specific cache key
-    const profileCacheKey = `${CACHE_KEYS.USER_PROFILE}_${userEmail}`;
-    
-    // Cache profile data (excluding videos for separate storage)
-    const profileDataWithoutVideos = { ...profileData };
-    const profileVideos = profileDataWithoutVideos.videos || [];
-    delete profileDataWithoutVideos.videos; // Remove videos for separate storage
-    
-    await AsyncStorage.setItem(profileCacheKey, JSON.stringify(profileDataWithoutVideos));
-    
-    // Cache PROFILE videos SEPARATELY from feed videos
-    if (profileVideos && profileVideos.length > 0) {
-      const profileVideosCacheKey = `${CACHE_KEYS.PROFILE_VIDEOS}_${userEmail}`;
-      await AsyncStorage.setItem(profileVideosCacheKey, JSON.stringify(profileVideos));
-      await setCacheTimestamp(profileVideosCacheKey);
-      console.log(`💾 Cached ${profileVideos.length} PROFILE videos separately from feed`);
-    }
-    
-    // Set PROFILE timestamp
-    await setCacheTimestamp(profileCacheKey);
-    
-    console.log('✅ Profile cached successfully (independent of feed)');
-  } catch (error) {
-    console.error('❌ Error caching profile:', error);
-  }
-};
-
-/**
- * Get cached user profile (independent of feed videos)
- * @param {string} userEmail - User email
- * @returns {Promise<Object|null>} Cached profile or null if expired/not found
- */
-export const getProfileCache = async (userEmail) => {
-  try {
-    const profileCacheKey = `${CACHE_KEYS.USER_PROFILE}_${userEmail}`;
-    
-    // Check if PROFILE cache exists and is not expired
-    const timestamp = await getCacheTimestamp(profileCacheKey);
-    if (!timestamp || isCacheExpired(timestamp, CACHE_EXPIRY.USER_PROFILE)) {
-      console.log('⏰ PROFILE cache expired or not found for:', userEmail);
-      return null;
-    }
-
-    // Get cached PROFILE data
-    const cachedProfile = await AsyncStorage.getItem(profileCacheKey);
-    if (cachedProfile) {
-      const profile = JSON.parse(cachedProfile);
-      
-      // Get PROFILE videos from separate cache
-      const profileVideosCacheKey = `${CACHE_KEYS.PROFILE_VIDEOS}_${userEmail}`;
-      const videoTimestamp = await getCacheTimestamp(profileVideosCacheKey);
-      
-      if (videoTimestamp && !isCacheExpired(videoTimestamp, CACHE_EXPIRY.PROFILE_VIDEOS)) {
-        const cachedProfileVideos = await AsyncStorage.getItem(profileVideosCacheKey);
-        if (cachedProfileVideos) {
-          profile.videos = JSON.parse(cachedProfileVideos);
-          console.log(`⚡ Restored ${profile.videos.length} PROFILE videos from separate cache`);
+    try {
+        const timestamps = await readCacheInstant(CACHE_KEYS.CACHE_TIMESTAMPS);
+        if (timestamps) {
+            const parsed = JSON.parse(timestamps);
+            return parsed[key] || null;
         }
-      }
-      
-      console.log(`⚡ Retrieved cached profile for: ${userEmail} (independent of feed)`);
-      return profile;
+        return null;
+    } catch (error) {
+        return null;
     }
+};
 
-    return null;
-  } catch (error) {
-    console.error('❌ Error getting PROFILE cache:', error);
-    return null;
-  }
+const setCacheTimestamp = (key, timestamp = getCurrentTimestamp()) => {
+    // Fire and forget - don't block for timestamp updates
+    queueWriteOperation(async () => {
+        try {
+            const timestamps = await readCacheInstant(CACHE_KEYS.CACHE_TIMESTAMPS);
+            const parsed = timestamps ? JSON.parse(timestamps) : {};
+            parsed[key] = timestamp;
+
+            const keys = Object.keys(parsed);
+            if (keys.length > 10) { // Reduced from 15
+                const sorted = keys.sort((a, b) => parsed[a] - parsed[b]);
+                sorted.slice(0, 5).forEach(k => delete parsed[k]); // More aggressive cleanup
+                logger.info(`Cleaned old timestamps: ${sorted.slice(0, 5).join(', ')}`);
+            }
+
+            await AsyncStorage.setItem(CACHE_KEYS.CACHE_TIMESTAMPS, JSON.stringify(parsed));
+
+            // Only cache if small
+            const dataSize = (JSON.stringify(parsed).length * 2) / 1024 / 1024;
+            if (dataSize < 1) {
+                setMemoryCache(CACHE_KEYS.CACHE_TIMESTAMPS, JSON.stringify(parsed));
+            }
+
+        } catch (error) {
+            logger.error('Error setting cache timestamp', error.message);
+        }
+    }, `timestamp_${key}`).catch(() => {
+        // Silent fail for timestamps
+    });
+};
+
+export const cacheFeedVideos = (feedVideos, metadata = {}) => {
+    logger.info(`Caching ${feedVideos.length} feed videos`);
+
+    return queueWriteOperation(async () => {
+        try {
+            const videosToCache = feedVideos.slice(0, 8); // Reduced from 12
+
+            const minimalVideos = videosToCache.map(v => ({
+                id: v.id,
+                user_id: v.user_id,
+                username: v.username,
+                video_url: v.video_url || v.videoUrl,
+                instruments: v.instruments
+            }));
+
+            const videoData = JSON.stringify(minimalVideos);
+            const metadataObj = {
+                videoCount: minimalVideos.length,
+                lastUpdated: getCurrentTimestamp(),
+                type: 'feed_only',
+                ...metadata
+            };
+
+            // Write to disk
+            await AsyncStorage.setItem(CACHE_KEYS.FEED_VIDEOS, videoData);
+            await AsyncStorage.setItem(CACHE_KEYS.FEED_METADATA, JSON.stringify(metadataObj));
+
+            // Only cache in memory if reasonable size
+            const dataSize = (videoData.length * 2) / 1024 / 1024;
+            if (dataSize < 3) {
+                setMemoryCache(CACHE_KEYS.FEED_VIDEOS, videoData);
+                setMemoryCache(CACHE_KEYS.FEED_METADATA, JSON.stringify(metadataObj));
+            }
+
+            setCacheTimestamp(CACHE_KEYS.FEED_VIDEOS);
+
+            logger.debug(`Feed videos cached successfully: ${minimalVideos.length} videos (${dataSize.toFixed(2)}MB)`);
+
+        } catch (error) {
+            logger.error('Error caching feed videos', error.message);
+        }
+    }, 'cache_feed_videos');
+};
+
+export const getDiscoverCache = async () => {
+    const startTime = Date.now();
+
+    try {
+        // Ultra-fast timestamp check
+        const timestamp = await getCacheTimestamp(CACHE_KEYS.FEED_VIDEOS);
+        if (!timestamp || isCacheExpired(timestamp, CACHE_EXPIRY.FEED_VIDEOS)) {
+            logger.info('Feed cache expired or missing');
+            return null;
+        }
+
+        // Instant cache read (memory first, then disk)
+        const cachedFeedVideos = await readCacheInstant(CACHE_KEYS.FEED_VIDEOS);
+        if (cachedFeedVideos) {
+            try {
+                const feedVideos = JSON.parse(cachedFeedVideos);
+                logger.debug(`Feed cache loaded: ${feedVideos.length} videos`, `${Date.now() - startTime}ms`);
+                return feedVideos;
+            } catch (parseError) {
+                logger.error('Feed cache corrupted, cleaning up');
+                // Queue cleanup asynchronously - don't block
+                queueWriteOperation(async () => {
+                    await AsyncStorage.removeItem(CACHE_KEYS.FEED_VIDEOS);
+                    memoryCache.delete(CACHE_KEYS.FEED_VIDEOS);
+                }, 'cleanup_corrupt_feed').catch(() => {});
+                return null;
+            }
+        }
+
+        logger.info('Feed cache miss');
+        return null;
+    } catch (error) {
+        logger.error('Error getting feed cache', error.message);
+        return null;
+    }
+};
+
+export const getFeedCache = getDiscoverCache;
+
+export const clearFeedCache = () => {
+    logger.info('Clearing feed cache');
+    return queueWriteOperation(async () => {
+        try {
+            await AsyncStorage.multiRemove([
+                CACHE_KEYS.FEED_VIDEOS,
+                CACHE_KEYS.FEED_METADATA
+            ]);
+
+            // Clear from memory cache too
+            memoryCache.delete(CACHE_KEYS.FEED_VIDEOS);
+            memoryCache.delete(CACHE_KEYS.FEED_METADATA);
+
+        } catch (error) {
+            logger.error('Error clearing feed cache', error.message);
+        }
+    }, 'clear_feed_cache');
+};
+
+export const cacheUserProfile = (profileData, userEmail) => {
+    logger.info(`Caching profile for: ${userEmail}`);
+
+    return queueWriteOperation(async () => {
+        try {
+            const profileCacheKey = `${CACHE_KEYS.USER_PROFILE}_${userEmail}`;
+
+            const minimalProfile = {
+                username: profileData.username,
+                email: profileData.email,
+                bio: profileData.bio,
+                instruments: profileData.instruments,
+                location: profileData.location,
+                age: profileData.age,
+                rating: profileData.rating,
+                followers: profileData.followers,
+                following: profileData.following,
+                likes: profileData.likes
+            };
+
+            const profileData_str = JSON.stringify(minimalProfile);
+            await AsyncStorage.setItem(profileCacheKey, profileData_str);
+
+            // Only cache in memory if reasonable size
+            const profileSize = (profileData_str.length * 2) / 1024 / 1024;
+            if (profileSize < 1) {
+                setMemoryCache(profileCacheKey, profileData_str);
+            }
+
+            if (profileData.videos && profileData.videos.length > 0) {
+                const videosToCache = profileData.videos.slice(0, 4); // Reduced from 6
+                const profileVideosCacheKey = `${CACHE_KEYS.PROFILE_VIDEOS}_${userEmail}`;
+                const videosData = JSON.stringify(videosToCache);
+
+                await AsyncStorage.setItem(profileVideosCacheKey, videosData);
+                
+                const videoSize = (videosData.length * 2) / 1024 / 1024;
+                if (videoSize < 2) {
+                    setMemoryCache(profileVideosCacheKey, videosData);
+                }
+                setCacheTimestamp(profileVideosCacheKey);
+            }
+
+            setCacheTimestamp(profileCacheKey);
+            logger.debug(`Profile cached for: ${userEmail} (${profileSize.toFixed(2)}MB)`);
+
+        } catch (error) {
+            logger.error(`Error caching profile for ${userEmail}`, error.message);
+        }
+    }, `cache_profile_${userEmail}`);
+};
+
+export const getProfileCache = async (userEmail) => {
+    const startTime = Date.now();
+
+    try {
+        const profileCacheKey = `${CACHE_KEYS.USER_PROFILE}_${userEmail}`;
+
+        // Ultra-fast timestamp check
+        const timestamp = await getCacheTimestamp(profileCacheKey);
+        if (!timestamp || isCacheExpired(timestamp, CACHE_EXPIRY.USER_PROFILE)) {
+            logger.info(`Profile cache expired for: ${userEmail}`);
+            return null;
+        }
+
+        // Instant cache read
+        const cachedProfile = await readCacheInstant(profileCacheKey);
+        if (cachedProfile) {
+            try {
+                const profile = JSON.parse(cachedProfile);
+
+                // Try to get videos too
+                const profileVideosCacheKey = `${CACHE_KEYS.PROFILE_VIDEOS}_${userEmail}`;
+                const videoTimestamp = await getCacheTimestamp(profileVideosCacheKey);
+
+                if (videoTimestamp && !isCacheExpired(videoTimestamp, CACHE_EXPIRY.PROFILE_VIDEOS)) {
+                    const cachedProfileVideos = await readCacheInstant(profileVideosCacheKey);
+                    if (cachedProfileVideos) {
+                        profile.videos = JSON.parse(cachedProfileVideos);
+                    }
+                }
+
+                logger.debug(`Profile cache loaded for: ${userEmail}`, `${Date.now() - startTime}ms`);
+                return profile;
+            } catch (parseError) {
+                logger.error(`Profile cache corrupted for: ${userEmail}`);
+                // Queue cleanup asynchronously
+                queueWriteOperation(async () => {
+                    await AsyncStorage.removeItem(profileCacheKey);
+                    memoryCache.delete(profileCacheKey);
+                }, `cleanup_corrupt_profile_${userEmail}`).catch(() => {});
+                return null;
+            }
+        }
+
+        logger.info(`Profile cache miss for: ${userEmail}`);
+        return null;
+    } catch (error) {
+        logger.error(`Error getting profile cache for ${userEmail}`, error.message);
+        return null;
+    }
+};
+
+export const clearProfileCache = (userEmail) => {
+    logger.info(`Clearing profile cache for: ${userEmail}`);
+    return queueWriteOperation(async () => {
+        try {
+            const profileCacheKey = `${CACHE_KEYS.USER_PROFILE}_${userEmail}`;
+            const profileVideosCacheKey = `${CACHE_KEYS.PROFILE_VIDEOS}_${userEmail}`;
+
+            await AsyncStorage.multiRemove([profileCacheKey, profileVideosCacheKey]);
+
+            // Clear from memory cache too
+            memoryCache.delete(profileCacheKey);
+            memoryCache.delete(profileVideosCacheKey);
+
+        } catch (error) {
+            logger.error(`Error clearing profile cache for ${userEmail}`, error.message);
+        }
+    }, `clear_profile_${userEmail}`);
 };
 
 /**
- * Clear specific user's PROFILE cache only (feed cache unaffected)
- * @param {string} userEmail - User email
- */
-export const clearProfileCache = async (userEmail) => {
-  try {
-    console.log(`🧹 Clearing PROFILE cache for: ${userEmail} (feed cache preserved)`);
-    
-    const profileCacheKey = `${CACHE_KEYS.USER_PROFILE}_${userEmail}`;
-    const profileVideosCacheKey = `${CACHE_KEYS.PROFILE_VIDEOS}_${userEmail}`;
-    
-    await AsyncStorage.multiRemove([profileCacheKey, profileVideosCacheKey]);
-    
-    console.log('✅ PROFILE cache cleared (feed cache untouched)');
-  } catch (error) {
-    console.error('❌ Error clearing PROFILE cache:', error);
-  }
-};
-
-// ============================================================================
-// CACHE MANAGEMENT & CLEANUP (SEPARATED SYSTEMS)
-// ============================================================================
-
-/**
- * Clear all caches (both feed and profile)
+ * ENHANCED: Emergency cache clearing with memory cleanup
  */
 export const clearAllCaches = async () => {
-  try {
-    console.log('🧹 Clearing ALL caches (both feed and profile)...');
+    logger.warn('Clearing ALL caches (emergency)');
+    isShuttingDown = true;
+
+    if (cleanupTimer) {
+        clearTimeout(cleanupTimer);
+        cleanupTimer = null;
+    }
+
+    writeQueue = [];
+    activeWrites = 0;
+    isProcessing = false;
+
+    // Force clear memory cache first
+    forceMemoryCacheCleanup('clear_all_caches');
+
+    try {
+        const allKeys = await AsyncStorage.getAllKeys();
+        const cacheKeys = allKeys.filter(key =>
+            key.includes('_cache') || key.includes('_metadata') || key.includes('_timestamps')
+        );
+
+        if (cacheKeys.length > 0) {
+            await AsyncStorage.multiRemove(cacheKeys);
+            logger.debug(`Cleared ${cacheKeys.length} cache entries`);
+        }
+
+        // Clear video cache directory
+        const videoCacheDir = `${FileSystem.cacheDirectory}videos`;
+        try {
+            const dirInfo = await FileSystem.getInfoAsync(videoCacheDir);
+            if (dirInfo.exists) {
+                await FileSystem.deleteAsync(videoCacheDir, { idempotent: true });
+                logger.debug('Cleared video cache directory');
+            }
+        } catch (videoCacheError) {
+            logger.warn('Error clearing video cache directory:', videoCacheError);
+        }
+
+    } catch (error) {
+        logger.error('Error clearing all caches', error.message);
+    }
+
+    isShuttingDown = false;
     
-    // Get all cache keys
-    const allKeys = await AsyncStorage.getAllKeys();
-    const cacheKeys = allKeys.filter(key => 
-      key.includes('_cache_v3') || key.includes('_metadata_v3') || key.includes('_timestamps_v3')
-    );
-    
-    // Remove all cache keys
-    await AsyncStorage.multiRemove(cacheKeys);
-    
-    console.log(`✅ Cleared ${cacheKeys.length} cache entries (feed + profile)`);
-  } catch (error) {
-    console.error('❌ Error clearing all caches:', error);
-  }
+    // Force garbage collection
+    if (global.gc) {
+        global.gc();
+    }
 };
 
-/**
- * Get separated cache statistics
- * @returns {Promise<Object>} Cache statistics for feed and profile separately
- */
 export const getCacheStats = async () => {
-  try {
-    const stats = {
-      feedVideos: 0,
-      feedCacheSize: 0,
-      profileCaches: 0,
-      profileVideos: 0,
-      totalCacheEntries: 0,
-      timestamps: {},
-      separation: 'feed_and_profile_independent'
-    };
+    try {
+        const allKeys = await AsyncStorage.getAllKeys();
+        const cacheKeys = allKeys.filter(key => key.includes('_cache'));
 
-    // Get all keys and separate by type
-    const allKeys = await AsyncStorage.getAllKeys();
-    const feedKeys = allKeys.filter(key => key.includes('feed_') && key.includes('_cache_v3'));
-    const profileKeys = allKeys.filter(key => key.includes('profile_') && key.includes('_cache_v3'));
-    
-    // Count FEED videos
-    const feedVideosKey = allKeys.find(key => key === CACHE_KEYS.FEED_VIDEOS);
-    if (feedVideosKey) {
-      const feedData = await AsyncStorage.getItem(feedVideosKey);
-      if (feedData) {
-        const feedVideos = JSON.parse(feedData);
-        stats.feedVideos = feedVideos.length;
-      }
+        let totalSize = 0;
+        const sampleKeys = cacheKeys.slice(0, 3); // Reduced sample
+
+        for (const key of sampleKeys) {
+            const value = await readCacheInstant(key, 500);
+            if (value) {
+                totalSize += value.length;
+            }
+        }
+
+        return {
+            totalKeys: cacheKeys.length,
+            approximateSize: `${(totalSize / 1024).toFixed(2)} KB`,
+            memoryCache: {
+                items: memoryCache.size,
+                sizeMB: currentMemoryCacheSizeMB.toFixed(2),
+                maxItems: MAX_MEMORY_CACHE_SIZE,
+                maxSizeMB: MAX_MEMORY_CACHE_MB
+            },
+            queueStatus: {
+                pending: writeQueue.length,
+                active: activeWrites
+            }
+        };
+    } catch (error) {
+        return null;
     }
-    
-    // Count PROFILE caches
-    stats.profileCaches = profileKeys.filter(key => key.includes('user_profile')).length;
-    
-    // Count total PROFILE videos across all users
-    const profileVideoKeys = profileKeys.filter(key => key.includes('profile_videos'));
-    for (const key of profileVideoKeys) {
-      const data = await AsyncStorage.getItem(key);
-      if (data) {
-        const videos = JSON.parse(data);
-        stats.profileVideos += videos.length;
-      }
-    }
-    
-    stats.feedCacheSize = feedKeys.length;
-    stats.totalCacheEntries = feedKeys.length + profileKeys.length;
-
-    // Get timestamps
-    const timestamps = await AsyncStorage.getItem(CACHE_KEYS.CACHE_TIMESTAMPS);
-    if (timestamps) {
-      stats.timestamps = JSON.parse(timestamps);
-    }
-
-    console.log('📊 Cache Stats:', {
-      feed: `${stats.feedVideos} videos in ${stats.feedCacheSize} entries`,
-      profile: `${stats.profileVideos} videos across ${stats.profileCaches} profiles`,
-      total: `${stats.totalCacheEntries} cache entries`,
-      separation: stats.separation
-    });
-
-    return stats;
-  } catch (error) {
-    console.error('❌ Error getting cache stats:', error);
-    return null;
-  }
 };
-
-// ============================================================================
-// VIDEO FILE CACHE MANAGEMENT (SHARED FOR EFFICIENCY)
-// ============================================================================
 
 /**
- * Manages video file cache by removing oldest files when size limit is reached
- * This is shared between feed and profile videos for efficient storage management
- * @param {number} maxCacheSizeMB - Maximum cache size in MB
+ * ENHANCED: More aggressive video cache management
  */
-export const manageCacheSize = async (maxCacheSizeMB = 200) => {
-  try {
-    const maxCacheBytes = maxCacheSizeMB * 1024 * 1024;
-    const videoCacheDir = `${FileSystem.cacheDirectory}videos`;
-    
-    const dirInfo = await FileSystem.getInfoAsync(videoCacheDir);
-    if (!dirInfo.exists) {
-      return;
-    }
-    
-    const files = await FileSystem.readDirectoryAsync(videoCacheDir);
-    
-    const fileInfoPromises = files.map(async (filename) => {
-      const fileUri = `${videoCacheDir}/${filename}`;
-      const info = await FileSystem.getInfoAsync(fileUri);
-      return {
-        uri: fileUri,
-        name: filename,
-        modTime: info.modificationTime || 0,
-        size: info.size || 0,
-        type: filename.includes('feed') ? 'feed' : filename.includes('profile') ? 'profile' : 'unknown'
-      };
-    });
-    
-    const fileInfos = await Promise.all(fileInfoPromises);
-    const totalCacheBytes = fileInfos.reduce((sum, file) => sum + file.size, 0);
-    const feedFiles = fileInfos.filter(f => f.type === 'feed');
-    const profileFiles = fileInfos.filter(f => f.type === 'profile');
-    
-    console.log(`📊 Video cache size: ${(totalCacheBytes / (1024 * 1024)).toFixed(2)}MB`);
-    console.log(`📊 Feed files: ${feedFiles.length}, Profile files: ${profileFiles.length}`);
-    
-    if (totalCacheBytes > maxCacheBytes) {
-      console.log(`🧹 Video cache cleanup needed (${(totalCacheBytes / (1024 * 1024)).toFixed(2)}MB/${maxCacheSizeMB}MB)`);
-      
-      // Prioritize removing feed files over profile files (profile videos are more permanent)
-      const sortedFiles = [
-        ...feedFiles.sort((a, b) => a.modTime - b.modTime), // Feed files first (oldest first)
-        ...profileFiles.sort((a, b) => a.modTime - b.modTime) // Profile files second (if needed)
-      ];
-      
-      let bytesToFree = totalCacheBytes - maxCacheBytes;
-      let freedBytes = 0;
-      
-      for (const file of sortedFiles) {
-        if (freedBytes >= bytesToFree) break;
-        
-        console.log(`🗑️ Removing cached video (${file.type}): ${file.name}`);
-        await FileSystem.deleteAsync(file.uri, { idempotent: true });
-        freedBytes += file.size;
-      }
-      
-      console.log(`✅ Video cache cleanup complete. Freed ${(freedBytes / (1024 * 1024)).toFixed(2)}MB`);
-    }
-  } catch (error) {
-    console.error('❌ Error managing video cache size:', error);
-  }
-};
+export const manageCacheSize = async (maxCacheSizeMB = 30) => { // Reduced default
+    return queueWriteOperation(async () => {
+        try {
+            const maxCacheBytes = maxCacheSizeMB * 1024 * 1024;
+            const videoCacheDir = `${FileSystem.cacheDirectory}videos`;
 
-// ============================================================================
-// HELPER FUNCTIONS FOR DEBUGGING
-// ============================================================================
+            const dirInfo = await FileSystem.getInfoAsync(videoCacheDir);
+            if (!dirInfo.exists) return;
+
+            const files = await FileSystem.readDirectoryAsync(videoCacheDir);
+            
+            if (files.length === 0) return;
+
+            // Get all file info at once
+            const fileInfoPromises = files.map(async (filename) => {
+                const fileUri = `${videoCacheDir}/${filename}`;
+                try {
+                    const info = await FileSystem.getInfoAsync(fileUri);
+                    return {
+                        uri: fileUri,
+                        name: filename,
+                        modTime: info.modificationTime || 0,
+                        size: info.size || 0
+                    };
+                } catch (error) {
+                    return null;
+                }
+            });
+
+            const filesWithInfo = (await Promise.all(fileInfoPromises)).filter(Boolean);
+            const totalSize = filesWithInfo.reduce((sum, file) => sum + file.size, 0);
+
+            logger.debug(`Video cache: ${files.length} files, ${(totalSize / 1024 / 1024).toFixed(2)}MB`);
+
+            if (totalSize > maxCacheBytes) {
+                // Sort by modification time (oldest first)
+                const sortedFiles = filesWithInfo.sort((a, b) => a.modTime - b.modTime);
+                
+                // Delete older files until under limit
+                let currentSize = totalSize;
+                let deletedCount = 0;
+                
+                for (const file of sortedFiles) {
+                    if (currentSize <= maxCacheBytes) break;
+                    
+                    try {
+                        await FileSystem.deleteAsync(file.uri);
+                        currentSize -= file.size;
+                        deletedCount++;
+                    } catch (deleteError) {
+                        logger.warn(`Failed to delete ${file.name}:`, deleteError);
+                    }
+                }
+                
+                logger.debug(`Deleted ${deletedCount} old video files, saved ${((totalSize - currentSize) / 1024 / 1024).toFixed(2)}MB`);
+            }
+        } catch (error) {
+            logger.error('Error managing cache size:', error.message);
+        }
+    }, 'manage_cache_size');
+};
 
 /**
- * Log current cache separation status
+ * NEW: Force memory cleanup - called from AppMemoryManager
  */
-export const logCacheSeparation = async () => {
-  try {
-    const stats = await getCacheStats();
-    console.log('🔍 CACHE SEPARATION STATUS:');
-    console.log(`   📺 Feed: ${stats.feedVideos} videos in ${stats.feedCacheSize} cache entries`);
-    console.log(`   👤 Profile: ${stats.profileVideos} videos across ${stats.profileCaches} user profiles`);
-    console.log(`   🔒 Separation: ${stats.separation}`);
-    console.log(`   📊 Total independent cache entries: ${stats.totalCacheEntries}`);
-    
-    return stats;
-  } catch (error) {
-    console.error('❌ Error logging cache separation:', error);
-  }
+export const forceMemoryCleanup = (reason = 'unknown') => {
+    forceMemoryCacheCleanup(reason);
 };
+
+/**
+ * ENHANCED: More frequent cleanup
+ */
+const startPeriodicCleanup = () => {
+    if (cleanupTimer) {
+        clearTimeout(cleanupTimer);
+    }
+
+    cleanupTimer = setTimeout(() => {
+        if (!isShuttingDown) {
+            // Clean write queue more aggressively
+            if (writeQueue.length > MAX_QUEUE_SIZE) {
+                const removed = writeQueue.length - MAX_QUEUE_SIZE;
+                writeQueue = writeQueue.slice(-MAX_QUEUE_SIZE);
+                logger.warn(`Queue cleanup: removed ${removed} old operations`);
+            }
+
+            // Clean memory cache more aggressively
+            if (memoryCache.size > MAX_MEMORY_CACHE_SIZE || currentMemoryCacheSizeMB > MAX_MEMORY_CACHE_MB) {
+                forceMemoryCacheCleanup('periodic_cleanup');
+            }
+
+            startPeriodicCleanup();
+        }
+    }, 10000); // Reduced from 20 seconds to 10 seconds
+};
+
+export const shutdownCacheManager = () => {
+    logger.warn('Shutting down cache manager');
+    isShuttingDown = true;
+
+    if (cleanupTimer) {
+        clearTimeout(cleanupTimer);
+        cleanupTimer = null;
+    }
+
+    writeQueue = [];
+    activeWrites = 0;
+    isProcessing = false;
+
+    forceMemoryCacheCleanup('shutdown');
+    clearAllCaches();
+};
+
+startPeriodicCleanup();

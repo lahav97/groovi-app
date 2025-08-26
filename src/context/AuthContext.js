@@ -27,7 +27,8 @@ export const AuthProvider = ({ children }) => {
     try {
       const userInfo = await Auth.currentAuthenticatedUser();
       
-      const onboardingCompleted = userInfo.attributes?.['custom:onboardingCompleted'] === 'true';
+      const onboardingCompleted = userInfo.attributes?.
+        ['custom:onboardingCompleted'] === 'true';
       const userEmail = userInfo.attributes?.email || userInfo.username;
       
       console.log('🔍 AuthContext: Current user:', userEmail);
@@ -48,12 +49,14 @@ export const AuthProvider = ({ children }) => {
       await AsyncStorage.setItem('userData', JSON.stringify(userData));
       await saveUserEmail(userEmail);
       
-      // Trigger background loading only once per email
+      // ✨ ENHANCED: Trigger parallel loading (discover + profile) only once per email
       if (onboardingCompleted && userEmail && 
           (!backgroundLoadingTriggered.current || lastLoadingEmail.current !== userEmail)) {
         backgroundLoadingTriggered.current = true;
         lastLoadingEmail.current = userEmail;
-        BackgroundDataService.startStagedLoading(userData);
+        
+        console.log('🚀 AuthContext: Starting parallel loading (Discover + Profile)');
+        BackgroundDataService.startParallelLoading(userData);
       }
       
       console.log('✅ AuthContext: User restored from session');
@@ -79,7 +82,8 @@ export const AuthProvider = ({ children }) => {
       console.log('🔐 AuthContext: Signing in:', email);
       
       const userInfo = await Auth.signIn(email, password);
-      const onboardingCompleted = userInfo.attributes?.['custom:onboardingCompleted'] === 'true';
+      const onboardingCompleted = userInfo.attributes?.
+        ['custom:onboardingCompleted'] === 'true';
       const userEmail = userInfo.attributes?.email || email || userInfo.username;
       
       console.log('✅ AuthContext: Sign in successful');
@@ -100,7 +104,7 @@ export const AuthProvider = ({ children }) => {
       await AsyncStorage.setItem('userData', JSON.stringify(userData));
       await saveUserEmail(userEmail);
       
-      // Trigger background loading only once per email
+      // ✨ ENHANCED: Trigger parallel loading only once per email
       if (onboardingCompleted && 
           (!backgroundLoadingTriggered.current || lastLoadingEmail.current !== userEmail)) {
         backgroundLoadingTriggered.current = true;
@@ -108,7 +112,8 @@ export const AuthProvider = ({ children }) => {
         
         // Small delay to let UI update first
         setTimeout(() => {
-          BackgroundDataService.startStagedLoading(userData);
+          console.log('🚀 AuthContext: Starting parallel loading after sign in');
+          BackgroundDataService.startParallelLoading(userData);
         }, 300);
       }
       
@@ -148,27 +153,27 @@ export const AuthProvider = ({ children }) => {
       
       console.log('✅ AuthContext: Sign up successful');
       
-      return {
-        success: true,
-        data: {
-          username: email,
-          email
-        }
+      return { 
+        success: true, 
+        user,
+        needsConfirmation: true 
       };
     } catch (error) {
       console.error('❌ AuthContext: Sign up error:', error);
-      return {
-        success: false,
-        error: error.message || 'Failed to sign up'
+      return { 
+        success: false, 
+        error: error.message || 'Failed to sign up' 
       };
     } finally {
       setIsLoading(false);
     }
   };
 
-  // Confirm sign up - NO GLOBAL LOADING STATE CHANGES
+  // Confirm sign up
   const confirmSignUp = async (username, code) => {
     try {
+      console.log('✅ AuthContext: Confirming sign up for:', username);
+      
       await Auth.confirmSignUp(username, code);
       console.log('✅ AuthContext: Sign up confirmed');
       
@@ -183,42 +188,44 @@ export const AuthProvider = ({ children }) => {
   };
 
   // Check if user exists in Cognito
-  const checkUserExistsInCognito = async (email) => {
+  const checkUserExistsInCognito = async (username) => {
     try {
-      await Auth.forgotPassword(email);
-      return { exists: true };
+      await Auth.forgotPassword(username);
+      return { exists: true, error: null };
     } catch (error) {
       if (error.code === 'UserNotFoundException') {
-        return { exists: false };
+        return { exists: false, error: null };
       }
-      return { exists: true, error: error.message };
+      return { exists: false, error: error.message };
     }
   };
 
-  // Complete onboarding with background loading
+  // Complete onboarding
   const completeOnboarding = async () => {
     try {
       console.log('🎯 AuthContext: Completing onboarding...');
       
-      const currentUser = await Auth.currentAuthenticatedUser();
-      await Auth.updateUserAttributes(currentUser, {
+      if (!user) {
+        throw new Error('No user found');
+      }
+
+      await Auth.updateUserAttributes(user, {
         'custom:onboardingCompleted': 'true'
       });
-      
-      setHasCompletedOnboarding(true);
-      
+
       const updatedUser = { ...user, hasCompletedOnboarding: true };
       setUser(updatedUser);
+      setHasCompletedOnboarding(true);
       await AsyncStorage.setItem('userData', JSON.stringify(updatedUser));
-      
-      // Trigger background loading after onboarding
-      if (updatedUser.email && 
-          (!backgroundLoadingTriggered.current || lastLoadingEmail.current !== updatedUser.email)) {
+
+      // ✨ ENHANCED: Trigger parallel loading after onboarding completion
+      if (!backgroundLoadingTriggered.current) {
         backgroundLoadingTriggered.current = true;
         lastLoadingEmail.current = updatedUser.email;
         
         setTimeout(() => {
-          BackgroundDataService.startStagedLoading(updatedUser);
+          console.log('🚀 AuthContext: Starting parallel loading after onboarding');
+          BackgroundDataService.startParallelLoading(updatedUser);
         }, 800);
       }
       
@@ -294,14 +301,15 @@ export const AuthProvider = ({ children }) => {
       await AsyncStorage.setItem('userData', JSON.stringify(userData));
       await saveUserEmail(userData.email);
       
-      // Trigger background loading for social sign in
+      // ✨ ENHANCED: Trigger parallel loading for social sign in
       if (userData.email && 
           (!backgroundLoadingTriggered.current || lastLoadingEmail.current !== userData.email)) {
         backgroundLoadingTriggered.current = true;
         lastLoadingEmail.current = userData.email;
         
         setTimeout(() => {
-          BackgroundDataService.startStagedLoading(userData);
+          console.log('🚀 AuthContext: Starting parallel loading after social sign in');
+          BackgroundDataService.startParallelLoading(userData);
         }, 300);
       }
       
@@ -336,6 +344,7 @@ export const AuthProvider = ({ children }) => {
 
   // Force refresh all background data
   const forceRefreshAllData = async () => {
+    console.log('🔄 AuthContext: Force refreshing all data...');
     await BackgroundDataService.forceRefreshAll();
   };
 
