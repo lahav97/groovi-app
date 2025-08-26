@@ -6,6 +6,9 @@
 
 import { useState, useRef, useEffect, useCallback, useMemo } from 'react';
 import { useIsFocused } from '@react-navigation/native';
+import Logger from '../utils/Logger';
+
+const logger = Logger.createLogger('useVideoCache');
 
 /**
  * Custom hook for video caching and loading state management
@@ -26,13 +29,12 @@ export const useVideoCache = (videos = []) => {
 
   // Debug video input
   useEffect(() => {
-    console.log('🎬 useVideoCache: Received videos:', {
-      type: typeof videos,
-      isArray: Array.isArray(videos),
-      length: videos?.length || 0,
-      first: videos?.[0],
-      data: videos
-    });
+    if (__DEV__) {
+      logger.debug('useVideoCache: Received videos', {
+        length: videos?.length || 0,
+        isArray: Array.isArray(videos)
+      });
+    }
   }, [videos]);
 
   /**
@@ -40,7 +42,7 @@ export const useVideoCache = (videos = []) => {
    */
   const generateVideoId = useCallback((videoUrl, index) => {
     if (!videoUrl || typeof videoUrl !== 'string') {
-      console.warn('⚠️ Invalid video URL:', videoUrl);
+      logger.warn('Invalid video URL', { videoUrl, index });
       return `profile-video-${index}-invalid`;
     }
     
@@ -80,7 +82,7 @@ export const useVideoCache = (videos = []) => {
    * Handle video load start - show tiny spinner
    */
   const handleVideoLoadStart = useCallback((videoId) => {
-    console.log('🔄 Video load start:', videoId);
+    logger.debug('🔄 Video load start', { videoId });
     setVideoLoadingState(videoId, 'loading');
   }, [setVideoLoadingState]);
 
@@ -88,7 +90,7 @@ export const useVideoCache = (videos = []) => {
    * Handle video ready for display - hide spinner, cache ref
    */
   const handleVideoReadyForDisplay = useCallback((videoId, videoRef) => {
-    console.log('✅ Video ready for display:', videoId);
+    logger.debug('✅ Video ready for display', { videoId });
     setVideoLoadingState(videoId, 'loaded');
     
     // CACHE the video ref to prevent re-loading when swiping back
@@ -105,7 +107,7 @@ export const useVideoCache = (videos = []) => {
    * Handle video load error - show error state
    */
   const handleVideoLoadError = useCallback((videoId, error) => {
-    console.error(`❌ useVideoCache: Video load error: ${videoId}`, error);
+    logger.error('❌ Video load error', { videoId, error: error?.message || error });
     setVideoLoadingState(videoId, 'error');
   }, [setVideoLoadingState]);
 
@@ -120,21 +122,17 @@ export const useVideoCache = (videos = []) => {
    * ENHANCED: Convert profile videos to video objects with better validation
    */
   const videoObjects = useMemo(() => {
-    console.log('🔄 Processing videos for videoObjects...');
-    
     // Handle various video input formats
     if (!videos) {
-      console.log('📝 No videos provided (null/undefined)');
       return [];
     }
 
     if (!Array.isArray(videos)) {
-      console.warn('⚠️ Videos is not an array:', typeof videos, videos);
+      logger.warn('Videos is not an array', { type: typeof videos });
       return [];
     }
 
     if (videos.length === 0) {
-      console.log('📝 Videos array is empty');
       return [];
     }
 
@@ -150,13 +148,13 @@ export const useVideoCache = (videos = []) => {
         
         // Validate URL
         if (!finalVideoUrl || typeof finalVideoUrl !== 'string') {
-          console.warn(`⚠️ Invalid video at index ${index}:`, videoUrl);
+          logger.warn(`❌ Invalid video at index ${index}`, { videoUrl });
           return null;
         }
         
         // Basic URL validation
         if (!finalVideoUrl.startsWith('http')) {
-          console.warn(`⚠️ Invalid video URL format at index ${index}:`, finalVideoUrl);
+          logger.warn(`❌ Invalid video URL format at index ${index}`, { finalVideoUrl });
           return null;
         }
 
@@ -173,11 +171,12 @@ export const useVideoCache = (videos = []) => {
       })
       .filter(video => video !== null); // Remove invalid videos
 
-    console.log('✅ Processed video objects:', {
-      input: videos.length,
-      output: processedVideos.length,
-      videos: processedVideos.map(v => ({ id: v.id, uri: v.uri?.substring(0, 50) + '...' }))
-    });
+    if (__DEV__) {
+      logger.debug('✅ Processed video objects', {
+        input: videos.length,
+        output: processedVideos.length
+      });
+    }
 
     return processedVideos;
   }, [videos, generateVideoId, isVideoCached, isVideoLoading, isVideoLoaded]);
@@ -186,7 +185,7 @@ export const useVideoCache = (videos = []) => {
    * Toggle video pause/play
    */
   const togglePause = useCallback((id) => {
-    console.log('⏯️ Toggling pause for video:', id);
+    logger.debug('⏯️ Toggling pause for video', { id });
     setPausedStatus(prev => ({ ...prev, [id]: !prev[id] }));
   }, []);
 
@@ -205,7 +204,6 @@ export const useVideoCache = (videos = []) => {
    * Handle video swiper index change with smart caching
    */
   const onIndexChanged = useCallback((index, videos) => {
-    console.log('📱 Video index changed to:', index);
     setCurrentIndex(index);
     
     if (!videos || videos.length === 0) return;
@@ -223,13 +221,12 @@ export const useVideoCache = (videos = []) => {
       videoRefs.current[currentVideo.id].playAsync().catch(() => {});
     }
 
-    // PRELOAD next video in background (for smooth swiping)
+    // Preload next video in background
     const nextIndex = index + 1;
     if (nextIndex < videos.length) {
       const nextVideo = videos[nextIndex];
       if (nextVideo && !nextVideo.isCached && !nextVideo.isLoading) {
-        // Trigger preload
-        console.log('🔄 Preloading next video:', nextVideo.id);
+        // Silent preload
       }
     }
   }, [pausedStatus]);
@@ -238,10 +235,9 @@ export const useVideoCache = (videos = []) => {
    * Set video ref in cache
    */
   const setVideoRef = useCallback((videoId, ref) => {
-    console.log('📝 Setting video ref for:', videoId);
     videoRefs.current[videoId] = ref;
     
-    // CACHE VIDEO REF when it's ready
+    // Cache video ref when ready
     if (ref && !isVideoCached(videoId)) {
       handleVideoReadyForDisplay(videoId, ref);
     }
@@ -258,8 +254,8 @@ export const useVideoCache = (videos = []) => {
    * Clear all video cache (for logout, etc.)
    */
   const clearVideoCache = useCallback(() => {
-    console.log('🧹 Clearing video cache...');
-    
+    logger.info('🧹 Clearing video cache');
+
     // Pause all videos
     Object.values(videoRefs.current).forEach(ref => {
       if (ref && ref.pauseAsync) {
@@ -279,12 +275,9 @@ export const useVideoCache = (videos = []) => {
    * Preload videos for better performance
    */
   const preloadVideos = useCallback((startIndex = 0, count = 2) => {
-    console.log(`🔄 Preloading ${count} videos starting from index ${startIndex}`);
-    
     for (let i = startIndex; i < Math.min(startIndex + count, videoObjects.length); i++) {
       const video = videoObjects[i];
       if (video && !video.isCached && !video.isLoading) {
-        // Trigger video preload
         setVideoLoadingState(video.id, 'preloading');
       }
     }
@@ -293,7 +286,6 @@ export const useVideoCache = (videos = []) => {
   // Preload first few videos when component mounts
   useEffect(() => {
     if (videoObjects.length > 0) {
-      console.log('🚀 Auto-preloading first videos...');
       preloadVideos(0, 2);
     }
   }, [videoObjects.length > 0]);
@@ -334,8 +326,8 @@ export const useVideoCache = (videos = []) => {
  * Can be called from AppNavigator or other components for emergency cleanup
  */
 export const clearVideoCache = () => {
-  console.log('🧹 Global video cache clear triggered');
-  
+  logger.info('🧹 Global video cache clear triggered');
+
   try {
     // Try to clear any global video references if they exist
     if (global.videoCache) {
@@ -352,16 +344,16 @@ export const clearVideoCache = () => {
       global.videoRefs = {};
     }
     
-    console.log('✅ Global video cache cleared');
+    logger.info('✅ Global video cache cleared');
   } catch (error) {
-    console.warn('⚠️ Error clearing global video cache:', error);
+    logger.warn('⚠️ Error clearing global video cache', { error: error.message });
   }
   
   // Force garbage collection if available
   if (global.gc) {
     setTimeout(() => {
       global.gc();
-      console.log('♻️ Forced GC after video cache clear');
+      logger.debug('♻️ Forced GC after video cache clear');
     }, 100);
   }
 };

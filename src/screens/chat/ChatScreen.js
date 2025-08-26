@@ -40,8 +40,6 @@ const ChatScreen = () => {
     // MESSAGES STATE - Replace mock with real data
     const [messages, setMessages] = useState([]);
 
-    const meRef = useRef(null);
-
     // ADD USERNAME STATE FOR PROPER MESSAGE IDENTIFICATION
     const [currentUsername, setCurrentUsername] = useState(null);
     const [isLoadingProfile, setIsLoadingProfile] = useState(true);
@@ -49,9 +47,6 @@ const ChatScreen = () => {
     // REFS
     const flatListRef = useRef(null);
     const messageListenerRef = useRef(null);
-
-    // Mock instruments for display - TODO: Get from user profile
-    const instruments = ['🥁 Drums', '🎸 Bass'];
 
     // ===================================
     // GET CURRENT USERNAME FOR MESSAGE IDENTIFICATION
@@ -132,7 +127,6 @@ const ChatScreen = () => {
         const setupMessageListener = () => {
             console.log('📡 ChatScreen: Setting up message listener...');
             messageListenerRef.current = ChatService.onMessage((data) => {
-                console.log('📨 Message received in ChatScreen:', JSON.stringify(data, null, 2));
                 handleIncomingMessage(data);
             });
             console.log('📡 ChatScreen: Message listener setup completed');
@@ -162,6 +156,22 @@ const ChatScreen = () => {
                     throw new Error('Failed to load chat history');
                 }
 
+                // MARK MESSAGES AS READ when entering the chat
+                console.log('✅ Marking messages as read for conversation with:', userName);
+                console.log('🔍 ChatService.markMessagesAsRead exists?', typeof ChatService.markMessagesAsRead);
+
+                try {
+                    const markReadSuccess = ChatService.markMessagesAsRead(userName);
+                    console.log('📤 markMessagesAsRead call result:', markReadSuccess);
+
+                    if (markReadSuccess) {
+                        console.log('✅ Successfully sent mark as read request');
+                    } else {
+                        console.log('⚠️ Failed to send mark as read request');
+                    }
+                } catch (error) {
+                    console.log('❌ Error calling markMessagesAsRead:', error);
+                }
             } catch (error) {
                 console.error('❌ Failed to initialize chat:', error);
                 setConnectionError(error.message || 'Failed to load chat');
@@ -185,7 +195,7 @@ const ChatScreen = () => {
     // ===================================
 
     const handleIncomingMessage = (data) => {
-        console.log('🔄 Processing message data:', data.type, data);
+        console.log('🔄 Processing message data:', data.type);
 
         // Handle messages without a type (like error responses)
         if (!data.type) {
@@ -208,7 +218,6 @@ const ChatScreen = () => {
 
         switch (data.type) {
             case 'message_received':
-                // New real-time message from other user
                 if (data.from === userName) {
                     const newMessage = {
                         id: Date.now().toString() + Math.random(),
@@ -236,23 +245,50 @@ const ChatScreen = () => {
                     }, 100);
                 }
                 break;
+            case 'message':  // ADD THIS NEW CASE
+                // Handle real-time messages from backend (type: "message")
+                if (data.from === userName) {
+                    const newMessage = {
+                        id: Date.now().toString() + Math.random(),
+                        text: data.message,
+                        sender: 'other',
+                        timestamp: formatTimestamp(data.timestamp),
+                        from: data.from
+                    };
 
+                    setMessages(prev => {
+                        // Avoid duplicates
+                        const exists = prev.some(msg =>
+                            msg.text === newMessage.text &&
+                            msg.sender === 'other' &&
+                            Math.abs(Date.now() - parseInt(msg.id)) < 5000
+                        );
+                        if (exists) return prev;
+
+                        return [...prev, newMessage];
+                    });
+
+                    // Auto-scroll to bottom
+                    setTimeout(() => {
+                        flatListRef.current?.scrollToEnd({ animated: true });
+                    }, 100);
+                }
+                break;
             case 'messages':
                 // This is the actual message format from your backend
                 console.log('📨 Processing messages from backend:', data.messages?.length || 0, 'messages');
-                console.log('🔍 Message details:', JSON.stringify(data, null, 2));
                 console.log('🔍 Current user identification:', { currentUsername, currentUserEmail });
 
                 // Handle old email#username conversationIds
                 if (data.conversationId && data.conversationId.includes('#')) {
-                    const [emailPart, usernamePart] = data.conversationId.split('#');
-                    console.log('🔍 Conversation ID contains email format:', { emailPart, usernamePart });
+                    const [user1, user2] = data.conversationId.split('#');
+                    console.log('🔍 Conversation ID format:', { user1, user2 });
 
-                    // Check if this conversation matches current chat
-                    const isMyEmailInConversation = emailPart === currentUserEmail || usernamePart === currentUsername;
-                    const isOtherUserInConversation = emailPart === userName || usernamePart === userName;
+                    const isCorrectConversation =
+                        (user1 === currentUsername && user2 === userName) ||
+                        (user1 === userName && user2 === currentUsername);
 
-                    if (!(isMyEmailInConversation && isOtherUserInConversation)) {
+                    if (!isCorrectConversation) {
                         console.log('⚠️ Message for different conversation, ignoring');
                         return;
                     }
@@ -273,8 +309,6 @@ const ChatScreen = () => {
                             // Fallback if username not available yet
                             isFromMe = messageFrom === currentUserEmail;
                         }
-
-                        console.log('🔍 Message from:', messageFrom, 'Is from me:', isFromMe, 'Text:', messageText.substring(0, 20));
 
                         return {
                             id: `msg_${index}_${messageTimestamp}`,
@@ -338,6 +372,18 @@ const ChatScreen = () => {
                 // Don't do anything here - this is just a confirmation
                 break;
 
+            case 'message_sent':
+                // Handle message sent confirmation - this is just a confirmation, don't add to UI
+                console.log('📤 Message sent confirmation:', data.message || 'Message sent successfully');
+                // The optimistic message is already in the UI, this is just backend confirmation
+                break;
+
+            case 'messages_marked_read':
+                // Handle mark as read confirmation
+                console.log('✅ Messages marked as read confirmation:', data);
+                // This is handled by ChatListScreen, no action needed here
+                break;
+
             case 'user_status':
                 // User online/offline status - could update UI here
                 console.log('👤 User status update:', data);
@@ -346,11 +392,12 @@ const ChatScreen = () => {
             default:
                 console.log('🤔 Unknown message type:', data.type, 'Full data:', JSON.stringify(data));
                 // Try to handle as error response
-                if (data.statusCode >= 400) {
+                if (data.statusCode && data.statusCode >= 400) {
                     console.log('❌ Treating as error response');
                     setConnectionError(`Error: ${data.message || 'Unknown error occurred'}`);
                     setIsLoadingHistory(false);
                 }
+                break;
         }
     };
 
@@ -525,9 +572,7 @@ const ChatScreen = () => {
                     {/* User Info */}
                     <View style={styles.userInfoContainer}>
                         <Text style={styles.headerUserName}>{userName}</Text>
-                        <Text style={styles.headerInstruments}>
-                            {instruments.join(' • ')}
-                        </Text>
+                        {/* TODO: Add real user instruments from profile */}
                     </View>
                 </View>
             </View>

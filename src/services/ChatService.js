@@ -514,6 +514,13 @@ class ChatService {
             case 'messages':
             case 'chat_history':
             case 'message_received':
+            case 'message_sent':
+                this.notifyListeners(this.eventListeners.message, data);
+                break;
+
+            // Success responses from Lambda functions
+            case 'success':
+                this.log('info', 'Backend operation successful', { operation: data.action });
                 this.notifyListeners(this.eventListeners.message, data);
                 break;
 
@@ -523,9 +530,91 @@ class ChatService {
                 this.notifyListeners(this.eventListeners.userStatus, data);
                 break;
 
-            // Fallback: deliver to message listeners so nothing is lost
-            default:
+            // Handle mark as read confirmation from Lambda
+            case 'messages_marked_read':
+            case 'mark_as_read_success':
+            case 'conversation_updated':
+                this.log('debug', 'Messages marked as read', { otherUser: data.otherUser });
+                this.notifyListeners(this.eventListeners.message, {
+                    type: 'messages_marked_read',
+                    ...data
+                });
+                break;
+
+            // Handle errors
+            case 'mark_as_read_error':
+            case 'error':
+                this.log('error', 'Backend error response', { message: data.message, code: data.statusCode });
                 this.notifyListeners(this.eventListeners.message, data);
+                break;
+
+            // Fallback: Check if it's a real-time message without proper type
+            default:
+                // Check if this is a real-time message (like your web version receives)
+                if (data.from && data.message && !data.type) {
+                    this.log('debug', 'Real-time message received', { from: data.from });
+                    // Transform to proper message_received format
+                    const messageReceived = {
+                        type: 'message_received',
+                        from: data.from,
+                        message: data.message,
+                        timestamp: data.timestamp || new Date().toISOString(),
+                        to: this.username
+                    };
+                    this.notifyListeners(this.eventListeners.message, messageReceived);
+                }
+                // Also handle direct messages without type - key fix for real-time updates
+                else if (data.from && data.message) {
+                    this.log('debug', 'Direct message received', { from: data.from });
+                    this.notifyListeners(this.eventListeners.message, {
+                        ...data,
+                        type: 'message_received',
+                        timestamp: data.timestamp || new Date().toISOString()
+                    });
+                }
+                // Check if the message contains mark as read confirmation
+                else if (data.message && typeof data.message === 'string' && data.message.includes('marked as read')) {
+                    this.log('debug', 'Mark as read confirmation received', { conversationId: data.conversationId });
+
+                    // Extract username from the message if available
+                    let otherUser = data.otherUserName || data.otherUser;
+
+                    // Try to extract from conversationId if not directly available
+                    if (!otherUser && data.conversationId && data.conversationId.includes('#')) {
+                        const parts = data.conversationId.split('#');
+                        // Find the part that's not our username
+                        otherUser = parts.find(part => part !== this.username);
+                    }
+
+                    this.notifyListeners(this.eventListeners.message, {
+                        type: 'messages_marked_read',
+                        conversationId: data.conversationId,
+                        otherUser: otherUser,
+                        otherUserName: otherUser,
+                        message: data.message
+                    });
+                }
+                // Handle success responses that might be mark as read confirmations
+                else if (data.statusCode === 200 && data.message && typeof data.message === 'string') {
+                    if (data.message.includes('marked as read') || data.message.includes('read status updated')) {
+                        this.log('debug', 'Mark as read success response', { statusCode: data.statusCode });
+                        this.notifyListeners(this.eventListeners.message, {
+                            type: 'messages_marked_read',
+                            message: data.message,
+                            statusCode: data.statusCode
+                        });
+                    } else {
+                        // Regular success response
+                        this.notifyListeners(this.eventListeners.message, data);
+                    }
+                }
+                else {
+                    // Unknown message type - log for debugging in development
+                    if (__DEV__) {
+                        this.log('warn', 'Unknown message type received', { type, hasFrom: !!data.from, hasMessage: !!data.message });
+                    }
+                    this.notifyListeners(this.eventListeners.message, data);
+                }
                 break;
         }
     }
@@ -571,10 +660,73 @@ class ChatService {
                 to: cleanTo,
                 preview: cleanMessage.substring(0, 50)
             });
+
+            this.notifyListeners(this.eventListeners.message, {
+                type: 'message_sent',
+                to: cleanTo,
+                message: cleanMessage,
+                from: this.username,
+                timestamp: new Date().toISOString()
+            });
         } else {
             this.log('error', 'Failed to send message', {
                 to: cleanTo,
                 preview: cleanMessage.substring(0, 50)
+            });
+        }
+
+        return success;
+    }
+
+    /**
+     * Mark messages as read in a conversation
+     * @param {string} conversationWith - Username of the conversation partner
+     * @returns {boolean} Success status
+     */
+    markMessagesAsRead(conversationWith) {
+        if (!conversationWith || typeof conversationWith !== 'string') {
+            this.log('warn', 'Invalid conversationWith parameter for markMessagesAsRead', { conversationWith });
+            return false;
+        }
+
+        const cleanConversationWith = conversationWith.trim();
+
+        if (!cleanConversationWith) {
+            this.log('warn', 'Empty conversationWith parameter after trimming');
+            return false;
+        }
+
+        // Check connection
+        if (!this.isConnected()) {
+            this.log('warn', 'Cannot mark messages as read: not connected');
+            return false;
+        }
+
+        const conversationId = `${this.username}#${cleanConversationWith}`;
+
+        // Create payload that matches your web version exactly
+        const payload = {
+            action: 'chat_readMsg',
+            username: this.username,
+            conversationId: conversationId,
+            otherUserName: cleanConversationWith
+        };
+
+        // Send the action
+        const success = this.sendAction('chat_readMsg', payload);
+
+        // Log results
+        if (success) {
+            this.log('info', 'Mark as read request sent successfully', {
+                action: 'chat_readMsg',
+                username: this.username,
+                conversationId: conversationId,
+                otherUserName: cleanConversationWith
+            });
+        } else {
+            this.log('error', 'Failed to send mark as read request', {
+                username: this.username,
+                otherUserName: cleanConversationWith
             });
         }
 

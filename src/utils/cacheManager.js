@@ -1,5 +1,8 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as FileSystem from 'expo-file-system';
+import Logger from './Logger';
+
+const logger = Logger.createLogger('CacheManager');
 
 const CACHE_KEYS = {
     FEED_VIDEOS: 'feed_videos_cache',
@@ -33,21 +36,6 @@ const MAX_QUEUE_SIZE = 2; // Reduced from 3
 const MAX_WRITE_OPERATIONS = 1;
 const OPERATION_TIMEOUT = 2000; // Reduced timeout
 
-const log = (level, message, data = null) => {
-    const timestamp = new Date().toISOString().slice(11, 23);
-    const prefix = `[${timestamp}] CACHE`;
-
-    if (level === 'info') {
-        console.log(`${prefix} ℹ️ ${message}`, data || '');
-    } else if (level === 'warn') {
-        console.warn(`${prefix} ⚠️ ${message}`, data || '');
-    } else if (level === 'error') {
-        console.error(`${prefix} ❌ ${message}`, data || '');
-    } else if (level === 'perf') {
-        console.log(`${prefix} ⚡ ${message}`, data || '');
-    }
-};
-
 /**
  * ENHANCED: Memory cache with size tracking
  */
@@ -77,7 +65,7 @@ const setMemoryCache = (key, data) => {
     
     // Check if data is too large for cache
     if (estimatedSizeMB > 5) {
-        log('warn', `Data too large for memory cache: ${estimatedSizeMB.toFixed(2)}MB`, key);
+        logger.warn(`Data too large for memory cache: ${estimatedSizeMB.toFixed(2)}MB`, { key });
         return;
     }
 
@@ -97,7 +85,7 @@ const setMemoryCache = (key, data) => {
         memoryCache.delete(oldestKey);
         memoryCacheExpiry.delete(oldestKey);
         
-        log('info', `Evicted from memory cache: ${oldestKey}`);
+        logger.info(`🗑️ Evicted from memory cache: ${oldestKey}`);
     }
 
     // Add new data
@@ -105,15 +93,17 @@ const setMemoryCache = (key, data) => {
     memoryCacheExpiry.set(key, Date.now() + MEMORY_CACHE_TTL);
     currentMemoryCacheSizeMB += estimatedSizeMB;
     
-    log('perf', `Memory cache: ${memoryCache.size} items, ${currentMemoryCacheSizeMB.toFixed(2)}MB`);
+    if (__DEV__) {
+        logger.debug(`💾 Memory cache: ${memoryCache.size} items, ${currentMemoryCacheSizeMB.toFixed(2)}MB`);
+    }
 };
 
 /**
  * ENHANCED: Aggressive memory cache cleanup
  */
 const forceMemoryCacheCleanup = (reason = 'unknown') => {
-    log('warn', `Force cleaning memory cache: ${reason}`);
-    
+    logger.warn(`🧹 Force cleaning memory cache: ${reason}`);
+
     const sizeBefore = memoryCache.size;
     const mbBefore = currentMemoryCacheSizeMB;
     
@@ -121,8 +111,8 @@ const forceMemoryCacheCleanup = (reason = 'unknown') => {
     memoryCacheExpiry.clear();
     currentMemoryCacheSizeMB = 0;
     
-    log('perf', `Memory cache cleared: ${sizeBefore} items (${mbBefore.toFixed(2)}MB) → 0`);
-    
+    logger.info(`✅ Memory cache cleared: ${sizeBefore} items (${mbBefore.toFixed(2)}MB) → 0`);
+
     // Force garbage collection if available
     if (global.gc) {
         setTimeout(() => global.gc(), 100);
@@ -135,7 +125,6 @@ const processWriteQueue = async () => {
     }
 
     isProcessing = true;
-    log('perf', `Processing ${writeQueue.length} write operations`);
 
     try {
         while (writeQueue.length > 0 && activeWrites < MAX_WRITE_OPERATIONS && !isShuttingDown) {
@@ -143,7 +132,6 @@ const processWriteQueue = async () => {
             if (!operation) continue;
 
             activeWrites++;
-            const startTime = Date.now();
 
             try {
                 await Promise.race([
@@ -152,36 +140,31 @@ const processWriteQueue = async () => {
                         setTimeout(() => reject(new Error('Write timeout')), OPERATION_TIMEOUT)
                     )
                 ]);
-
-                log('perf', `Write operation completed: ${operation.id}`, `${Date.now() - startTime}ms`);
             } catch (error) {
-                log('error', `Write operation failed: ${operation.id}`, error.message);
+                logger.error(`❌ Write operation failed: ${operation.id}`, { error: error.message });
             } finally {
                 activeWrites--;
             }
 
-            await new Promise(resolve => setTimeout(resolve, 5)); // Reduced delay
+            await new Promise(resolve => setTimeout(resolve, 5));
         }
     } finally {
         isProcessing = false;
 
         if (writeQueue.length > 0 && !isShuttingDown) {
-            setTimeout(processWriteQueue, 15); // Faster processing
+            setTimeout(processWriteQueue, 15);
         }
     }
 };
 
-const readCacheInstant = async (key, timeout = 500) => { // Reduced timeout
-    const startTime = Date.now();
-
-    // STEP 1: Check memory cache first (instant)
+const readCacheInstant = async (key, timeout = 500) => {
+    // Check memory cache first
     const memoryData = getFromMemoryCache(key);
     if (memoryData) {
-        log('perf', `Memory cache HIT: ${key}`, `${Date.now() - startTime}ms`);
         return memoryData;
     }
 
-    // STEP 2: Read from disk (fast)
+    // Read from disk
     try {
         const promise = AsyncStorage.getItem(key);
         const timeoutPromise = new Promise((_, reject) =>
@@ -191,32 +174,28 @@ const readCacheInstant = async (key, timeout = 500) => { // Reduced timeout
         const result = await Promise.race([promise, timeoutPromise]);
 
         if (result) {
-            // Only cache in memory if not too large
             const dataSize = (result.length * 2) / 1024 / 1024;
-            if (dataSize < 3) { // Only cache items under 3MB
+            if (dataSize < 3) {
                 setMemoryCache(key, result);
             }
-            log('perf', `Disk cache HIT: ${key}`, `${Date.now() - startTime}ms`);
-        } else {
-            log('info', `Cache MISS: ${key}`);
         }
 
         return result;
     } catch (error) {
-        log('warn', `Cache read failed: ${key}`, error.message);
+        logger.warn(`⚠️ Cache read failed: ${key}`, { error: error.message });
         return null;
     }
 };
 
 const queueWriteOperation = (operation, operationId = null) => {
     if (isShuttingDown) {
-        log('warn', 'Write operation rejected - shutting down');
+        logger.warn('Write operation rejected - shutting down');
         return Promise.reject(new Error('Cache manager shutting down'));
     }
 
     if (writeQueue.length >= MAX_QUEUE_SIZE) {
-        writeQueue = writeQueue.slice(-1); // Keep only 1 operation
-        log('warn', `Write queue full, trimmed to ${writeQueue.length} operations`);
+        writeQueue = writeQueue.slice(-1);
+        logger.warn(`📦 Write queue full, trimmed to ${writeQueue.length} operations`);
     }
 
     const id = operationId || `write_${Date.now()}`;
@@ -235,7 +214,9 @@ const queueWriteOperation = (operation, operationId = null) => {
             }
         });
 
-        log('info', `Queued write operation: ${id}`, `Queue size: ${writeQueue.length}`);
+        if (__DEV__) {
+            logger.debug(`📝 Queued write operation: ${id} (Queue size: ${writeQueue.length})`);
+        }
         processWriteQueue();
     });
 };
@@ -271,7 +252,7 @@ const setCacheTimestamp = (key, timestamp = getCurrentTimestamp()) => {
             if (keys.length > 10) { // Reduced from 15
                 const sorted = keys.sort((a, b) => parsed[a] - parsed[b]);
                 sorted.slice(0, 5).forEach(k => delete parsed[k]); // More aggressive cleanup
-                log('info', `Cleaned old timestamps: ${sorted.slice(0, 5).join(', ')}`);
+                logger.info(`Cleaned old timestamps: ${sorted.slice(0, 5).join(', ')}`);
             }
 
             await AsyncStorage.setItem(CACHE_KEYS.CACHE_TIMESTAMPS, JSON.stringify(parsed));
@@ -283,7 +264,7 @@ const setCacheTimestamp = (key, timestamp = getCurrentTimestamp()) => {
             }
 
         } catch (error) {
-            log('error', 'Error setting cache timestamp', error.message);
+            logger.error('Error setting cache timestamp', error.message);
         }
     }, `timestamp_${key}`).catch(() => {
         // Silent fail for timestamps
@@ -291,7 +272,7 @@ const setCacheTimestamp = (key, timestamp = getCurrentTimestamp()) => {
 };
 
 export const cacheFeedVideos = (feedVideos, metadata = {}) => {
-    log('info', `Caching ${feedVideos.length} feed videos`);
+    logger.info(`Caching ${feedVideos.length} feed videos`);
 
     return queueWriteOperation(async () => {
         try {
@@ -326,10 +307,10 @@ export const cacheFeedVideos = (feedVideos, metadata = {}) => {
 
             setCacheTimestamp(CACHE_KEYS.FEED_VIDEOS);
 
-            log('perf', `Feed videos cached successfully: ${minimalVideos.length} videos (${dataSize.toFixed(2)}MB)`);
+            logger.debug(`Feed videos cached successfully: ${minimalVideos.length} videos (${dataSize.toFixed(2)}MB)`);
 
         } catch (error) {
-            log('error', 'Error caching feed videos', error.message);
+            logger.error('Error caching feed videos', error.message);
         }
     }, 'cache_feed_videos');
 };
@@ -341,7 +322,7 @@ export const getDiscoverCache = async () => {
         // Ultra-fast timestamp check
         const timestamp = await getCacheTimestamp(CACHE_KEYS.FEED_VIDEOS);
         if (!timestamp || isCacheExpired(timestamp, CACHE_EXPIRY.FEED_VIDEOS)) {
-            log('info', 'Feed cache expired or missing');
+            logger.info('Feed cache expired or missing');
             return null;
         }
 
@@ -350,10 +331,10 @@ export const getDiscoverCache = async () => {
         if (cachedFeedVideos) {
             try {
                 const feedVideos = JSON.parse(cachedFeedVideos);
-                log('perf', `Feed cache loaded: ${feedVideos.length} videos`, `${Date.now() - startTime}ms`);
+                logger.debug(`Feed cache loaded: ${feedVideos.length} videos`, `${Date.now() - startTime}ms`);
                 return feedVideos;
             } catch (parseError) {
-                log('error', 'Feed cache corrupted, cleaning up');
+                logger.error('Feed cache corrupted, cleaning up');
                 // Queue cleanup asynchronously - don't block
                 queueWriteOperation(async () => {
                     await AsyncStorage.removeItem(CACHE_KEYS.FEED_VIDEOS);
@@ -363,10 +344,10 @@ export const getDiscoverCache = async () => {
             }
         }
 
-        log('info', 'Feed cache miss');
+        logger.info('Feed cache miss');
         return null;
     } catch (error) {
-        log('error', 'Error getting feed cache', error.message);
+        logger.error('Error getting feed cache', error.message);
         return null;
     }
 };
@@ -374,7 +355,7 @@ export const getDiscoverCache = async () => {
 export const getFeedCache = getDiscoverCache;
 
 export const clearFeedCache = () => {
-    log('info', 'Clearing feed cache');
+    logger.info('Clearing feed cache');
     return queueWriteOperation(async () => {
         try {
             await AsyncStorage.multiRemove([
@@ -387,13 +368,13 @@ export const clearFeedCache = () => {
             memoryCache.delete(CACHE_KEYS.FEED_METADATA);
 
         } catch (error) {
-            log('error', 'Error clearing feed cache', error.message);
+            logger.error('Error clearing feed cache', error.message);
         }
     }, 'clear_feed_cache');
 };
 
 export const cacheUserProfile = (profileData, userEmail) => {
-    log('info', `Caching profile for: ${userEmail}`);
+    logger.info(`Caching profile for: ${userEmail}`);
 
     return queueWriteOperation(async () => {
         try {
@@ -436,10 +417,10 @@ export const cacheUserProfile = (profileData, userEmail) => {
             }
 
             setCacheTimestamp(profileCacheKey);
-            log('perf', `Profile cached for: ${userEmail} (${profileSize.toFixed(2)}MB)`);
+            logger.debug(`Profile cached for: ${userEmail} (${profileSize.toFixed(2)}MB)`);
 
         } catch (error) {
-            log('error', `Error caching profile for ${userEmail}`, error.message);
+            logger.error(`Error caching profile for ${userEmail}`, error.message);
         }
     }, `cache_profile_${userEmail}`);
 };
@@ -453,7 +434,7 @@ export const getProfileCache = async (userEmail) => {
         // Ultra-fast timestamp check
         const timestamp = await getCacheTimestamp(profileCacheKey);
         if (!timestamp || isCacheExpired(timestamp, CACHE_EXPIRY.USER_PROFILE)) {
-            log('info', `Profile cache expired for: ${userEmail}`);
+            logger.info(`Profile cache expired for: ${userEmail}`);
             return null;
         }
 
@@ -474,10 +455,10 @@ export const getProfileCache = async (userEmail) => {
                     }
                 }
 
-                log('perf', `Profile cache loaded for: ${userEmail}`, `${Date.now() - startTime}ms`);
+                logger.debug(`Profile cache loaded for: ${userEmail}`, `${Date.now() - startTime}ms`);
                 return profile;
             } catch (parseError) {
-                log('error', `Profile cache corrupted for: ${userEmail}`);
+                logger.error(`Profile cache corrupted for: ${userEmail}`);
                 // Queue cleanup asynchronously
                 queueWriteOperation(async () => {
                     await AsyncStorage.removeItem(profileCacheKey);
@@ -487,16 +468,16 @@ export const getProfileCache = async (userEmail) => {
             }
         }
 
-        log('info', `Profile cache miss for: ${userEmail}`);
+        logger.info(`Profile cache miss for: ${userEmail}`);
         return null;
     } catch (error) {
-        log('error', `Error getting profile cache for ${userEmail}`, error.message);
+        logger.error(`Error getting profile cache for ${userEmail}`, error.message);
         return null;
     }
 };
 
 export const clearProfileCache = (userEmail) => {
-    log('info', `Clearing profile cache for: ${userEmail}`);
+    logger.info(`Clearing profile cache for: ${userEmail}`);
     return queueWriteOperation(async () => {
         try {
             const profileCacheKey = `${CACHE_KEYS.USER_PROFILE}_${userEmail}`;
@@ -509,7 +490,7 @@ export const clearProfileCache = (userEmail) => {
             memoryCache.delete(profileVideosCacheKey);
 
         } catch (error) {
-            log('error', `Error clearing profile cache for ${userEmail}`, error.message);
+            logger.error(`Error clearing profile cache for ${userEmail}`, error.message);
         }
     }, `clear_profile_${userEmail}`);
 };
@@ -518,7 +499,7 @@ export const clearProfileCache = (userEmail) => {
  * ENHANCED: Emergency cache clearing with memory cleanup
  */
 export const clearAllCaches = async () => {
-    log('warn', 'Clearing ALL caches (emergency)');
+    logger.warn('Clearing ALL caches (emergency)');
     isShuttingDown = true;
 
     if (cleanupTimer) {
@@ -541,7 +522,7 @@ export const clearAllCaches = async () => {
 
         if (cacheKeys.length > 0) {
             await AsyncStorage.multiRemove(cacheKeys);
-            log('perf', `Cleared ${cacheKeys.length} cache entries`);
+            logger.debug(`Cleared ${cacheKeys.length} cache entries`);
         }
 
         // Clear video cache directory
@@ -550,14 +531,14 @@ export const clearAllCaches = async () => {
             const dirInfo = await FileSystem.getInfoAsync(videoCacheDir);
             if (dirInfo.exists) {
                 await FileSystem.deleteAsync(videoCacheDir, { idempotent: true });
-                log('perf', 'Cleared video cache directory');
+                logger.debug('Cleared video cache directory');
             }
         } catch (videoCacheError) {
-            log('warn', 'Error clearing video cache directory:', videoCacheError);
+            logger.warn('Error clearing video cache directory:', videoCacheError);
         }
 
     } catch (error) {
-        log('error', 'Error clearing all caches', error.message);
+        logger.error('Error clearing all caches', error.message);
     }
 
     isShuttingDown = false;
@@ -637,7 +618,7 @@ export const manageCacheSize = async (maxCacheSizeMB = 30) => { // Reduced defau
             const filesWithInfo = (await Promise.all(fileInfoPromises)).filter(Boolean);
             const totalSize = filesWithInfo.reduce((sum, file) => sum + file.size, 0);
 
-            log('perf', `Video cache: ${files.length} files, ${(totalSize / 1024 / 1024).toFixed(2)}MB`);
+            logger.debug(`Video cache: ${files.length} files, ${(totalSize / 1024 / 1024).toFixed(2)}MB`);
 
             if (totalSize > maxCacheBytes) {
                 // Sort by modification time (oldest first)
@@ -655,14 +636,14 @@ export const manageCacheSize = async (maxCacheSizeMB = 30) => { // Reduced defau
                         currentSize -= file.size;
                         deletedCount++;
                     } catch (deleteError) {
-                        log('warn', `Failed to delete ${file.name}:`, deleteError);
+                        logger.warn(`Failed to delete ${file.name}:`, deleteError);
                     }
                 }
                 
-                log('perf', `Deleted ${deletedCount} old video files, saved ${((totalSize - currentSize) / 1024 / 1024).toFixed(2)}MB`);
+                logger.debug(`Deleted ${deletedCount} old video files, saved ${((totalSize - currentSize) / 1024 / 1024).toFixed(2)}MB`);
             }
         } catch (error) {
-            log('error', 'Error managing cache size:', error.message);
+            logger.error('Error managing cache size:', error.message);
         }
     }, 'manage_cache_size');
 };
@@ -688,7 +669,7 @@ const startPeriodicCleanup = () => {
             if (writeQueue.length > MAX_QUEUE_SIZE) {
                 const removed = writeQueue.length - MAX_QUEUE_SIZE;
                 writeQueue = writeQueue.slice(-MAX_QUEUE_SIZE);
-                log('warn', `Queue cleanup: removed ${removed} old operations`);
+                logger.warn(`Queue cleanup: removed ${removed} old operations`);
             }
 
             // Clean memory cache more aggressively
@@ -702,7 +683,7 @@ const startPeriodicCleanup = () => {
 };
 
 export const shutdownCacheManager = () => {
-    log('warn', 'Shutting down cache manager');
+    logger.warn('Shutting down cache manager');
     isShuttingDown = true;
 
     if (cleanupTimer) {

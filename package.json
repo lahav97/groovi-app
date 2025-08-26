@@ -44,6 +44,7 @@
     "expo-localization": "~16.0.1",
     "expo-location": "~18.0.10",
     "expo-media-library": "~17.0.6",
+    "expo-status-bar": "^2.2.3",
     "expo-video-thumbnails": "~9.0.3",
     "expo-web-browser": "~14.0.2",
     "libphonenumber-js": "^1.12.6",

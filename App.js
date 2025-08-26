@@ -24,7 +24,7 @@ export default function App() {
         // Initialize memory manager (handles everything)
         AppMemoryManager.init();
         console.log('✅ App initialized with memory management');
-        
+
         return () => {
             // Cleanup on app shutdown
             AppMemoryManager.shutdown();

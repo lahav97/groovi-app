@@ -4,7 +4,7 @@ import { handleError } from '../utils/errors';
 /**
  * @typedef {Object} DetailedAddress
  * @property {string} street - Street name
- * @property {string} streetNumber - House/building number
+ * @property {string} streetNumber - Street number
  * @property {string} city - City name
  * @property {string} region - State/region
  * @property {string} country - Country name
@@ -205,96 +205,6 @@ class LocationService {
     }
     
     return parts.filter(part => part && part.trim()).join(', ');
-  }
-
-  /**
-   * Create a formatted address string from individual components
-   * @param {DetailedAddress} address - Address object with individual components
-   * @returns {string} Formatted address string
-   */
-  static formatAddressFromComponents(address) {
-    const parts = [];
-    
-    if (address.streetNumber && address.street) {
-      parts.push(`${address.streetNumber} ${address.street}`);
-    } else if (address.street) {
-      parts.push(address.street);
-    }
-    
-    if (address.city) parts.push(address.city);
-    if (address.region) parts.push(address.region);
-    if (address.postalCode) parts.push(address.postalCode);
-    if (address.country) parts.push(address.country);
-    
-    return parts.filter(part => part && part.trim()).join(', ');
-  }
-
-  /**
-   * Validate address components
-   * @param {DetailedAddress} address - Address to validate
-   * @returns {Object} Validation result with errors
-   */
-  static validateAddress(address) {
-    const errors = {};
-    
-    if (!address.city || address.city.trim() === '') {
-      errors.city = 'City is required';
-    }
-    
-    if (!address.country || address.country.trim() === '') {
-      errors.country = 'Country is required';
-    }
-    
-    // Street is optional but if provided, should not be empty
-    if (address.street && address.street.trim() === '') {
-      errors.street = 'Street cannot be empty if provided';
-    }
-    
-    return {
-      isValid: Object.keys(errors).length === 0,
-      errors
-    };
-  }
-
-  /**
-   * Search for addresses based on text input (for autocomplete)
-   * @param {string} query - Search query
-   * @returns {Promise<{success: boolean, results?: Array, error?: string}>}
-   */
-  static async searchAddresses(query) {
-    try {
-      if (!query || query.trim().length < 3) {
-        return {
-          success: true,
-          results: []
-        };
-      }
-
-      // Use geocoding to search for addresses
-      const results = await Location.geocodeAsync(query);
-      
-      const formattedResults = await Promise.all(
-        results.map(async (result) => {
-          const addressResult = await this.getDetailedAddress(
-            result.latitude,
-            result.longitude
-          );
-          
-          return addressResult.success ? addressResult.address : null;
-        })
-      );
-
-      return {
-        success: true,
-        results: formattedResults.filter(result => result !== null)
-      };
-    } catch (error) {
-      console.error('Error searching addresses:', error);
-      return {
-        success: false,
-        error: error.message
-      };
-    }
   }
 }
 

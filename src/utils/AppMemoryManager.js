@@ -1,6 +1,9 @@
 import { AppState } from 'react-native';
 import { clearAllCaches, manageCacheSize } from './cacheManager';
 import BackgroundDataService from '../services/BackgroundDataService';
+import Logger from './Logger';
+
+const logger = Logger.createLogger('AppMemoryManager');
 
 class AppMemoryManager {
     constructor() {
@@ -26,12 +29,11 @@ class AppMemoryManager {
             }
         });
 
-        // AGGRESSIVE cleanup every 30 seconds (reduced from 5 minutes)
+        // Cleanup every 30 seconds
         this.cleanupInterval = setInterval(() => {
             this.performPeriodicCleanup();
         }, 30 * 1000);
 
-        // Memory pressure monitoring
         this.startMemoryMonitoring();
     }
 
@@ -62,7 +64,7 @@ class AppMemoryManager {
                 try {
                     listener('navigation_cleanup');
                 } catch (error) {
-                    console.warn('Navigation listener error:', error);
+                    logger.warn('Navigation listener error', { error: error.message });
                 }
             });
 
@@ -82,50 +84,16 @@ class AppMemoryManager {
             }
 
         } catch (error) {
-            console.error('❌ Navigation cleanup error:', error);
+            logger.error('Navigation cleanup error', { error: error.message });
         }
-    }
-
-    /**
-     * ENHANCED: Memory pressure monitoring
-     */
-    startMemoryMonitoring() {
-        setInterval(() => {
-            try {
-                // Check JS heap if available
-                const jsHeap = global.performance?.memory?.usedJSHeapSize;
-                const totalHeap = global.performance?.memory?.totalJSHeapSize;
-
-                if (jsHeap && totalHeap) {
-                    const heapMB = jsHeap / 1024 / 1024;
-                    const usage = jsHeap / totalHeap;
-
-                    // Update memory pressure level
-                    const oldLevel = this.memoryPressureLevel;
-                    
-                    if (heapMB > 1500 || usage > 0.9) {
-                        this.memoryPressureLevel = 'critical';
-                    } else if (heapMB > 800 || usage > 0.7) {
-                        this.memoryPressureLevel = 'warning';
-                    } else {
-                        this.memoryPressureLevel = 'normal';
-                    }
-
-                    // Trigger emergency cleanup if pressure increased
-                    if (this.memoryPressureLevel === 'critical' && oldLevel !== 'critical') {
-                        this.performEmergencyCleanup('memory_pressure');
-                    }
-                }
-            } catch (error) {
-                console.warn('Memory monitoring error:', error);
-            }
-        }, 10000); // Check every 10 seconds
     }
 
     /**
      * EMERGENCY CLEANUP - For critical memory situations
      */
     async performEmergencyCleanup(reason = 'unknown') {
+        logger.warn(`Emergency cleanup triggered: ${reason}`);
+
         try {
             // 1. Clear all video caches immediately
             await clearAllCaches();
@@ -135,7 +103,7 @@ class AppMemoryManager {
                 try {
                     listener('emergency_cleanup');
                 } catch (error) {
-                    console.warn('Emergency listener error:', error);
+                    logger.warn('Emergency listener error', { error: error.message });
                 }
             });
 
@@ -152,97 +120,135 @@ class AppMemoryManager {
                 }
             }
 
+            logger.info(`Emergency cleanup completed: ${reason}`);
+
         } catch (error) {
-            console.error('❌ Emergency cleanup failed:', error);
+            logger.error('Emergency cleanup failed', { error: error.message, reason });
         }
     }
 
     async performBackgroundCleanup() {
         try {
-            // AGGRESSIVE cleanup when backgrounded
             await this.performEmergencyCleanup('app_background');
-
-            // Reduce cache size to minimum
-            await manageCacheSize(25); // 25MB limit when backgrounded
-
-            // Cancel all requests
+            await manageCacheSize(25);
             BackgroundDataService.cancelAllRequests();
-
-            // Get simple cache stats
-            const stats = this.getSimpleCacheStats();
-
         } catch (error) {
-            console.error('❌ Background cleanup error:', error);
+            logger.error('🚨 Background cleanup error', { error: error.message });
         }
     }
 
     async performActiveCleanup() {
         const now = Date.now();
 
-        // More frequent cleanup (reduced from 2 minutes to 30 seconds)
         if (now - this.lastCleanup > 30 * 1000) {
             this.lastCleanup = now;
 
             try {
-                // Manage cache size based on memory pressure
-                const maxCacheSize = this.memoryPressureLevel === 'critical' ? 30 : 
+                const maxCacheSize = this.memoryPressureLevel === 'critical' ? 30 :
                                    this.memoryPressureLevel === 'warning' ? 50 : 75;
                 
                 await manageCacheSize(maxCacheSize);
 
-                // Check system status
                 const systemStatus = BackgroundDataService.getSeparatedSystemStatus();
                 if (systemStatus.feed.hasError || systemStatus.profile.hasError) {
-                    console.warn('⚠️ System issues detected:', {
+                    logger.warn('⚠️ System issues detected', {
                         feedError: systemStatus.feed.error,
                         profileError: systemStatus.profile.error
                     });
                 }
 
             } catch (error) {
-                console.error('❌ Active cleanup error:', error);
+                logger.error('🚨 Active cleanup error', { error: error.message });
             }
         }
     }
 
     async performPeriodicCleanup() {
         try {
-            // Check system status
             const systemStatus = BackgroundDataService.getSeparatedSystemStatus();
             if (systemStatus.feed.hasError || systemStatus.profile.hasError) {
-                console.warn('⚠️ System issues detected:', {
+                logger.warn('⚠️ System issues detected', {
                     feedError: systemStatus.feed.error,
                     profileError: systemStatus.profile.error
                 });
             }
 
-            // Adaptive cache management based on memory pressure
-            const maxCacheSize = this.memoryPressureLevel === 'critical' ? 25 : 
+            const maxCacheSize = this.memoryPressureLevel === 'critical' ? 25 :
                                this.memoryPressureLevel === 'warning' ? 40 : 60;
             
             await manageCacheSize(maxCacheSize);
 
-            // Notify listeners for periodic cleanup
             this.navigationListeners.forEach(listener => {
                 try {
                     listener('periodic_cleanup');
                 } catch (error) {
-                    console.warn('Periodic listener error:', error);
+                    logger.warn('⚠️ Periodic listener error', { error: error.message });
                 }
             });
 
-            // Force GC if memory pressure is high
             if (this.memoryPressureLevel !== 'normal' && global.gc) {
                 global.gc();
-                console.log('♻️ Periodic GC due to memory pressure');
             }
 
-            // Get stats
-            const stats = this.getSimpleCacheStats();
-            console.log('📊 Periodic cache stats:', stats);
-
         } catch (error) {
-            console.error('❌ Periodic cleanup error:', error);
+            logger.error('🚨 Periodic cleanup error', { error: error.message });
+        }
+    }
+
+    /**
+     * Start monitoring memory pressure levels
+     */
+    startMemoryMonitoring() {
+        // Monitor memory pressure if available
+        if (global.performance?.memory) {
+            // Check memory every 15 seconds
+            setInterval(() => {
+                if (!this.isInitialized) return;
+
+                try {
+                    const heap = global.performance.memory;
+                    const usedMB = heap.usedJSHeapSize / 1024 / 1024;
+                    const limitMB = heap.jsHeapSizeLimit / 1024 / 1024;
+                    const usagePercent = (usedMB / limitMB) * 100;
+
+                    // Update memory pressure level
+                    const oldLevel = this.memoryPressureLevel;
+
+                    if (usagePercent > 85) {
+                        this.memoryPressureLevel = 'critical';
+                    } else if (usagePercent > 70) {
+                        this.memoryPressureLevel = 'warning';
+                    } else {
+                        this.memoryPressureLevel = 'normal';
+                    }
+
+                    // Trigger emergency cleanup if memory pressure is critical
+                    if (this.memoryPressureLevel === 'critical' && oldLevel !== 'critical') {
+                        logger.warn(`🚨 Critical memory pressure detected: ${usagePercent.toFixed(1)}%`);
+                        this.performEmergencyCleanup('critical_memory_pressure').catch(error => {
+                            logger.error('Emergency cleanup failed', { error: error.message });
+                        });
+                    }
+
+                } catch (error) {
+                    logger.warn('Memory monitoring error', { error: error.message });
+                }
+            }, 15000); // Check every 15 seconds
+        }
+
+        // React Native memory warning listener
+        if (typeof global.addEventListener === 'function') {
+            try {
+                global.addEventListener('memoryWarning', () => {
+                    logger.warn('🚨 System memory warning received');
+                    this.memoryPressureLevel = 'critical';
+                    this.performEmergencyCleanup('system_memory_warning').catch(error => {
+                        logger.error('Emergency cleanup failed', { error: error.message });
+                    });
+                });
+            } catch (error) {
+                logger.debug('Memory warning listener not available');
+            }
         }
     }
 
@@ -295,7 +301,7 @@ class AppMemoryManager {
      * PUBLIC: Force immediate cleanup
      */
     async forceCleanup(reason = 'manual') {
-        console.log(`🔧 Force cleanup triggered: ${reason}`);
+        logger.info(`Force cleanup triggered: ${reason}`);
         await this.performEmergencyCleanup(reason);
     }
 
@@ -303,8 +309,8 @@ class AppMemoryManager {
      * PUBLIC: Clear all memory and caches - used by AppNavigator
      */
     async clearAll(reason = 'navigation') {
-        console.log(`🧹 AppMemoryManager.clearAll triggered: ${reason}`);
-        
+        logger.info(`AppMemoryManager.clearAll triggered: ${reason}`);
+
         try {
             // 1. Cancel all background requests first
             BackgroundDataService.cancelAllRequests?.();
@@ -314,7 +320,7 @@ class AppMemoryManager {
                 try {
                     listener('clear_all');
                 } catch (error) {
-                    console.warn('Listener error during clearAll:', error);
+                    logger.warn('Listener error during clearAll', { error: error.message });
                 }
             });
             
@@ -326,18 +332,18 @@ class AppMemoryManager {
                 for (let i = 0; i < 3; i++) {
                     setTimeout(() => {
                         global.gc();
-                        if (i === 2) console.log('♻️ AppMemoryManager.clearAll - GC completed');
+                        if (i === 2) logger.debug('AppMemoryManager.clearAll - GC completed');
                     }, i * 100);
                 }
             }
             
         } catch (error) {
-            console.error('❌ AppMemoryManager.clearAll failed:', error);
+            logger.error('AppMemoryManager.clearAll failed', { error: error.message });
         }
     }
 
     shutdown() {
-        console.log('💥 Shutting down AppMemoryManager');
+        logger.warn('Shutting down AppMemoryManager');
 
         if (this.appStateSubscription) {
             this.appStateSubscription.remove();
@@ -357,7 +363,7 @@ class AppMemoryManager {
         
         this.isInitialized = false;
 
-        console.log('✅ AppMemoryManager shutdown complete');
+        logger.info('AppMemoryManager shutdown complete');
     }
 }
 
