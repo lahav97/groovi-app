@@ -9,9 +9,9 @@ const CONFIG = {
     MESSAGE_TIMEOUT: 15000, // 15 seconds for message responses
 };
 
-import Logger from '../utils/Logger';
+import { createLogger } from '../utils/Logger';
 
-const logger = Logger.createLogger('ChatService');
+const logger = createLogger('ChatService');
 
 // Connection States
 const CONNECTION_STATES = {
@@ -77,36 +77,7 @@ class ChatService {
         this.handleWebSocketClose = this.handleWebSocketClose.bind(this);
         this.handleWebSocketError = this.handleWebSocketError.bind(this);
 
-        logger.info('ChatService initialized');
-    }
-
-    // ===================================
-    // LOGGING SYSTEM
-    // ===================================
-
-    /**
-     * Professional logging system with levels and formatting
-     * @param {string} level - Log level (error, warn, info, debug)
-     * @param {string} message - Log message
-     * @param {object} data - Optional data to log
-     */
-    log(level, message, data = null) {
-        switch (level) {
-            case 'error':
-                logger.error(message, data);
-                break;
-            case 'warn':
-                logger.warn(message, data);
-                break;
-            case 'info':
-                logger.info(message, data);
-                break;
-            case 'debug':
-                logger.debug(message, data);
-                break;
-            default:
-                logger.info(message, data);
-        }
+        logger.info('✅ ChatService initialized');
     }
 
     // ===================================
@@ -122,7 +93,7 @@ class ChatService {
         // Validation
         if (!username || typeof username !== 'string' || !username.trim()) {
             const error = new Error('Invalid username provided');
-            this.log('error', 'Connection failed: Invalid username', { username });
+            logger.error('❌ Connection failed: Invalid username', { username });
             throw error;
         }
 
@@ -130,18 +101,17 @@ class ChatService {
 
         // Prevent duplicate connections
         if (this.connectionState === CONNECTION_STATES.CONNECTING) {
-            this.log('warn', 'Connection already in progress, waiting...');
+            logger.warn('⏳ Connection already in progress, waiting...');
             return this.connectionPromise;
         }
 
         if (this.connectionState === CONNECTION_STATES.CONNECTED && this.username === cleanUsername) {
-            this.log('info', 'Already connected with same username');
             return Promise.resolve();
         }
 
         // Clean up existing connection
         if (this.ws) {
-            this.log('info', 'Closing existing connection before reconnecting');
+            logger.info('🔄 Closing existing connection before reconnecting');
             await this.disconnectFromWebSocket();
         }
 
@@ -157,10 +127,10 @@ class ChatService {
 
         try {
             await this.connectionPromise;
-            this.log('info', 'Successfully connected to WebSocket', { username: cleanUsername });
+            logger.info('✅ Successfully connected to WebSocket', { username: cleanUsername });
             return;
         } catch (error) {
-            this.log('error', 'Failed to connect to WebSocket', { error: error.message, username: cleanUsername });
+            logger.error('❌ Failed to connect to WebSocket', { error: error.message, username: cleanUsername });
             throw error;
         } finally {
             this.connectionPromise = null;
@@ -177,7 +147,6 @@ class ChatService {
             try {
                 // Construct WebSocket URL
                 const wsUrl = `${CONFIG.WEBSOCKET_URL}?username=${encodeURIComponent(this.username)}`;
-                this.log('debug', 'Creating WebSocket connection', { url: wsUrl });
 
                 // Create WebSocket instance
                 this.ws = new WebSocket(wsUrl);
@@ -200,7 +169,7 @@ class ChatService {
                     if (this.connectionState === CONNECTION_STATES.CONNECTING) {
                         this.ws?.close();
                         const timeoutError = new Error(`Connection timeout after ${CONFIG.CONNECTION_TIMEOUT}ms`);
-                        this.log('error', 'Connection timeout', { timeout: CONFIG.CONNECTION_TIMEOUT });
+                        logger.error('⏰ Connection timeout', { timeout: CONFIG.CONNECTION_TIMEOUT });
                         reject(timeoutError);
                     }
                 }, CONFIG.CONNECTION_TIMEOUT);
@@ -209,7 +178,7 @@ class ChatService {
                 this.ws.addEventListener('open', () => clearTimeout(timeoutId), { once: true });
 
             } catch (error) {
-                this.log('error', 'Failed to create WebSocket', { error: error.message });
+                logger.error('❌ Failed to create WebSocket', { error: error.message });
                 reject(error);
             }
         });
@@ -221,7 +190,7 @@ class ChatService {
      * @returns {Promise<void>}
      */
     async disconnectFromWebSocket(intentional = true) {
-        this.log('info', 'Disconnecting from WebSocket', { intentional });
+        logger.info('🔌 Disconnecting from WebSocket', { intentional });
 
         this.isIntentionalDisconnect = intentional;
         this.connectionState = CONNECTION_STATES.DISCONNECTED;
@@ -241,7 +210,7 @@ class ChatService {
                     this.ws.close();
                 }
             } catch (error) {
-                this.log('warn', 'Error closing WebSocket', { error: error.message });
+                logger.warn('⚠️ Error closing WebSocket', { error: error.message });
             }
 
             this.ws = null;
@@ -259,8 +228,6 @@ class ChatService {
             username: null,
             intentional
         });
-
-        this.log('info', 'Successfully disconnected from WebSocket');
     }
 
     // ===================================
@@ -272,7 +239,7 @@ class ChatService {
      * @private
      */
     handleWebSocketOpen(event) {
-        this.log('info', 'WebSocket connection established');
+        logger.info('🟢 WebSocket connection established');
 
         this.connectionState = CONNECTION_STATES.CONNECTED;
         this.connectionError = null;
@@ -295,7 +262,7 @@ class ChatService {
      * @private
      */
     handleWebSocketClose(event) {
-        this.log('info', 'WebSocket connection closed', {
+        logger.info('🔴 WebSocket connection closed', {
             code: event.code,
             reason: event.reason,
             wasClean: event.wasClean,
@@ -325,7 +292,7 @@ class ChatService {
      * @private
      */
     handleWebSocketError(error) {
-        this.log('error', 'WebSocket error occurred', { error: error.message || error });
+        logger.error('❌ WebSocket error occurred', { error: error.message || error });
 
         this.connectionError = error.message || 'WebSocket error occurred';
 
@@ -344,15 +311,14 @@ class ChatService {
     handleWebSocketMessage(event) {
         try {
             const data = JSON.parse(event.data);
-            this.log('debug', 'Received WebSocket message', { data });
 
             this.metrics.messagesReceived++;
 
-            // Handle different message types (will be expanded later)
+            // Handle different message types
             this.processIncomingMessage(data);
 
         } catch (error) {
-            this.log('error', 'Failed to parse WebSocket message', {
+            logger.error('❌ Failed to parse WebSocket message', {
                 error: error.message,
                 rawData: event.data
             });
@@ -370,8 +336,6 @@ class ChatService {
     startPingInterval() {
         this.stopPingInterval();
 
-        this.log('debug', 'Starting ping interval', { interval: CONFIG.PING_INTERVAL });
-
         this.pingInterval = setInterval(() => {
             if (this.connectionState === CONNECTION_STATES.CONNECTED && this.ws?.readyState === WebSocket.OPEN) {
                 this.sendKeepAlivePing();
@@ -387,7 +351,6 @@ class ChatService {
         if (this.pingInterval) {
             clearInterval(this.pingInterval);
             this.pingInterval = null;
-            this.log('debug', 'Ping interval stopped');
         }
     }
 
@@ -407,7 +370,6 @@ class ChatService {
         };
 
         this.sendAction('chat_keep_alive', pingPayload);
-        this.log('debug', 'Keep-alive ping sent');
     }
 
     // ===================================
@@ -420,7 +382,7 @@ class ChatService {
      */
     handleReconnection() {
         if (this.isIntentionalDisconnect || this.reconnectAttempts >= CONFIG.MAX_RECONNECT_ATTEMPTS) {
-            this.log('warn', 'Reconnection aborted', {
+            logger.warn('🚫 Reconnection aborted', {
                 intentional: this.isIntentionalDisconnect,
                 attempts: this.reconnectAttempts,
                 maxAttempts: CONFIG.MAX_RECONNECT_ATTEMPTS
@@ -445,7 +407,7 @@ class ChatService {
             CONFIG.RECONNECT_MAX_DELAY
         );
 
-        this.log('info', 'Scheduling reconnection attempt', {
+        logger.info('🔄 Scheduling reconnection attempt', {
             attempt: this.reconnectAttempts,
             delay,
             maxAttempts: CONFIG.MAX_RECONNECT_ATTEMPTS
@@ -462,10 +424,9 @@ class ChatService {
         this.reconnectTimeout = setTimeout(async () => {
             if (!this.isIntentionalDisconnect && this.username) {
                 try {
-                    this.log('info', 'Attempting reconnection', { attempt: this.reconnectAttempts });
                     await this.connectUserToWebSocket(this.username);
                 } catch (error) {
-                    this.log('error', 'Reconnection attempt failed', {
+                    logger.error('❌ Reconnection attempt failed', {
                         attempt: this.reconnectAttempts,
                         error: error.message
                     });
@@ -485,7 +446,6 @@ class ChatService {
         if (this.reconnectTimeout) {
             clearTimeout(this.reconnectTimeout);
             this.reconnectTimeout = null;
-            this.log('debug', 'Reconnection cancelled');
         }
         this.reconnectAttempts = 0;
     }
@@ -495,13 +455,12 @@ class ChatService {
     // ===================================
 
     /**
-     * Process incoming messages (will be expanded with event listeners)
+     * Process incoming messages
      * @private
      * @param {object} data - Parsed message data
      */
     processIncomingMessage(data) {
         const type = data?.type || 'unknown';
-        this.log('debug', 'Processing incoming message', { type });
 
         switch (type) {
             // Chat list payloads from backend
@@ -520,7 +479,7 @@ class ChatService {
 
             // Success responses from Lambda functions
             case 'success':
-                this.log('info', 'Backend operation successful', { operation: data.action });
+                logger.info('✅ Backend operation successful', { operation: data.action });
                 this.notifyListeners(this.eventListeners.message, data);
                 break;
 
@@ -534,7 +493,6 @@ class ChatService {
             case 'messages_marked_read':
             case 'mark_as_read_success':
             case 'conversation_updated':
-                this.log('debug', 'Messages marked as read', { otherUser: data.otherUser });
                 this.notifyListeners(this.eventListeners.message, {
                     type: 'messages_marked_read',
                     ...data
@@ -544,7 +502,7 @@ class ChatService {
             // Handle errors
             case 'mark_as_read_error':
             case 'error':
-                this.log('error', 'Backend error response', { message: data.message, code: data.statusCode });
+                logger.error('❌ Backend error response', { message: data.message, code: data.statusCode });
                 this.notifyListeners(this.eventListeners.message, data);
                 break;
 
@@ -552,7 +510,6 @@ class ChatService {
             default:
                 // Check if this is a real-time message (like your web version receives)
                 if (data.from && data.message && !data.type) {
-                    this.log('debug', 'Real-time message received', { from: data.from });
                     // Transform to proper message_received format
                     const messageReceived = {
                         type: 'message_received',
@@ -565,7 +522,6 @@ class ChatService {
                 }
                 // Also handle direct messages without type - key fix for real-time updates
                 else if (data.from && data.message) {
-                    this.log('debug', 'Direct message received', { from: data.from });
                     this.notifyListeners(this.eventListeners.message, {
                         ...data,
                         type: 'message_received',
@@ -574,8 +530,6 @@ class ChatService {
                 }
                 // Check if the message contains mark as read confirmation
                 else if (data.message && typeof data.message === 'string' && data.message.includes('marked as read')) {
-                    this.log('debug', 'Mark as read confirmation received', { conversationId: data.conversationId });
-
                     // Extract username from the message if available
                     let otherUser = data.otherUserName || data.otherUser;
 
@@ -597,7 +551,6 @@ class ChatService {
                 // Handle success responses that might be mark as read confirmations
                 else if (data.statusCode === 200 && data.message && typeof data.message === 'string') {
                     if (data.message.includes('marked as read') || data.message.includes('read status updated')) {
-                        this.log('debug', 'Mark as read success response', { statusCode: data.statusCode });
                         this.notifyListeners(this.eventListeners.message, {
                             type: 'messages_marked_read',
                             message: data.message,
@@ -609,10 +562,6 @@ class ChatService {
                     }
                 }
                 else {
-                    // Unknown message type - log for debugging in development
-                    if (__DEV__) {
-                        this.log('warn', 'Unknown message type received', { type, hasFrom: !!data.from, hasMessage: !!data.message });
-                    }
                     this.notifyListeners(this.eventListeners.message, data);
                 }
                 break;
@@ -627,7 +576,7 @@ class ChatService {
      */
     sendMessage(to, message) {
         if (!to || !message || typeof to !== 'string' || typeof message !== 'string') {
-            this.log('warn', 'Invalid message parameters', { to, message });
+            logger.warn('⚠️ Invalid message parameters', { to, message });
             return false;
         }
 
@@ -635,13 +584,13 @@ class ChatService {
         const cleanMessage = message.trim();
 
         if (!cleanTo || !cleanMessage) {
-            this.log('warn', 'Empty message parameters after trimming');
+            logger.warn('⚠️ Empty message parameters after trimming');
             return false;
         }
 
         // Check connection
         if (!this.isConnected()) {
-            this.log('warn', 'Cannot send message: not connected');
+            logger.warn('⚠️ Cannot send message: not connected');
             return false;
         }
 
@@ -656,9 +605,9 @@ class ChatService {
 
         // Log results
         if (success) {
-            this.log('info', 'Message sent successfully', {
+            logger.info('✅ Message sent successfully', {
                 to: cleanTo,
-                preview: cleanMessage.substring(0, 50)
+                preview: cleanMessage.substring(0, 50) + (cleanMessage.length > 50 ? '...' : '')
             });
 
             this.notifyListeners(this.eventListeners.message, {
@@ -669,9 +618,9 @@ class ChatService {
                 timestamp: new Date().toISOString()
             });
         } else {
-            this.log('error', 'Failed to send message', {
+            logger.error('❌ Failed to send message', {
                 to: cleanTo,
-                preview: cleanMessage.substring(0, 50)
+                preview: cleanMessage.substring(0, 50) + (cleanMessage.length > 50 ? '...' : '')
             });
         }
 
@@ -685,20 +634,20 @@ class ChatService {
      */
     markMessagesAsRead(conversationWith) {
         if (!conversationWith || typeof conversationWith !== 'string') {
-            this.log('warn', 'Invalid conversationWith parameter for markMessagesAsRead', { conversationWith });
+            logger.warn('⚠️ Invalid conversationWith parameter for markMessagesAsRead', { conversationWith });
             return false;
         }
 
         const cleanConversationWith = conversationWith.trim();
 
         if (!cleanConversationWith) {
-            this.log('warn', 'Empty conversationWith parameter after trimming');
+            logger.warn('⚠️ Empty conversationWith parameter after trimming');
             return false;
         }
 
         // Check connection
         if (!this.isConnected()) {
-            this.log('warn', 'Cannot mark messages as read: not connected');
+            logger.warn('⚠️ Cannot mark messages as read: not connected');
             return false;
         }
 
@@ -717,14 +666,14 @@ class ChatService {
 
         // Log results
         if (success) {
-            this.log('info', 'Mark as read request sent successfully', {
+            logger.info('✅ Mark as read request sent successfully', {
                 action: 'chat_readMsg',
                 username: this.username,
                 conversationId: conversationId,
                 otherUserName: cleanConversationWith
             });
         } else {
-            this.log('error', 'Failed to send mark as read request', {
+            logger.error('❌ Failed to send mark as read request', {
                 username: this.username,
                 otherUserName: cleanConversationWith
             });
@@ -741,7 +690,7 @@ class ChatService {
      */
     sendAction(action, payload = {}) {
         if (!this.isConnected()) {
-            this.log('warn', 'Cannot send action: not connected', { action });
+            logger.warn('⚠️ Cannot send action: not connected', { action });
             return false;
         }
 
@@ -753,10 +702,9 @@ class ChatService {
         try {
             this.ws.send(JSON.stringify(message));
             this.metrics.messagesSent++;
-            this.log('debug', 'Action sent successfully', { action, payload });
             return true;
         } catch (error) {
-            this.log('error', 'Failed to send action', {
+            logger.error('❌ Failed to send action', {
                 action,
                 error: error.message
             });
@@ -771,12 +719,12 @@ class ChatService {
      */
     loadChatList(username) {
         if (!username || typeof username !== 'string') {
-            this.log('warn', 'Invalid username for loadChatList', { username });
+            logger.warn('⚠️ Invalid username for loadChatList', { username });
             return false;
         }
 
         if (!this.isConnected()) {
-            this.log('warn', 'Cannot load chat list: not connected');
+            logger.warn('⚠️ Cannot load chat list: not connected');
             return false;
         }
 
@@ -787,9 +735,9 @@ class ChatService {
         const success = this.sendAction('load_chatList', payload);
 
         if (success) {
-            this.log('info', 'Chat list request sent', { username: username.trim() });
+            logger.info('📋 Chat list request sent', { username: username.trim() });
         } else {
-            this.log('error', 'Failed to request chat list', { username: username.trim() });
+            logger.error('❌ Failed to request chat list', { username: username.trim() });
         }
 
         return success;
@@ -803,12 +751,12 @@ class ChatService {
      */
     loadChatHistory(user1, user2) {
         if (!user1 || !user2 || typeof user1 !== 'string' || typeof user2 !== 'string') {
-            this.log('warn', 'Invalid parameters for loadChatHistory', { user1, user2 });
+            logger.warn('⚠️ Invalid parameters for loadChatHistory', { user1, user2 });
             return false;
         }
 
         if (!this.isConnected()) {
-            this.log('warn', 'Cannot load chat history: not connected');
+            logger.warn('⚠️ Cannot load chat history: not connected');
             return false;
         }
 
@@ -820,9 +768,9 @@ class ChatService {
         const success = this.sendAction('chat_history', payload);
 
         if (success) {
-            this.log('info', 'Chat history request sent', { user1: user1.trim(), user2: user2.trim() });
+            logger.info('📚 Chat history request sent', { user1: user1.trim(), user2: user2.trim() });
         } else {
-            this.log('error', 'Failed to request chat history', { user1: user1.trim(), user2: user2.trim() });
+            logger.error('❌ Failed to request chat history', { user1: user1.trim(), user2: user2.trim() });
         }
 
         return success;
@@ -858,9 +806,8 @@ class ChatService {
     }
 
     // ===================================
-    // EVENT HANDLER PLACEHOLDERS
+    // EVENT HANDLERS
     // ===================================
-    // These will be implemented in the next phase
 
     /**
      * Add listener for incoming messages
@@ -869,17 +816,15 @@ class ChatService {
      */
     onMessage(callback) {
         if (typeof callback !== 'function') {
-            this.log('warn', 'onMessage callback must be a function');
+            logger.warn('⚠️ onMessage callback must be a function');
             return () => {};
         }
 
         this.eventListeners.message.add(callback);
-        this.log('debug', 'Message listener added', { totalListeners: this.eventListeners.message.size });
 
         // Return unsubscribe function
         return () => {
             this.eventListeners.message.delete(callback);
-            this.log('debug', 'Message listener removed', { totalListeners: this.eventListeners.message.size });
         };
     }
 
@@ -890,17 +835,15 @@ class ChatService {
      */
     onChatListUpdate(callback) {
         if (typeof callback !== 'function') {
-            this.log('warn', 'onChatListUpdate callback must be a function');
+            logger.warn('⚠️ onChatListUpdate callback must be a function');
             return () => {};
         }
 
         this.eventListeners.chatList.add(callback);
-        this.log('debug', 'Chat list listener added', { totalListeners: this.eventListeners.chatList.size });
 
         // Return unsubscribe function
         return () => {
             this.eventListeners.chatList.delete(callback);
-            this.log('debug', 'Chat list listener removed', { totalListeners: this.eventListeners.chatList.size });
         };
     }
 
@@ -911,17 +854,15 @@ class ChatService {
      */
     onConnectionChange(callback) {
         if (typeof callback !== 'function') {
-            this.log('warn', 'onConnectionChange callback must be a function');
+            logger.warn('⚠️ onConnectionChange callback must be a function');
             return () => {};
         }
 
         this.eventListeners.connection.add(callback);
-        this.log('debug', 'Connection listener added', { totalListeners: this.eventListeners.connection.size });
 
         // Return unsubscribe function
         return () => {
             this.eventListeners.connection.delete(callback);
-            this.log('debug', 'Connection listener removed', { totalListeners: this.eventListeners.connection.size });
         };
     }
 
@@ -931,21 +872,23 @@ class ChatService {
      * @param {object} data - Connection state data
      */
     notifyConnectionHandlers(data) {
-        this.log('debug', 'Connection state changed', data);
-
         // Notify all connection listeners
         this.eventListeners.connection.forEach(callback => {
             try {
                 callback(data);
             } catch (error) {
-                this.log('error', 'Error in connection callback', { error: error.message });
+                logger.error('❌ Error in connection callback', { error: error.message });
             }
         });
     }
 
     notifyListeners(set, payload) {
         set.forEach(cb => {
-            try { cb(payload); } catch (e) { this.log('error', 'Listener error', { error: e.message }); }
+            try {
+                cb(payload);
+            } catch (e) {
+                logger.error('❌ Listener error', { error: e.message });
+            }
         });
     }
 
@@ -955,14 +898,12 @@ class ChatService {
      * @param {object} error - Error data
      */
     notifyErrorHandlers(error) {
-        this.log('debug', 'Error occurred', error);
-
         // Notify all error listeners
         this.eventListeners.error.forEach(callback => {
             try {
                 callback(error);
             } catch (err) {
-                this.log('error', 'Error in error callback', { error: err.message });
+                logger.error('❌ Error in error callback', { error: err.message });
             }
         });
     }

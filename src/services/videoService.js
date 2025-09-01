@@ -2,29 +2,24 @@ import axios from 'axios';
 import * as FileSystem from 'expo-file-system';
 import * as VideoThumbnails from 'expo-video-thumbnails';
 import { handleError } from '../utils/errors';
+import { createLogger } from '../utils/Logger';
 
-const MUSICIAN_API_URL = 'https://yflgdontu1.execute-api.us-east-1.amazonaws.com/groovi/discover'; // For DiscoverScreen
-const MATCH_API_URL = 'https://g25kk1qcgi.execute-api.us-east-1.amazonaws.com/groovi/match'; // For MatchScreen
+const logger = createLogger('VideoService');
+
+const MUSICIAN_API_URL = 'https://yflgdontu1.execute-api.us-east-1.amazonaws.com/groovi/discover';
+const MATCH_API_URL = 'https://g25kk1qcgi.execute-api.us-east-1.amazonaws.com/groovi/match';
 const DELETE_API_URL = 'https://9u6y4sfrn2.execute-api.us-east-1.amazonaws.com/groovi/build_profile/delete';
 
-// ✅ ADD THIS HERE - AFTER THE API URLS, BEFORE OTHER VARIABLES
+/**
+ * Instrument variations mapping for smart filtering
+ * Allows flexible matching of similar instrument types
+ */
 const INSTRUMENT_VARIATIONS = {
-    // Bass variations
     'Bass': ['Bass', 'Bass guitar', 'Electric bass', 'Acoustic bass', 'Upright bass', 'Double bass', 'Bass guitar electric', 'Bass guitar acoustic'],
-
-    // Guitar variations
     'Guitar': ['Guitar', 'Electric guitar', 'Acoustic guitar', 'Classical guitar', 'Guitar electric', 'Guitar acoustic', 'Guitar classical'],
-
-    // Piano variations
     'Piano': ['Piano', 'Piano keyboard', 'Keyboard', 'Electric piano', 'Digital piano'],
-
-    // Drums variations
     'Drums': ['Drums', 'Drum kit', 'Percussion', 'Drum set', 'Electronic drums'],
-
-    // Violin variations
     'Violin': ['Violin', 'Electric violin', 'Acoustic violin'],
-
-    // Other instruments (add exact matches for now)
     'Cello': ['Cello'],
     'Cajon': ['Cajon'],
     'Bongos': ['Bongos'],
@@ -41,34 +36,28 @@ let currentOffset = 0;
 let hasReachedActualEnd = false;
 
 /**
- * Helper function for DISCOVER API (limited data)
- * Used by DiscoverScreen - keeps existing functionality
+ * Format API response for Discover Screen
+ * Transforms raw API data into standardized musician objects with limited profile data
  * @param {Array} apiData - Raw data from discover API
- * @returns {Array} - Transformed musician objects with limited data
+ * @returns {Array} Transformed musician objects with basic information
  */
 const formatDiscoverResponse = (apiData) => {
     const musicians = apiData.map(musician => {
-        console.log('🔍 Raw musician data from DISCOVER API:', {
+        logger.debug('Processing musician from Discover API', {
             username: musician.username,
-            bio: musician.bio,
-            location: musician.location,
-            hasLimitedData: !musician.bio || !musician.location
+            hasProfile: !!(musician.bio && musician.location)
         });
 
         return {
             id: musician.user_id || musician.id,
             username: musician.username,
             videos: [musician.video_url],
-
-            // DISCOVER API has limited data
             bio: musician.bio || null,
             location: musician.location || musician.address || null,
             age: musician.age || null,
             rating: musician.rating || null,
             instruments: musician.instruments || [],
             genres: musician.genres || [],
-
-            // Keep any other fields from the API response
             ...musician
         };
     });
@@ -77,27 +66,23 @@ const formatDiscoverResponse = (apiData) => {
 };
 
 /**
- * Helper function for MATCH API (complete data)
- * Used by MatchScreen - gets complete user data
- * @param {Array} apiData - Raw data from match API (complete user objects)
- * @returns {Array} - Transformed musician objects with complete data
+ * Format API response for Match Screen
+ * Transforms raw API data into complete musician profiles for matching
+ * @param {Array} apiData - Raw data from match API with complete user objects
+ * @returns {Array} Transformed musician objects with complete profile data
  */
 const formatMatchResponse = (apiData) => {
-    console.log('🔄 Processing MATCH API response with', apiData.length, 'musicians');
-    
+    logger.info(`🎯 Processing Match API response: ${apiData.length} musicians`);
+
     const musicians = apiData.map((musician, index) => {
-        console.log(`🔍 Processing musician ${index + 1}:`, {
+        logger.debug(`Processing musician ${index + 1}`, {
             username: musician.username,
-            bio: musician.bio ? 'Has bio' : 'No bio',
-            location: musician.location ? 'Has location' : 'No location',
-            age: musician.age || 'No age',
-            rating: musician.rating || 'No rating',
-            videosCount: musician.videos?.length || 0,
-            hasCompleteData: !!(musician.bio && musician.location)
+            profileComplete: !!(musician.bio && musician.location && musician.age),
+            videoCount: musician.videos?.length || 0
         });
 
-        // Pick a random video from the user's videos array
-        const randomVideo = musician.videos && musician.videos.length > 0 
+        // Select random video from user's collection
+        const randomVideo = musician.videos && musician.videos.length > 0
             ? musician.videos[Math.floor(Math.random() * musician.videos.length)]
             : null;
 
@@ -105,17 +90,15 @@ const formatMatchResponse = (apiData) => {
             id: musician.id || musician.user_id || `match-${index}-${Date.now()}`,
             username: musician.username || `unknown_${index}`,
             videos: musician.videos || [],
-            video_url: randomVideo, // For compatibility
+            video_url: randomVideo,
 
-            // ✅ COMPLETE DATA FROM MATCH API!
+            // Complete profile data from Match API
             bio: musician.bio || null,
             location: musician.location || null,
             age: musician.age || null,
             rating: musician.rating || null,
             instruments: musician.instruments || [],
             genres: musician.genres || [],
-            
-            // All other complete profile fields
             followers: musician.followers || 0,
             following: musician.following || 0,
             likes: musician.likes || 0,
@@ -123,121 +106,136 @@ const formatMatchResponse = (apiData) => {
             email: musician.email || null,
             gender: musician.gender || null,
             profile_picture: musician.profile_picture || null,
-
-            // Keep all other fields
             ...musician
         };
 
-        console.log(`✅ Formatted musician ${index + 1}:`, {
+        logger.debug(`✅ Formatted musician ${index + 1}`, {
             username: formattedMusician.username,
-            hasBio: !!formattedMusician.bio,
-            hasLocation: !!formattedMusician.location,
-            hasAge: !!formattedMusician.age,
-            hasRating: !!formattedMusician.rating
+            hasCompleteProfile: !!(formattedMusician.bio && formattedMusician.location && formattedMusician.age)
         });
 
         return formattedMusician;
     });
 
-    console.log(`✅ Formatted ${musicians.length} musicians with COMPLETE data from MATCH API`);
+    logger.info(`✅ Successfully formatted ${musicians.length} musicians with complete profiles`);
     return musicians;
 };
 
 /**
- * Legacy function - keep for backward compatibility with DiscoverScreen
+ * Legacy function for backward compatibility with DiscoverScreen
  * @param {Array} apiData - Raw data from API
- * @returns {Array} - Transformed musician objects
+ * @returns {Array} Transformed musician objects
  */
 const formatMusicianResponse = (apiData) => {
-    return formatDiscoverResponse(apiData); // Use discover formatter for backward compatibility
+    return formatDiscoverResponse(apiData);
 };
 
 /**
- * Fetch initial musicians (no filters) - 5 random users
+ * Fetch initial musicians for discovery
+ * @param {string} currentUser - Current user identifier
+ * @param {number} limit - Maximum number of musicians to fetch
+ * @returns {Promise<Array>} Array of musician objects
  */
 export const fetchInitialMusicians = async (currentUser, limit = 5) => {
+    logger.time('fetchInitialMusicians'); // 🎯 PERFORMANCE TRACKING
+
     try {
-        console.log('🎵 Fetching initial musicians...');
+        logger.info('🎵 Fetching initial musicians for discovery', { currentUser, limit });
 
         const url = `${MUSICIAN_API_URL}?type=initial&username=${encodeURIComponent(currentUser)}`;
-        console.log('🎵 GET request to:', url);
+
+        // 🎯 PERFORMANCE: Only log URL in debug mode
+        logger.debug('API Request URL', { url });
 
         const response = await axios.get(url);
 
         if (!response.data || !Array.isArray(response.data)) {
-            console.log('❌ Invalid API response format');
+            logger.warn('Invalid API response format received');
             return [];
         }
 
-        console.log(`✅ Fetched ${response.data.length} initial musicians`);
-        return formatMusicianResponse(response.data);
+        // 🎯 PERFORMANCE: Memory check after API call
+        logger.memory('After API Response');
+
+        const result = formatMusicianResponse(response.data);
+
+        logger.info('✅ Successfully fetched initial musicians', {
+            count: response.data.length,
+            processed: result.length
+        });
+
+        return result;
     } catch (error) {
-        console.error('❌ Error fetching initial musicians:', error);
+        logger.error('Failed to fetch initial musicians', {
+            error: error.message,
+            stack: error.stack
+        });
         throw error;
+    } finally {
+        logger.timeEnd('fetchInitialMusicians'); // 🎯 SHOWS EXACT PERFORMANCE
     }
 };
 
 /**
- * Fetch filtered musicians using GET with query parameters
+ * Fetch filtered musicians with smart instrument matching
+ * @param {string} currentUser - Current user identifier
+ * @param {Object} filters - Filter criteria object
+ * @param {number} limit - Maximum number of results
+ * @returns {Promise<Array>} Array of filtered musician objects
  */
 export const fetchFilteredMusicians = async (currentUser, filters, limit = 5) => {
     try {
-        console.log('🎯 Fetching filtered musicians:', filters);
+        logger.info('🎯 Fetching filtered musicians', { filters });
 
         const params = new URLSearchParams();
         params.append('type', 'filter');
         params.append('username', currentUser);
 
-        // SMART INSTRUMENT FILTERING
+        // Smart instrument filtering with variations
         if (filters.selectedInstruments && filters.selectedInstruments.length > 0) {
-            // Expand each selected instrument to include all its variations
             const expandedInstruments = {};
 
             filters.selectedInstruments.forEach(selectedInstrument => {
                 const skillLevel = filters.selectedSkill && filters.selectedSkill.length > 0 ? filters.selectedSkill[0] : "any";
-
-                // Get all variations for this instrument
                 const variations = INSTRUMENT_VARIATIONS[selectedInstrument] || [selectedInstrument];
 
-                console.log(`🎸 Expanding "${selectedInstrument}" to:`, variations);
+                logger.debug(`🎸 Expanding instrument: ${selectedInstrument}`, { variations });
 
-                // Add all variations to the filter
                 variations.forEach(variation => {
                     expandedInstruments[variation] = skillLevel;
                 });
             });
 
-            console.log('🎸 Final expanded instruments:', expandedInstruments);
+            logger.debug('Final instrument filter mapping', expandedInstruments);
             params.append('instruments', JSON.stringify(expandedInstruments));
         }
 
-        // Add genre filters as JSON string
+        // Apply genre filters
         if (filters.selectedGenres && filters.selectedGenres.length > 0) {
             params.append('genres', JSON.stringify(filters.selectedGenres));
         }
 
-        // Add gender filter as JSON array string
+        // Apply gender filter
         if (filters.selectedGender && filters.selectedGender !== 'Any') {
             params.append('gender', JSON.stringify([filters.selectedGender.toLowerCase()]));
         }
 
         const url = `${MUSICIAN_API_URL}?${params.toString()}`;
-
         const response = await axios.get(url);
 
         if (!response.data || !Array.isArray(response.data)) {
-            console.log('❌ Invalid API response format');
+            logger.warn('Invalid filtered API response format');
             return [];
         }
 
-        // DEBUG: Show what instruments we got back
+        // Log instrument matching results
         const responseInstruments = response.data.map(musician => musician.instruments || []).flat();
-        console.log('🎸 Found instruments in response:', [...new Set(responseInstruments)]);
+        logger.debug('🎸 Instruments found in response', { instruments: [...new Set(responseInstruments)] });
 
-        console.log(`✅ Fetched ${response.data.length} filtered musicians with smart matching`);
+        logger.info(`✅ Successfully fetched ${response.data.length} filtered musicians`);
         return formatMusicianResponse(response.data);
     } catch (error) {
-        console.error('❌ Error fetching filtered musicians:', error);
+        logger.error('Failed to fetch filtered musicians', { error: error.message });
         throw error;
     }
 };
@@ -247,7 +245,7 @@ export const fetchFilteredMusicians = async (currentUser, filters, limit = 5) =>
  */
 export const loadMoreFilteredMusicians = async (currentUser, filters, limit = 3) => {
     try {
-        console.log('🎯 Loading more filtered musicians...');
+        logger.info('🎯 Loading more filtered musicians...');
 
         const params = new URLSearchParams();
         params.append('type', 'filter');
@@ -280,19 +278,19 @@ export const loadMoreFilteredMusicians = async (currentUser, filters, limit = 3)
         }
 
         const url = `${MUSICIAN_API_URL}?${params.toString()}`;
-        console.log('🎯 Loading more with smart filtering:', url);
+        logger.debug('Loading more with smart filtering:', url);
 
         const response = await axios.get(url);
 
         if (!response.data || !Array.isArray(response.data)) {
-            console.log('❌ Invalid API response format');
+            logger.warn('Invalid API response format');
             return [];
         }
 
-        console.log(`✅ Loaded ${response.data.length} more filtered musicians with smart matching`);
+        logger.info(`✅ Loaded ${response.data.length} more filtered musicians with smart matching`);
         return formatMusicianResponse(response.data);
     } catch (error) {
-        console.error('❌ Error loading more filtered musicians:', error);
+        logger.error('Failed to load more filtered musicians', { error: error.message });
         throw error;
     }
 };
@@ -318,8 +316,8 @@ export const discoverInstrumentVariations = async (currentUser) => {
 
             const sortedInstruments = Array.from(allInstruments).sort();
 
-            console.log('🔍 All instruments found in backend:');
-            console.log(sortedInstruments);
+            logger.info('🔍 All instruments found in backend');
+            logger.table(sortedInstruments);
 
             // Group similar instruments
             const instrumentGroups = {
@@ -330,10 +328,10 @@ export const discoverInstrumentVariations = async (currentUser) => {
                 vocals: sortedInstruments.filter(i => i.toLowerCase().includes('vocal') || i.toLowerCase().includes('singer')),
             };
 
-            console.log('🎸 Instrument groups found:');
+            logger.info('🎸 Instrument groups found');
             Object.entries(instrumentGroups).forEach(([group, instruments]) => {
                 if (instruments.length > 0) {
-                    console.log(`${group}:`, instruments);
+                    logger.log(`${group}:`, instruments);
                 }
             });
 
@@ -342,7 +340,7 @@ export const discoverInstrumentVariations = async (currentUser) => {
 
         return { allInstruments: [], instrumentGroups: {} };
     } catch (error) {
-        console.error('❌ Error discovering instruments:', error);
+        logger.error('Failed to discover instruments', { error: error.message });
         return { allInstruments: [], instrumentGroups: {} };
     }
 };
@@ -352,23 +350,23 @@ export const discoverInstrumentVariations = async (currentUser) => {
  */
 export const loadMusicianWithoutFilters = async (currentUser, limit = 3) => {
     try {
-        console.log('🎵 Loading more musicians without filters...');
+        logger.info('🎵 Loading more musicians without filters...');
 
         // Use filter endpoint with just username to get random users
         const url = `${MUSICIAN_API_URL}?type=filter&username=${encodeURIComponent(currentUser)}`;
-        console.log('🎵 GET request to:', url);
+        logger.debug('GET request', { url });
 
         const response = await axios.get(url);
 
         if (!response.data || !Array.isArray(response.data)) {
-            console.log('❌ Invalid API response format');
+            logger.warn('Invalid API response format');
             return [];
         }
 
-        console.log(`✅ Loaded ${response.data.length} more musicians`);
+        logger.info(`✅ Loaded ${response.data.length} more musicians`);
         return formatMusicianResponse(response.data);
     } catch (error) {
-        console.error('❌ Error loading more musicians:', error);
+        logger.error('Failed to load more musicians', { error: error.message });
         throw error;
     }
 };
@@ -389,7 +387,7 @@ export const fetchMusicians = async (type = 'initial', username = null, filterCr
             }
         }
     } catch (error) {
-        console.error('❌ Error in legacy fetchMusicians:', error);
+        logger.error('Error in legacy fetchMusicians', { error: error.message });
         return [];
     }
 };
@@ -403,7 +401,7 @@ export const fetchVideos = async (offset = 0, limit = 5) => {
     try {
         if (offset === 0) {
             fetchedVideoIds.clear();
-            console.log('🔄 Reset video state tracking');
+            logger.debug('Reset video state tracking');
         }
 
         const musicians = await fetchInitialMusicians('default_user');
@@ -418,11 +416,11 @@ export const fetchVideos = async (offset = 0, limit = 5) => {
             instruments: musician.instruments,
         }));
 
-        console.log(`🎯 Returning ${videos.length} videos from musician API`);
+        logger.info(`🎯 Returning ${videos.length} videos from musician API`);
         return videos;
 
     } catch (error) {
-        console.error('❌ Error fetching videos:', handleError(error, 'videoService/fetchVideos'));
+        logger.error('Error fetching videos', handleError(error, 'videoService/fetchVideos'));
         return [];
     }
 };
@@ -450,7 +448,7 @@ export const validateVideoFile = async (videoAsset, options = {}) => {
             durationSec = durationSec / 1000;
         }
 
-        console.log(`📊 Video validation - Size: ${sizeMB.toFixed(2)}MB, Duration: ${durationSec.toFixed(1)}s`);
+        logger.info(`📊 Video validation - Size: ${sizeMB.toFixed(2)}MB, Duration: ${durationSec.toFixed(1)}s`);
 
         if (sizeMB > maxSizeMB) {
             return {
@@ -476,7 +474,7 @@ export const validateVideoFile = async (videoAsset, options = {}) => {
         };
 
     } catch (error) {
-        console.error('❌ Error validating video:', error);
+        logger.error('Error validating video', error);
         return {
             success: false,
             error: 'Failed to validate video file.'
@@ -526,7 +524,7 @@ export const checkVideoDuplicate = async (videoAsset, existingKeys, validationOp
         };
 
     } catch (error) {
-        console.error('❌ Error checking video duplicate:', error);
+        logger.error('Error checking video duplicate', error);
         return {
             isDuplicate: false,
             videoKey: null,
@@ -554,7 +552,7 @@ export const generateVideoThumbnail = async (videoUri, timeMs = 100) => {
         };
 
     } catch (error) {
-        console.error('❌ Error generating thumbnail:', error);
+        logger.error('Error generating thumbnail', error);
         return {
             success: false,
             thumbnailUri: videoUri + "#t=0.1",
@@ -572,7 +570,7 @@ export const generateVideoThumbnail = async (videoUri, timeMs = 100) => {
  */
 export const processVideoAsset = async (selectedAsset, existingKeys, options = {}) => {
     try {
-        console.log(`🎬 Processing video: ${selectedAsset.fileName}`);
+        logger.info(`🎬 Processing video: ${selectedAsset.fileName}`);
 
         const duplicateCheck = await checkVideoDuplicate(selectedAsset, existingKeys, options);
 
@@ -606,7 +604,7 @@ export const processVideoAsset = async (selectedAsset, existingKeys, options = {
             thumbnail: thumbnailResult.thumbnailUri,
         };
 
-        console.log(`✅ Video processed successfully:`, {
+        logger.info(`✅ Video processed successfully:`, {
             fileName: videoData.fileName,
             size: `${(videoData.size / (1024 * 1024)).toFixed(2)}MB`,
             duration: `${videoData.duration}s`
@@ -619,7 +617,7 @@ export const processVideoAsset = async (selectedAsset, existingKeys, options = {
         };
 
     } catch (error) {
-        console.error('❌ Error processing video asset:', error);
+        logger.error('Error processing video asset', error);
         return {
             success: false,
             error: 'Failed to process video.'
@@ -637,7 +635,7 @@ export const processVideoAsset = async (selectedAsset, existingKeys, options = {
  */
 export const processBatchVideos = async (videoAssets, existingKeys, options = {}, onProgress = null) => {
     try {
-        console.log(`🎬 Processing ${videoAssets.length} videos...`);
+        logger.info(`🎬 Processing ${videoAssets.length} videos...`);
 
         const processedVideos = [];
         const videoKeys = new Set(existingKeys);
@@ -664,7 +662,7 @@ export const processBatchVideos = async (videoAssets, existingKeys, options = {}
             }
         }
 
-        console.log(`✅ Batch processing complete: ${processedVideos.length} successful, ${errors.length} errors`);
+        logger.info(`✅ Batch processing complete: ${processedVideos.length} successful, ${errors.length} errors`);
 
         return {
             success: true,
@@ -679,7 +677,7 @@ export const processBatchVideos = async (videoAssets, existingKeys, options = {}
         };
 
     } catch (error) {
-        console.error('❌ Error in batch video processing:', error);
+        logger.error('Error in batch video processing', error);
         return {
             success: false,
             error: 'Failed to process videos.',
@@ -696,19 +694,19 @@ export const processBatchVideos = async (videoAssets, existingKeys, options = {}
  */
 export const deleteVideoFromS3 = async (fileName) => {
     try {
-        console.log(`🗑️ Deleting video from S3: ${fileName}`);
+        logger.info(`🗑️ Deleting video from S3: ${fileName}`);
 
         const deleteUrl = `${DELETE_API_URL}?filename=${encodeURIComponent(fileName)}`;
         const response = await axios.delete(deleteUrl);
 
         if (response.status === 200) {
-            console.log(`✅ Video ${fileName} deleted successfully from S3`);
+            logger.info(`✅ Video ${fileName} deleted successfully from S3`);
             return {
                 success: true,
                 message: `Video ${fileName} deleted successfully`
             };
         } else {
-            console.error(`❌ Failed to delete video ${fileName}:`, response.data);
+            logger.error(`❌ Failed to delete video ${fileName}:`, response.data);
             return {
                 success: false,
                 error: `Failed to delete video: ${response.status}`
@@ -716,7 +714,7 @@ export const deleteVideoFromS3 = async (fileName) => {
         }
 
     } catch (error) {
-        console.error(`❌ Error deleting video ${fileName}:`, error.response?.data || error.message);
+        logger.error(`❌ Error deleting video ${fileName}:`, error.response?.data || error.message);
         return {
             success: false,
             error: error.response?.data?.message || error.message || 'Failed to delete video'
@@ -827,7 +825,7 @@ export const resetVideoState = () => {
  */
 export const forceResetHasMoreVideos = () => {
     hasReachedActualEnd = false;
-    console.log('🔁 Force reset hasReachedActualEnd');
+    logger.info('🔁 Force reset hasReachedActualEnd');
 };
 
 /**
@@ -836,30 +834,30 @@ export const forceResetHasMoreVideos = () => {
  */
 export const fetchInitialMusiciansForMatch = async (currentUser, limit = 5) => {
     try {
-        console.log('🎵 Fetching initial musicians for MATCH SCREEN...');
+        logger.info('🎵 Fetching musicians for Match Screen with complete profiles');
 
         const url = `${MATCH_API_URL}?type=initial&currentUser=${encodeURIComponent(currentUser)}&limit=${limit}`;
-        console.log('🎵 GET request to MATCH API:', url);
+        logger.debug('Match API Request', { url });
 
         const response = await axios.get(url);
 
-        console.log('✅ MATCH API Response received:', {
+        logger.info('✅ Match API Response received', {
             status: response.status,
-            dataType: Array.isArray(response.data),
-            dataLength: response.data?.length || 0
+            isArray: Array.isArray(response.data),
+            count: response.data?.length || 0
         });
 
         if (!response.data || !Array.isArray(response.data)) {
-            console.log('❌ Invalid API response format from MATCH API');
+            logger.warn('Invalid Match API response format');
             return [];
         }
 
-        console.log(`✅ Fetched ${response.data.length} initial musicians with complete data from MATCH API`);
-        console.log('🔍 Sample raw data from MATCH API:', response.data[0]);
-        
+        logger.info(`✅ Successfully fetched ${response.data.length} complete musician profiles`);
+        logger.debug('Sample Match API data', { sample: response.data[0] });
+
         return formatMatchResponse(response.data);
     } catch (error) {
-        console.error('❌ Error fetching initial musicians from MATCH API:', error);
+        logger.error('Failed to fetch musicians from Match API', { error: error.message });
         throw error;
     }
 };
@@ -870,45 +868,42 @@ export const fetchInitialMusiciansForMatch = async (currentUser, limit = 5) => {
  */
 export const loadMoreMusiciansForMatch = async (currentUser, limit = 3) => {
     try {
-        console.log('🎵 Loading more musicians for MATCH SCREEN...');
+        logger.info('🎵 Loading additional musicians for Match Screen');
 
-        // Build query parameters for GET request
         const params = new URLSearchParams();
         params.append('type', 'filter');
         params.append('username', currentUser);
         
         const url = `${MATCH_API_URL}?${params.toString()}`;
-        console.log('🔗 MATCH API URL:', url);
-        
+        logger.debug('Match API Load More Request', { url });
+
         const response = await axios.get(url);
 
-        console.log('✅ MATCH API Response received:', {
+        logger.info('✅ Match API Load More Response', {
             status: response.status,
-            dataType: Array.isArray(response.data),
-            dataLength: response.data?.length || 0
+            isArray: Array.isArray(response.data),
+            count: response.data?.length || 0
         });
 
         if (!response.data || !Array.isArray(response.data)) {
-            console.log('❌ Invalid API response format from MATCH API');
+            logger.warn('Invalid Match API load more response format');
             return [];
         }
 
-        console.log(`✅ Loaded ${response.data.length} musicians with complete data from MATCH API`);
-        console.log('🔍 Sample raw data from MATCH API:', response.data[0]);
-        
+        logger.info(`✅ Successfully loaded ${response.data.length} additional musicians`);
+        logger.debug('Sample additional Match API data', { sample: response.data[0] });
+
         return formatMatchResponse(response.data);
     } catch (error) {
-        console.error('❌ Error loading more musicians from MATCH API:', error);
-        console.error('❌ Error details:', {
+        logger.error('Failed to load more musicians from Match API', {
+            error: error.message,
             status: error.response?.status,
             statusText: error.response?.statusText,
-            data: error.response?.data,
-            url: error.config?.url,
-            method: error.config?.method
+            url: error.config?.url
         });
         
-        // Return empty array instead of throwing to prevent infinite loops
-        console.log('🔄 Returning empty array to prevent infinite loop');
+        // Return empty array to prevent infinite loops
+        logger.info('🔄 Returning empty array to prevent retry loops');
         return [];
     }
 };

@@ -21,6 +21,9 @@ import ChatService from '../../services/ChatService';
 import { useAuth } from '../../context/AuthContext';
 import { getUsernameForChat } from '../../services/profileService';
 import { getCurrentUserEmail } from '../../utils/userUtils';
+import { createLogger } from '../../utils/Logger';
+
+const logger = createLogger('ChatScreen');
 
 const ChatScreen = () => {
     const route = useRoute();
@@ -55,39 +58,36 @@ const ChatScreen = () => {
     useEffect(() => {
         const fetchCurrentUsername = async () => {
             if (!isSignedIn || !currentUserEmail) {
-                console.log('❌ ChatScreen: User not signed in or no email:', { isSignedIn, currentUserEmail });
+                logger.error('❌ User not signed in or no email', { isSignedIn, currentUserEmail });
                 setIsLoadingProfile(false);
                 return;
             }
 
             try {
                 setIsLoadingProfile(true);
-                console.log('🔍 ChatScreen: Getting username for message identification');
-                console.log('🔍 ChatScreen: Current user email:', currentUserEmail);
 
                 const userEmail = currentUserEmail || await getCurrentUserEmail();
                 if (!userEmail) {
-                    console.log('❌ ChatScreen: No user email found');
+                    logger.error('❌ No user email found');
                     setIsLoadingProfile(false);
                     return;
                 }
 
-                console.log('📧 ChatScreen: Using email for username lookup:', userEmail);
                 const username = await getUsernameForChat(userEmail);
-                console.log('📝 ChatScreen: getUsernameForChat returned:', username);
 
                 if (username) {
                     setCurrentUsername(username);
-                    console.log('✅ ChatScreen: Got username for message identification:', username);
+                    logger.info('✅ Got username for message identification', { username });
                 } else {
-                    console.log('❌ ChatScreen: Failed to get username - result was null/undefined');
+                    logger.error('❌ Failed to get username - result was null/undefined');
                 }
             } catch (error) {
-                console.error('❌ ChatScreen: Error getting username:', error);
-                console.error('❌ ChatScreen: Error stack:', error.stack);
+                logger.error('❌ Error getting username', {
+                    error: error.message,
+                    stack: error.stack
+                });
             } finally {
                 setIsLoadingProfile(false);
-                console.log('🏁 ChatScreen: Profile loading completed, isLoadingProfile set to false');
             }
         };
 
@@ -101,35 +101,32 @@ const ChatScreen = () => {
     useEffect(() => {
         // WAIT FOR USERNAME BEFORE INITIALIZING CHAT
         if (isLoadingProfile || !currentUsername) {
-            console.log('⏳ Waiting for username before initializing chat...', { isLoadingProfile, currentUsername });
             return;
         }
 
         // Validation: Check if we have required data
         if (!isSignedIn || !currentUserEmail) {
-            console.log('❌ Cannot initialize chat: User not signed in');
+            logger.error('❌ Cannot initialize chat: User not signed in');
             setConnectionError('Please sign in to access chat');
             return;
         }
 
         if (!userName) {
-            console.log('❌ Cannot initialize chat: No userName provided');
+            logger.error('❌ Cannot initialize chat: No userName provided');
             setConnectionError('Invalid conversation');
             return;
         }
 
-        console.log('💬 Initializing ChatScreen for conversation:', {
-            currentUser: currentUsername, // Use username instead of email
+        logger.info('💬 Initializing ChatScreen for conversation', {
+            currentUser: currentUsername,
             otherUser: userName
         });
 
         // Set up message listener
         const setupMessageListener = () => {
-            console.log('📡 ChatScreen: Setting up message listener...');
             messageListenerRef.current = ChatService.onMessage((data) => {
                 handleIncomingMessage(data);
             });
-            console.log('📡 ChatScreen: Message listener setup completed');
         };
 
         // Connect and load chat history
@@ -141,39 +138,33 @@ const ChatScreen = () => {
                 // Connect to ChatService (if not already connected)
                 const connectionState = ChatService.getConnectionState();
                 if (!connectionState.connected) {
-                    console.log('🔗 Connecting to chat service with username:', currentUsername);
-                    await ChatService.connectUserToWebSocket(currentUsername); // Use username
+                    await ChatService.connectUserToWebSocket(currentUsername);
                 }
 
                 // Set up listener before loading history
                 setupMessageListener();
 
                 // Load chat history using USERNAME
-                console.log('📜 Loading chat history with username:', currentUsername);
-                const success = ChatService.loadChatHistory(currentUsername, userName); // Use username
+                const success = ChatService.loadChatHistory(currentUsername, userName);
 
                 if (!success) {
                     throw new Error('Failed to load chat history');
                 }
 
                 // MARK MESSAGES AS READ when entering the chat
-                console.log('✅ Marking messages as read for conversation with:', userName);
-                console.log('🔍 ChatService.markMessagesAsRead exists?', typeof ChatService.markMessagesAsRead);
-
                 try {
                     const markReadSuccess = ChatService.markMessagesAsRead(userName);
-                    console.log('📤 markMessagesAsRead call result:', markReadSuccess);
 
                     if (markReadSuccess) {
-                        console.log('✅ Successfully sent mark as read request');
+                        logger.info('✅ Successfully sent mark as read request');
                     } else {
-                        console.log('⚠️ Failed to send mark as read request');
+                        logger.warn('⚠️ Failed to send mark as read request');
                     }
                 } catch (error) {
-                    console.log('❌ Error calling markMessagesAsRead:', error);
+                    logger.error('❌ Error calling markMessagesAsRead', { error: error.message });
                 }
             } catch (error) {
-                console.error('❌ Failed to initialize chat:', error);
+                logger.error('❌ Failed to initialize chat', { error: error.message });
                 setConnectionError(error.message || 'Failed to load chat');
                 setIsLoadingHistory(false);
             }
@@ -183,7 +174,6 @@ const ChatScreen = () => {
 
         // CLEANUP: Very important!
         return () => {
-            console.log('🧹 Cleaning up ChatScreen...');
             if (messageListenerRef.current) {
                 messageListenerRef.current(); // Unsubscribe from messages
             }
@@ -195,13 +185,14 @@ const ChatScreen = () => {
     // ===================================
 
     const handleIncomingMessage = (data) => {
-        console.log('🔄 Processing message data:', data.type);
-
         // Handle messages without a type (like error responses)
         if (!data.type) {
             if (data.statusCode && data.message) {
                 // Backend error response
-                console.log('❌ Backend error response:', data.statusCode, data.message);
+                logger.error('❌ Backend error response', {
+                    statusCode: data.statusCode,
+                    message: data.message
+                });
                 if (data.statusCode >= 400) {
                     setConnectionError(`Server error: ${data.message}`);
                     setIsLoadingHistory(false);
@@ -245,8 +236,7 @@ const ChatScreen = () => {
                     }, 100);
                 }
                 break;
-            case 'message':  // ADD THIS NEW CASE
-                // Handle real-time messages from backend (type: "message")
+            case 'message':  // Handle real-time messages from backend
                 if (data.from === userName) {
                     const newMessage = {
                         id: Date.now().toString() + Math.random(),
@@ -275,21 +265,20 @@ const ChatScreen = () => {
                 }
                 break;
             case 'messages':
-                // This is the actual message format from your backend
-                console.log('📨 Processing messages from backend:', data.messages?.length || 0, 'messages');
-                console.log('🔍 Current user identification:', { currentUsername, currentUserEmail });
+                logger.info('📨 Processing messages from backend', {
+                    messageCount: data.messages?.length || 0
+                });
 
                 // Handle old email#username conversationIds
                 if (data.conversationId && data.conversationId.includes('#')) {
                     const [user1, user2] = data.conversationId.split('#');
-                    console.log('🔍 Conversation ID format:', { user1, user2 });
 
                     const isCorrectConversation =
                         (user1 === currentUsername && user2 === userName) ||
                         (user1 === userName && user2 === currentUsername);
 
                     if (!isCorrectConversation) {
-                        console.log('⚠️ Message for different conversation, ignoring');
+                        logger.warn('⚠️ Message for different conversation, ignoring');
                         return;
                     }
                 }
@@ -319,8 +308,9 @@ const ChatScreen = () => {
                         };
                     });
 
-                    console.log('✅ Processed messages:', processedMessages.length, 'messages');
-                    console.log('🔍 Message breakdown:', processedMessages.map(m => ({ text: m.text.substring(0, 20), sender: m.sender, from: m.from })));
+                    logger.info('✅ Processed messages', {
+                        count: processedMessages.length
+                    });
                     setMessages(processedMessages);
 
                     // Scroll to bottom after loading messages
@@ -328,14 +318,16 @@ const ChatScreen = () => {
                         flatListRef.current?.scrollToEnd({ animated: false });
                     }, 500);
                 } else {
-                    console.log('⚠️ No messages array found in data');
+                    logger.warn('⚠️ No messages array found in data');
                 }
                 setIsLoadingHistory(false);
                 break;
 
             case 'chat_history':
                 // Historical messages loaded (keep for compatibility)
-                console.log('📚 Loading chat history:', data.messages?.length || 0, 'messages');
+                logger.info('📚 Loading chat history', {
+                    messageCount: data.messages?.length || 0
+                });
 
                 if (data.messages && Array.isArray(data.messages)) {
                     const historyMessages = data.messages.map((msg, index) => {
@@ -368,32 +360,28 @@ const ChatScreen = () => {
 
             case 'success':
                 // Backend success response - this doesn't contain message content
-                console.log('✅ Backend success response:', data.message);
+                logger.info('✅ Backend success response', { message: data.message });
                 // Don't do anything here - this is just a confirmation
                 break;
 
             case 'message_sent':
                 // Handle message sent confirmation - this is just a confirmation, don't add to UI
-                console.log('📤 Message sent confirmation:', data.message || 'Message sent successfully');
                 // The optimistic message is already in the UI, this is just backend confirmation
                 break;
 
             case 'messages_marked_read':
                 // Handle mark as read confirmation
-                console.log('✅ Messages marked as read confirmation:', data);
                 // This is handled by ChatListScreen, no action needed here
                 break;
 
             case 'user_status':
                 // User online/offline status - could update UI here
-                console.log('👤 User status update:', data);
                 break;
 
             default:
-                console.log('🤔 Unknown message type:', data.type, 'Full data:', JSON.stringify(data));
                 // Try to handle as error response
                 if (data.statusCode && data.statusCode >= 400) {
-                    console.log('❌ Treating as error response');
+                    logger.error('❌ Treating as error response');
                     setConnectionError(`Error: ${data.message || 'Unknown error occurred'}`);
                     setIsLoadingHistory(false);
                 }
@@ -448,7 +436,7 @@ const ChatScreen = () => {
             }
 
         } catch (error) {
-            console.error('❌ Error sending message:', error);
+            logger.error('❌ Error sending message', { error: error.message });
 
             // Remove failed message from UI
             setMessages(prev => prev.filter(msg => msg.id !== optimisticMessage.id));

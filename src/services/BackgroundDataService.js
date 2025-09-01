@@ -1,14 +1,15 @@
 /**
  * @module BackgroundDataService
- * ENHANCED VERSION - Memory leak prevention with video decoder cleanup
- * Fixed function references and added parallel loading capability + memory management
+ * Enterprise-grade background data service with memory leak prevention
+ * Handles parallel loading and video decoder cleanup for optimal performance
  */
 
 import { fetchVideos, resetVideoState } from './videoService';
 import { fetchUserProfile } from './profileService';
+import { createLogger } from '../utils/Logger';
 
-// FIXED: Import functions directly with explicit names
-import { 
+// Import functions directly with explicit names
+import {
   getFeedCache,
   cacheFeedVideos,
   getProfileCache,
@@ -16,24 +17,26 @@ import {
   forceMemoryCleanup
 } from '../utils/cacheManager';
 
+const logger = createLogger('BackgroundDataService');
+
 class BackgroundDataService {
   constructor() {
     this.isLoading = false;
     this.loadingStage = 0;
     this.userData = null;
     
-    // SAFE REQUEST MANAGEMENT
+    // Safe request management
     this.activeRequests = new Set();
     this.abortControllers = new Map();
-    this.maxConcurrentRequests = 2; // INCREASED for parallel loading
-    this.requestDelay = 500; // Reduced delay for faster loading
-    
-    // VIDEO DECODER TRACKING - Critical for memory leak prevention
+    this.maxConcurrentRequests = 2;
+    this.requestDelay = 500;
+
+    // Video decoder tracking - Critical for memory leak prevention
     this.activeVideoDecoders = new Set();
     this.videoDecoderCleanupCallbacks = new Set();
     
     this.stages = {
-      PARALLEL_LOADING: 1, // NEW: Load both simultaneously
+      PARALLEL_LOADING: 1,
       BACKGROUND_OPTIMIZATION: 2,
     };
     
@@ -51,108 +54,158 @@ class BackgroundDataService {
         error: null
       }
     };
+
+    logger.info('🚀 BackgroundDataService initialized', {
+      maxConcurrentRequests: this.maxConcurrentRequests,
+      stages: Object.keys(this.stages)
+    });
   }
 
   /**
-   * CRITICAL: Register video decoder for cleanup tracking
+   * Register video decoder for cleanup tracking
+   * @param {string} decoderId - Unique decoder identifier
+   * @param {Function} cleanupCallback - Cleanup function to execute
    */
   registerVideoDecoder(decoderId, cleanupCallback) {
     this.activeVideoDecoders.add(decoderId);
     if (cleanupCallback) {
       this.videoDecoderCleanupCallbacks.add(cleanupCallback);
     }
-    console.log(`📹 Registered video decoder: ${decoderId} (total: ${this.activeVideoDecoders.size})`);
+    logger.debug(`📹 Registered video decoder: ${decoderId}`, {
+      total: this.activeVideoDecoders.size,
+      hasCleanupCallback: !!cleanupCallback
+    });
   }
 
   /**
-   * CRITICAL: Unregister video decoder
+   * Unregister video decoder
+   * @param {string} decoderId - Decoder identifier to remove
    */
   unregisterVideoDecoder(decoderId) {
     this.activeVideoDecoders.delete(decoderId);
-    console.log(`📹 Unregistered video decoder: ${decoderId} (total: ${this.activeVideoDecoders.size})`);
+    logger.debug(`📹 Unregistered video decoder: ${decoderId}`, {
+      remaining: this.activeVideoDecoders.size
+    });
   }
 
   /**
-   * CRITICAL: Emergency video decoder cleanup - prevents 2GB memory leaks
+   * Emergency video decoder cleanup - prevents memory leaks
+   * @param {string} reason - Reason for cleanup trigger
    */
   async emergencyVideoCleanup(reason = 'unknown') {
-    console.log(`🚨 EMERGENCY VIDEO CLEANUP - ${reason} (${this.activeVideoDecoders.size} decoders)`);
+    logger.warn(`🚨 Emergency video cleanup: ${reason}`, {
+      activeDecoders: this.activeVideoDecoders.size,
+      cleanupCallbacks: this.videoDecoderCleanupCallbacks.size
+    });
 
     try {
-      // 1. Execute all cleanup callbacks
-      const cleanupPromises = Array.from(this.videoDecoderCleanupCallbacks).map(callback => {
+      // Execute all cleanup callbacks
+      const cleanupPromises = Array.from(this.videoDecoderCleanupCallbacks).map((callback, index) => {
         try {
           return Promise.resolve(callback());
         } catch (error) {
-          console.warn('Video cleanup callback error:', error);
+          logger.warn(`Video cleanup callback error at index ${index}`, {
+            error: error.message
+          });
           return Promise.resolve();
         }
       });
 
       await Promise.allSettled(cleanupPromises);
 
-      // 2. Clear all tracking
+      // Clear all tracking
       this.activeVideoDecoders.clear();
       this.videoDecoderCleanupCallbacks.clear();
 
-      // 3. Force memory cleanup in cache manager
+      // Force memory cleanup in cache manager
       forceMemoryCleanup(reason);
 
-      // 4. Cancel all requests that might be loading videos
+      // Cancel all requests that might be loading videos
       this.cancelAllRequests();
 
-      // 5. Force garbage collection
+      // Force garbage collection
       if (global.gc) {
         global.gc();
-        console.log('♻️ Forced GC after video cleanup');
+        logger.debug('♻️ Forced GC after video cleanup');
       }
 
-      console.log('✅ Emergency video cleanup completed');
+      logger.info('✅ Emergency video cleanup completed', {
+        reason,
+        callbacksProcessed: cleanupPromises.length
+      });
 
     } catch (error) {
-      console.error('❌ Emergency video cleanup failed:', error);
+      logger.error('❌ Emergency video cleanup failed', {
+        reason,
+        error: error.message
+      });
     }
   }
 
   /**
-   * CANCEL ALL REQUESTS - Enhanced with video cleanup
+   * Cancel all active requests with video cleanup
    */
   cancelAllRequests() {
-    console.log('🛑 BackgroundDataService: Cancelling all requests for safe navigation');
-    
+    logger.info('🛑 Cancelling all active requests for safe navigation', {
+      activeRequests: this.activeRequests.size,
+      abortControllers: this.abortControllers.size
+    });
+
+    let cancelledCount = 0;
+    let failedCount = 0;
+
     this.abortControllers.forEach((controller, id) => {
       try {
         controller.abort();
+        cancelledCount++;
       } catch (err) {
-        console.warn('Failed to abort request:', id);
+        failedCount++;
+        logger.warn(`Failed to abort request: ${id}`, { error: err.message });
       }
     });
     
     this.abortControllers.clear();
     this.activeRequests.clear();
 
-    // Also trigger video cleanup
+    // Trigger video cleanup if needed
     if (this.activeVideoDecoders.size > 0) {
-      console.log('🎬 Triggering video cleanup due to request cancellation');
+      logger.info('🎬 Triggering video cleanup due to request cancellation', {
+        activeDecoders: this.activeVideoDecoders.size
+      });
       setTimeout(() => this.emergencyVideoCleanup('request_cancellation'), 100);
     }
+
+    logger.info('✅ Request cancellation completed', {
+      cancelledCount,
+      failedCount
+    });
   }
 
   /**
-   * SAFE API REQUEST with timeout and cancellation
+   * Make safe API request with timeout and cancellation
+   * @param {Function} requestFunction - Request function to execute
+   * @param {string} requestId - Optional request identifier
+   * @returns {Promise} Request result or null
    */
   async makeSafeRequest(requestFunction, requestId = null) {
     const id = requestId || `req_${Date.now()}`;
-    
-    // Check if too many concurrent requests
+
+    // Check concurrent request limits
     if (this.activeRequests.size >= this.maxConcurrentRequests) {
-      console.log('⚠️ Too many concurrent requests, skipping:', id);
+      logger.info(`🚫 Request rejected due to concurrent limit: ${id}`, {
+        activeRequests: this.activeRequests.size,
+        maxConcurrent: this.maxConcurrentRequests
+      });
       return null;
     }
 
     const abortController = new AbortController();
     this.abortControllers.set(id, abortController);
     this.activeRequests.add(id);
+
+    logger.debug(`📤 Starting safe request: ${id}`, {
+      activeRequests: this.activeRequests.size
+    });
 
     try {
       // 15 second timeout for parallel loading
@@ -163,15 +216,22 @@ class BackgroundDataService {
       const requestPromise = requestFunction(abortController.signal);
       const result = await Promise.race([requestPromise, timeoutPromise]);
       
+      logger.debug(`✅ Safe request completed: ${id}`, {
+        hasResult: !!result
+      });
+
       return result;
     } catch (error) {
       if (error.name === 'AbortError') {
-        console.log('🛑 Request cancelled:', id);
+        logger.info(`🛑 Request cancelled: ${id}`);
         return null;
       }
       
-      console.warn('⚠️ Request failed safely:', error.message);
-      return null; // Return null instead of throwing
+      logger.warn(`⚠️ Safe request failed: ${id}`, {
+        error: error.message,
+        errorType: error.name
+      });
+      return null;
     } finally {
       this.activeRequests.delete(id);
       this.abortControllers.delete(id);
@@ -179,15 +239,20 @@ class BackgroundDataService {
   }
 
   /**
-   * ENHANCED: PARALLEL LOADING with memory monitoring
+   * Start parallel loading of both feed and profile systems
+   * @param {Object} userData - User data for profile loading
    */
   async startParallelLoading(userData) {
     if (this.isLoading) {
-      console.log('⚠️ Already loading, skipping duplicate request');
+      logger.info('⏳ Loading already in progress, skipping duplicate request');
       return;
     }
 
-    console.log('🚀 BackgroundDataService: Starting PARALLEL loading (Discover + Profile)');
+    logger.info('🚀 Starting enhanced parallel loading (Discover + Profile)', {
+      userEmail: userData?.email,
+      systemsToLoad: ['feed', 'profile']
+    });
+
     this.isLoading = true;
     this.userData = userData;
     this.loadingStage = this.stages.PARALLEL_LOADING;
@@ -196,37 +261,67 @@ class BackgroundDataService {
       // Check memory before starting
       const memoryBefore = global.performance?.memory?.usedJSHeapSize;
       if (memoryBefore) {
-        console.log(`📊 Memory before loading: ${Math.round(memoryBefore / 1024 / 1024)}MB`);
+        const memoryBeforeMB = Math.round(memoryBefore / 1024 / 1024);
+        logger.debug(`📊 Memory before loading: ${memoryBeforeMB}MB`);
       }
 
-      // ✨ NEW: Load BOTH systems in parallel for instant app experience
+      // Load both systems in parallel for instant app experience
       const [feedResult, profileResult] = await Promise.allSettled([
         this.loadFeedSystemSafe(),
         this.loadProfileSystemSafe()
       ]);
 
-      // Log results
-      if (feedResult.status === 'fulfilled') {
-        console.log('✅ Discover loading completed successfully');
+      // Enhanced result logging
+      const results = {
+        feed: {
+          status: feedResult.status,
+          success: feedResult.status === 'fulfilled',
+          error: feedResult.status === 'rejected' ? feedResult.reason?.message : null
+        },
+        profile: {
+          status: profileResult.status,
+          success: profileResult.status === 'fulfilled',
+          error: profileResult.status === 'rejected' ? profileResult.reason?.message : null
+        }
+      };
+
+      if (results.feed.success) {
+        logger.info('✅ Discover loading completed successfully');
       } else {
-        console.error('❌ Discover loading failed:', feedResult.reason);
+        logger.error('❌ Discover loading failed', {
+          error: results.feed.error,
+          status: results.feed.status
+        });
       }
 
-      if (profileResult.status === 'fulfilled') {
-        console.log('✅ Profile loading completed successfully');
+      if (results.profile.success) {
+        logger.info('✅ Profile loading completed successfully');
       } else {
-        console.error('❌ Profile loading failed:', profileResult.reason);
+        logger.error('❌ Profile loading failed', {
+          error: results.profile.error,
+          status: results.profile.status
+        });
       }
 
-      // Check memory after loading
+      // Enhanced memory monitoring
       const memoryAfter = global.performance?.memory?.usedJSHeapSize;
       if (memoryBefore && memoryAfter) {
         const memoryIncrease = (memoryAfter - memoryBefore) / 1024 / 1024;
-        console.log(`📊 Memory after loading: ${Math.round(memoryAfter / 1024 / 1024)}MB (+${memoryIncrease.toFixed(1)}MB)`);
-        
+        const memoryAfterMB = Math.round(memoryAfter / 1024 / 1024);
+
+        logger.info(`📊 Memory impact analysis`, {
+          before: `${Math.round(memoryBefore / 1024 / 1024)}MB`,
+          after: `${memoryAfterMB}MB`,
+          increase: `${memoryIncrease.toFixed(1)}MB`,
+          percentage: `${((memoryIncrease / (memoryBefore / 1024 / 1024)) * 100).toFixed(1)}%`
+        });
+
         // Trigger cleanup if memory increase is too high
         if (memoryIncrease > 100) {
-          console.log('⚠️ High memory increase detected, triggering cleanup');
+          logger.warn('🚨 High memory increase detected, scheduling cleanup', {
+            memoryIncrease: `${memoryIncrease.toFixed(1)}MB`,
+            threshold: '100MB'
+          });
           setTimeout(() => this.emergencyVideoCleanup('high_memory_increase'), 1000);
         }
       }
@@ -235,23 +330,28 @@ class BackgroundDataService {
       this.loadingStage = this.stages.BACKGROUND_OPTIMIZATION;
       
     } catch (error) {
-      console.error('❌ BackgroundDataService: Parallel loading error:', error);
+      logger.error('❌ Parallel loading encountered critical error', {
+        error: error.message,
+        userData: userData ? { email: userData.email } : null
+      });
     } finally {
       this.isLoading = false;
-      console.log('🎯 BackgroundDataService: Parallel loading complete');
+      logger.info('🎯 Parallel loading session completed', {
+        finalStage: this.loadingStage
+      });
     }
   }
 
   /**
-   * SAFE FEED LOADING - Independent system
+   * Safe feed system loading - Independent system
    */
   async loadFeedSystemSafe() {
     if (this.separatedSystems.feed.loaded) {
-      console.log('✅ Feed already loaded, skipping');
+      logger.debug('📱 Feed system already loaded, skipping');
       return;
     }
     
-    console.log('🎯 Loading discover videos safely...');
+    logger.info('🎯 Loading discover videos with enhanced safety measures');
 
     try {
       // Check cache first (no network required)
@@ -259,7 +359,10 @@ class BackgroundDataService {
       try {
         cachedFeed = await getFeedCache();
       } catch (cacheError) {
-        console.warn('⚠️ Cache read failed, will load from API:', cacheError.message);
+        logger.warn('⚠️ Cache read failed, will load from API', {
+          error: cacheError.message,
+          fallbackStrategy: 'api_load'
+        });
       }
       
       if (cachedFeed && cachedFeed.length > 0) {
@@ -267,11 +370,16 @@ class BackgroundDataService {
         this.separatedSystems.feed.videoCount = cachedFeed.length;
         this.separatedSystems.feed.lastUpdate = Date.now();
         this.separatedSystems.feed.error = null;
-        console.log('✅ Discover videos loaded from cache');
+
+        logger.info('✅ Discover videos loaded from cache', {
+          videoCount: cachedFeed.length,
+          source: 'cache'
+        });
         return cachedFeed;
       }
 
       // Load from API with safe request
+      logger.info('📡 Loading discover videos from API');
       const feedVideos = await this.makeSafeRequest(async (signal) => {
         resetVideoState();
         return await fetchVideos(0, 5);
@@ -285,48 +393,64 @@ class BackgroundDataService {
         this.separatedSystems.feed.lastUpdate = Date.now();
         this.separatedSystems.feed.error = null;
         
-        console.log('✅ Discover videos loaded from API');
+        logger.info('✅ Discover videos loaded from API', {
+          videoCount: feedVideos.length,
+          source: 'api'
+        });
         return feedVideos;
       } else {
-        console.log('⚠️ No discover videos received');
+        logger.info('📭 No discover videos received from API');
         return [];
       }
     } catch (error) {
-      console.error('❌ Discover loading failed:', error);
+      logger.error('❌ Discover loading failed with error', {
+        error: error.message,
+        errorType: error.name
+      });
       this.separatedSystems.feed.error = error.message;
       return [];
     }
   }
 
   /**
-   * SAFE PROFILE LOADING - Independent system with videos
+   * Safe profile system loading - Independent system with videos
    */
   async loadProfileSystemSafe() {
     if (this.separatedSystems.profile.loaded) {
-      console.log('✅ Profile already loaded, skipping');
+      logger.debug('👤 Profile system already loaded, skipping');
       return;
     }
     
-    console.log('👤 Loading profile with videos safely...');
+    logger.info('👤 Loading profile with videos using enhanced safety measures');
 
     try {
       if (!this.userData?.email) {
-        console.log('⚠️ No user email for profile loading');
+        logger.info('📧 No user email available for profile loading', {
+          userData: !!this.userData,
+          reason: 'missing_email'
+        });
         return null;
       }
 
       // Check cache first
       const cachedProfile = await getProfileCache(this.userData.email);
+
       if (cachedProfile) {
         this.separatedSystems.profile.loaded = true;
         this.separatedSystems.profile.videoCount = cachedProfile.videos ? cachedProfile.videos.length : 0;
         this.separatedSystems.profile.lastUpdate = Date.now();
         this.separatedSystems.profile.error = null;
-        console.log('✅ Profile loaded from cache with', this.separatedSystems.profile.videoCount, 'videos');
+
+        logger.info(`✅ Profile loaded from cache`, {
+          email: this.userData.email,
+          videoCount: this.separatedSystems.profile.videoCount,
+          source: 'cache'
+        });
         return cachedProfile;
       }
 
       // Load from API with safe request
+      logger.info('📡 Loading profile from API', { email: this.userData.email });
       const profileData = await this.makeSafeRequest(async (signal) => {
         return await fetchUserProfile('email', this.userData.email);
       }, 'profile_load');
@@ -339,28 +463,36 @@ class BackgroundDataService {
         this.separatedSystems.profile.lastUpdate = Date.now();
         this.separatedSystems.profile.error = null;
         
-        console.log('✅ Profile loaded from API with', this.separatedSystems.profile.videoCount, 'videos');
+        logger.info(`✅ Profile loaded from API`, {
+          email: this.userData.email,
+          videoCount: this.separatedSystems.profile.videoCount,
+          source: 'api'
+        });
         return profileData;
       } else {
-        console.log('⚠️ No profile data received');
+        logger.info('📭 No profile data received from API');
         return null;
       }
     } catch (error) {
-      console.error('❌ Profile loading failed:', error);
+      logger.error('❌ Profile loading failed with error', {
+        email: this.userData?.email,
+        error: error.message,
+        errorType: error.name
+      });
       this.separatedSystems.profile.error = error.message;
       return null;
     }
   }
 
   /**
-   * LEGACY: Backwards compatibility with old single-stage loading
+   * Legacy backwards compatibility with old single-stage loading
    */
   async startStagedLoading(userData) {
-    console.log('🔄 Legacy loading detected, upgrading to parallel loading...');
+    logger.debug('Legacy loading detected, upgrading to parallel loading');
     return this.startParallelLoading(userData);
   }
 
-  // Keep all existing methods for backwards compatibility
+  // Keep existing methods for backwards compatibility
   async stage1_LoadFeedOnly() {
     return this.loadFeedSystemSafe();
   }
@@ -373,6 +505,11 @@ class BackgroundDataService {
    * SAFE LOAD MORE VIDEOS
    */
   async loadMoreFeedVideos(currentVideoCount) {
+    logger.info('📥 Loading more feed videos', {
+      currentVideoCount,
+      requestedCount: 3
+    });
+
     try {
       const moreFeedVideos = await this.makeSafeRequest(async (signal) => {
         return await fetchVideos(currentVideoCount, 3);
@@ -384,12 +521,22 @@ class BackgroundDataService {
         await cacheFeedVideos(combinedFeedVideos);
 
         this.separatedSystems.feed.videoCount = combinedFeedVideos.length;
+
+        logger.info('✅ More feed videos loaded successfully', {
+          newVideos: moreFeedVideos.length,
+          totalVideos: combinedFeedVideos.length
+        });
+
         return moreFeedVideos;
       } else {
+        logger.info('📭 No additional feed videos available');
         return [];
       }
     } catch (error) {
-      console.error('❌ Load more videos failed:', error);
+      logger.error('❌ Load more videos failed', {
+        currentVideoCount,
+        error: error.message
+      });
       return [];
     }
   }
@@ -398,8 +545,8 @@ class BackgroundDataService {
    * FORCE REFRESH with video cleanup
    */
   async forceRefreshFeedOnly() {
-    console.log('🔄 BackgroundDataService: Safe feed refresh...');
-    
+    logger.info('🔄 Safe feed refresh initiated with cleanup');
+
     try {
       // Cleanup videos before refresh
       await this.emergencyVideoCleanup('feed_refresh');
@@ -408,13 +555,18 @@ class BackgroundDataService {
       this.separatedSystems.feed.error = null;
       resetVideoState();
       await this.loadFeedSystemSafe();
-      console.log('✅ Feed refresh completed');
+
+      logger.info('✅ Feed refresh completed successfully');
     } catch (error) {
-      console.error('❌ Feed refresh failed:', error);
+      logger.error('❌ Feed refresh failed', {
+        error: error.message
+      });
     }
   }
 
   async forceRefreshProfileOnly() {
+    logger.info('🔄 Safe profile refresh initiated with cleanup');
+
     try {
       // Cleanup videos before refresh
       await this.emergencyVideoCleanup('profile_refresh');
@@ -422,13 +574,18 @@ class BackgroundDataService {
       this.separatedSystems.profile.loaded = false;
       this.separatedSystems.profile.error = null;
       await this.loadProfileSystemSafe();
-      console.log('✅ Profile refresh completed');
+
+      logger.info('✅ Profile refresh completed successfully');
     } catch (error) {
-      console.error('❌ Profile refresh failed:', error);
+      logger.error('❌ Profile refresh failed', {
+        error: error.message
+      });
     }
   }
 
   async forceRefreshAll() {
+    logger.info('🔄 Complete system refresh initiated with emergency cleanup');
+
     try {
       // Emergency cleanup before refresh
       await this.emergencyVideoCleanup('force_refresh_all');
@@ -443,9 +600,11 @@ class BackgroundDataService {
       // Use parallel loading for refresh
       await this.startParallelLoading(this.userData);
       
-      console.log('✅ All systems refresh completed');
+      logger.info('✅ Complete system refresh completed successfully');
     } catch (error) {
-      console.error('❌ Force refresh failed:', error);
+      logger.error('❌ Complete refresh failed', {
+        error: error.message
+      });
     }
   }
 
@@ -453,17 +612,23 @@ class BackgroundDataService {
    * PUBLIC: Get video decoder stats for debugging
    */
   getVideoDecoderStats() {
-    return {
+    const stats = {
       activeDecoders: this.activeVideoDecoders.size,
       cleanupCallbacks: this.videoDecoderCleanupCallbacks.size,
-      activeRequests: this.activeRequests.size
+      activeRequests: this.activeRequests.size,
+      isLoading: this.isLoading,
+      currentStage: this.loadingStage
     };
+
+    logger.debug('📊 Video decoder statistics requested', stats);
+    return stats;
   }
 
   /**
    * PUBLIC: Manual video cleanup trigger
    */
   async cleanupVideos(reason = 'manual') {
+    logger.info(`🧹 Manual video cleanup triggered: ${reason}`);
     await this.emergencyVideoCleanup(reason);
   }
 

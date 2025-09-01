@@ -26,6 +26,9 @@ import {
   createValidationError,
   handleError
 } from '../../utils/errors';
+import { createLogger } from '../../utils/Logger';
+
+const logger = createLogger('VideoUploadScreen');
 
 const VideoUploadScreen = () => {
   const navigation = useNavigation();
@@ -46,7 +49,7 @@ const VideoUploadScreen = () => {
   const videoManager = createVideoManager(videos, videoThumbnails, videoUrls, uploadStatuses);
 
   /**
-   * Pick multiple videos from device library
+   * Pick multiple videos from device library with validation
    */
   const pickVideos = async () => {
     try {
@@ -68,12 +71,12 @@ const VideoUploadScreen = () => {
         return;
       }
 
-      console.log(`📱 Processing ${result.assets.length} selected videos...`);
+      logger.info(`📱 Processing ${result.assets.length} selected videos`);
 
       // Process videos using the video service with upload screen limits
       const processingOptions = {
-        maxSizeMB: 20,  // Upload screen allows larger files
-        maxDurationSec: 45  // Upload screen allows longer videos
+        maxSizeMB: 20,
+        maxDurationSec: 45
       };
 
       const batchResult = await processBatchVideos(
@@ -81,7 +84,7 @@ const VideoUploadScreen = () => {
         videoKeys, 
         processingOptions,
         (progress) => {
-          console.log(`Processing video ${progress.current}/${progress.total}`);
+          logger.debug(`Processing video ${progress.current}/${progress.total}`);
         }
       );
 
@@ -91,7 +94,7 @@ const VideoUploadScreen = () => {
           const newArrays = videoManager.addVideo(
             videoData,
             videoData.thumbnail,
-            null, // No URL yet
+            null,
             { uploading: false, uploaded: false, error: null }
           );
           
@@ -110,13 +113,13 @@ const VideoUploadScreen = () => {
           Alert.alert('Some videos could not be processed', errorMessages);
         }
 
-        console.log(`✅ Processed ${batchResult.processedVideos.length} videos successfully`);
+        logger.info(`✅ Processed ${batchResult.processedVideos.length} videos successfully`);
       } else {
         Alert.alert('Error', handleError(batchResult.error, 'VideoUploadScreen/pickVideos') || 'Failed to process videos');
       }
 
     } catch (error) {
-      console.error('❌ Error picking videos:', error);
+      logger.error('Error picking videos', { error: error.message });
       Alert.alert('Error', handleError(error, 'VideoUploadScreen/pickVideos'));
     }
   };
@@ -133,7 +136,7 @@ const VideoUploadScreen = () => {
     setIsUploading(true);
     
     try {
-      console.log(`🚀 Starting upload of ${videos.length} videos...`);
+      logger.info(`🚀 Starting upload of ${videos.length} videos`);
 
       // Filter out already uploaded videos
       const videosToUpload = videos.filter((_, index) => !uploadStatuses[index]?.uploaded);
@@ -154,7 +157,7 @@ const VideoUploadScreen = () => {
             [progressData.videoIndex]: progressData.currentProgress
           }));
           
-          console.log(`📈 Upload progress: Video ${progressData.videoIndex + 1}/${progressData.totalVideos} - ${progressData.currentProgress}% (${progressData.stage})`);
+          logger.debug(`Upload progress: Video ${progressData.videoIndex + 1}/${progressData.totalVideos} - ${progressData.currentProgress}% (${progressData.stage})`);
         },
         // Single video complete callback
         (index, result) => {
@@ -172,7 +175,7 @@ const VideoUploadScreen = () => {
             setVideoUrls(newArrays.urls);
             setUploadStatuses(newArrays.statuses);
             
-            console.log(`✅ Video ${index + 1} uploaded successfully: ${result.videoUrl}`);
+            logger.info(`✅ Video ${index + 1} uploaded successfully: ${result.videoUrl}`);
           } else {
             // Update status with error
             const newArrays = videoManager.updateVideo(actualIndex, {
@@ -180,7 +183,7 @@ const VideoUploadScreen = () => {
             });
             
             setUploadStatuses(newArrays.statuses);
-            console.log(`❌ Video ${index + 1} upload failed: ${handleError(result.error, 'VideoUploadScreen/handleUploadAll')}`);
+            logger.error(`❌ Video ${index + 1} upload failed`, { error: result.error });
           }
         },
         // Upload options
@@ -191,7 +194,7 @@ const VideoUploadScreen = () => {
         }
       );
 
-      console.log(`🏁 Upload complete!`, uploadResult.stats);
+      logger.info('🏁 Upload complete', uploadResult.stats);
 
       Alert.alert(
         'Upload Complete!', 
@@ -209,7 +212,7 @@ const VideoUploadScreen = () => {
       );
 
     } catch (error) {
-      console.error('💥 Upload process failed:', error);
+      logger.error('Upload process failed', { error: error.message });
       Alert.alert('Upload Failed', handleError(error, 'VideoUploadScreen/handleUploadAll'));
     } finally {
       setIsUploading(false);
@@ -219,7 +222,7 @@ const VideoUploadScreen = () => {
   };
 
   /**
-   * Remove a video from the list with S3 deletion
+   * Remove a video from the list with S3 deletion if needed
    */
   const removeVideo = (index) => {
     const videoToRemove = videos[index];
@@ -243,12 +246,12 @@ const VideoUploadScreen = () => {
             try {
               // If video has been uploaded, delete from S3
               if (uploadStatuses[index]?.uploaded && videoToRemove.fileName) {
-                console.log(`🗑️ Deleting video from S3: ${videoToRemove.fileName}`);
-                
+                logger.info(`🗑️ Deleting video from S3: ${videoToRemove.fileName}`);
+
                 const deleteResult = await deleteVideoFromS3(videoToRemove.fileName);
                 
                 if (!deleteResult.success) {
-                  console.warn(`⚠️ S3 deletion failed: ${deleteResult.error}`);
+                  logger.warn('S3 deletion failed', { error: deleteResult.error });
                   Alert.alert(
                     'Warning', 
                     handleError(deleteResult.error, 'VideoUploadScreen/removeVideo') ||
@@ -290,10 +293,10 @@ const VideoUploadScreen = () => {
                 return newProgress;
               });
               
-              console.log(`✅ Video at index ${index} removed`);
-              
+              logger.info(`✅ Video at index ${index} removed successfully`);
+
             } catch (error) {
-              console.error(`❌ Error deleting video:`, error);
+              logger.error('Error deleting video', { error: error.message });
               Alert.alert('Error', handleError(error, 'VideoUploadScreen/removeVideo'));
             }
           },
@@ -314,7 +317,7 @@ const VideoUploadScreen = () => {
     setUploadStatuses(newArrays.statuses);
     setVideoUrls(newArrays.urls);
 
-    console.log(`🔄 Moved video from position ${fromIndex} to ${toIndex}`);
+    logger.debug(`🔄 Moved video from position ${fromIndex} to ${toIndex}`);
   };
 
   /**
@@ -407,7 +410,7 @@ const VideoUploadScreen = () => {
                     </Text>
                   )}
 
-                  {/* Controls */}
+                  {/* Video Controls */}
                   <View style={styles.videoControls}>
                     <TouchableOpacity
                       onPress={() => moveVideo(index, index - 1)}
@@ -439,7 +442,7 @@ const VideoUploadScreen = () => {
           </View>
         )}
 
-        {/* Upload Progress */}
+        {/* Upload Progress Display */}
         {isUploading && (
           <View style={styles.progressSection}>
             <Text style={[styles.progressText, { color: isDark ? '#fff' : '#000' }]}>
@@ -473,7 +476,7 @@ const VideoUploadScreen = () => {
         )}
       </ScrollView>
 
-      {/* Upload Button */}
+      {/* Upload All Button */}
       {videos.length > 0 && (
         <View style={styles.uploadButtonContainer}>
           <TouchableOpacity 

@@ -76,14 +76,6 @@ const ProfileInfo = ({
         </Text>
       </View>
 
-      {/* Social Links */}
-      <View style={styles.infoItem}>
-        <Ionicons name="link-outline" size={SIZES.icon} color={theme.text} />
-        <Text style={[styles.infoText, { color: theme.text }]}>
-          {profile?.social_links || '@social_link'}
-        </Text>
-      </View>
-
       {/* Logout Button */}
       <TouchableOpacity 
         style={styles.logoutButton} 

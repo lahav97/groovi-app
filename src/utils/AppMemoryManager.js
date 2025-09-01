@@ -1,9 +1,9 @@
 import { AppState } from 'react-native';
 import { clearAllCaches, manageCacheSize } from './cacheManager';
 import BackgroundDataService from '../services/BackgroundDataService';
-import Logger from './Logger';
+import { createLogger } from './Logger';
 
-const logger = Logger.createLogger('AppMemoryManager');
+const logger = createLogger('AppMemoryManager');
 
 class AppMemoryManager {
     constructor() {
@@ -13,7 +13,7 @@ class AppMemoryManager {
         this.isInitialized = false;
         this.navigationListeners = new Set();
         this.lastNavigationCleanup = 0;
-        this.memoryPressureLevel = 'normal'; // normal, warning, critical
+        this.memoryPressureLevel = 'normal';
     }
 
     init() {
@@ -38,7 +38,7 @@ class AppMemoryManager {
     }
 
     /**
-     * CRITICAL: Add navigation listener for immediate video cleanup
+     * Add navigation listener for immediate video cleanup
      */
     addNavigationListener(listener) {
         this.navigationListeners.add(listener);

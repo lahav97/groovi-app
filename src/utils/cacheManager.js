@@ -1,8 +1,8 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as FileSystem from 'expo-file-system';
-import Logger from './Logger';
+import { createLogger } from './Logger';
 
-const logger = Logger.createLogger('CacheManager');
+const logger = createLogger('CacheManager');
 
 const CACHE_KEYS = {
     FEED_VIDEOS: 'feed_videos_cache',
@@ -47,6 +47,12 @@ const getFromMemoryCache = (key) => {
             // Estimate and subtract size
             const estimatedSize = (JSON.stringify(oldData).length * 2) / 1024 / 1024;
             currentMemoryCacheSizeMB = Math.max(0, currentMemoryCacheSizeMB - estimatedSize);
+
+            logger.debug('🗑️ Memory cache entry expired', {
+                key,
+                estimatedSize: `${estimatedSize.toFixed(2)}MB`,
+                remainingSize: `${currentMemoryCacheSizeMB.toFixed(2)}MB`
+            });
         }
         
         memoryCache.delete(key);
@@ -65,12 +71,13 @@ const setMemoryCache = (key, data) => {
     
     // Check if data is too large for cache
     if (estimatedSizeMB > 5) {
-        logger.warn(`Data too large for memory cache: ${estimatedSizeMB.toFixed(2)}MB`, { key });
+        logger.warn(`📦 Data too large for memory cache: ${estimatedSizeMB.toFixed(2)}MB`, { key });
         return;
     }
 
     // Clean cache if at limits
-    while ((memoryCache.size >= MAX_MEMORY_CACHE_SIZE || 
+    let evictedCount = 0;
+    while ((memoryCache.size >= MAX_MEMORY_CACHE_SIZE ||
            currentMemoryCacheSizeMB + estimatedSizeMB > MAX_MEMORY_CACHE_MB) && 
            memoryCache.size > 0) {
         
@@ -84,8 +91,11 @@ const setMemoryCache = (key, data) => {
         
         memoryCache.delete(oldestKey);
         memoryCacheExpiry.delete(oldestKey);
-        
-        logger.info(`🗑️ Evicted from memory cache: ${oldestKey}`);
+        evictedCount++;
+    }
+
+    if (evictedCount > 0) {
+        logger.info(`🗑️ Evicted ${evictedCount} items from memory cache for space`);
     }
 
     // Add new data
@@ -94,7 +104,12 @@ const setMemoryCache = (key, data) => {
     currentMemoryCacheSizeMB += estimatedSizeMB;
     
     if (__DEV__) {
-        logger.debug(`💾 Memory cache: ${memoryCache.size} items, ${currentMemoryCacheSizeMB.toFixed(2)}MB`);
+        logger.debug(`💾 Memory cache updated`, {
+            key,
+            size: `${estimatedSizeMB.toFixed(2)}MB`,
+            totalItems: memoryCache.size,
+            totalSize: `${currentMemoryCacheSizeMB.toFixed(2)}MB`
+        });
     }
 };
 
@@ -102,7 +117,10 @@ const setMemoryCache = (key, data) => {
  * ENHANCED: Aggressive memory cache cleanup
  */
 const forceMemoryCacheCleanup = (reason = 'unknown') => {
-    logger.warn(`🧹 Force cleaning memory cache: ${reason}`);
+    logger.warn(`🧹 Force cleaning memory cache: ${reason}`, {
+        itemsBefore: memoryCache.size,
+        sizeBefore: `${currentMemoryCacheSizeMB.toFixed(2)}MB`
+    });
 
     const sizeBefore = memoryCache.size;
     const mbBefore = currentMemoryCacheSizeMB;
@@ -111,11 +129,18 @@ const forceMemoryCacheCleanup = (reason = 'unknown') => {
     memoryCacheExpiry.clear();
     currentMemoryCacheSizeMB = 0;
     
-    logger.info(`✅ Memory cache cleared: ${sizeBefore} items (${mbBefore.toFixed(2)}MB) → 0`);
+    logger.info(`✅ Memory cache cleared successfully`, {
+        reason,
+        clearedItems: sizeBefore,
+        freedMemory: `${mbBefore.toFixed(2)}MB`
+    });
 
     // Force garbage collection if available
     if (global.gc) {
-        setTimeout(() => global.gc(), 100);
+        setTimeout(() => {
+            global.gc();
+            logger.debug('♻️ Forced garbage collection after cache cleanup');
+        }, 100);
     }
 };
 
@@ -178,24 +203,35 @@ const readCacheInstant = async (key, timeout = 500) => {
             if (dataSize < 3) {
                 setMemoryCache(key, result);
             }
+
+            logger.debug('💿 Disk cache hit', {
+                key,
+                size: `${dataSize.toFixed(2)}MB`
+            });
         }
 
         return result;
     } catch (error) {
-        logger.warn(`⚠️ Cache read failed: ${key}`, { error: error.message });
+        logger.warn(`⚠️ Cache read failed: ${key}`, {
+            error: error.message,
+            timeout: `${timeout}ms`
+        });
         return null;
     }
 };
 
 const queueWriteOperation = (operation, operationId = null) => {
     if (isShuttingDown) {
-        logger.warn('Write operation rejected - shutting down');
+        logger.warn('🚫 Write operation rejected - shutting down', { operationId });
         return Promise.reject(new Error('Cache manager shutting down'));
     }
 
     if (writeQueue.length >= MAX_QUEUE_SIZE) {
         writeQueue = writeQueue.slice(-1);
-        logger.warn(`📦 Write queue full, trimmed to ${writeQueue.length} operations`);
+        logger.warn(`📦 Write queue full, trimmed to prevent memory issues`, {
+            previousSize: writeQueue.length + 1,
+            newSize: writeQueue.length
+        });
     }
 
     const id = operationId || `write_${Date.now()}`;
@@ -207,15 +243,22 @@ const queueWriteOperation = (operation, operationId = null) => {
             fn: async () => {
                 try {
                     const result = await operation();
+                    logger.debug(`✅ Write operation completed: ${id}`);
                     resolve(result);
                 } catch (error) {
+                    logger.error(`❌ Write operation failed: ${id}`, {
+                        error: error.message
+                    });
                     reject(error);
                 }
             }
         });
 
         if (__DEV__) {
-            logger.debug(`📝 Queued write operation: ${id} (Queue size: ${writeQueue.length})`);
+            logger.debug(`📝 Queued write operation: ${id}`, {
+                queueSize: writeQueue.length,
+                activeWrites
+            });
         }
         processWriteQueue();
     });
@@ -272,7 +315,10 @@ const setCacheTimestamp = (key, timestamp = getCurrentTimestamp()) => {
 };
 
 export const cacheFeedVideos = (feedVideos, metadata = {}) => {
-    logger.info(`Caching ${feedVideos.length} feed videos`);
+    logger.info(`🎬 Caching feed videos`, {
+        videoCount: feedVideos.length,
+        hasMetadata: Object.keys(metadata).length > 0
+    });
 
     return queueWriteOperation(async () => {
         try {
@@ -307,22 +353,31 @@ export const cacheFeedVideos = (feedVideos, metadata = {}) => {
 
             setCacheTimestamp(CACHE_KEYS.FEED_VIDEOS);
 
-            logger.debug(`Feed videos cached successfully: ${minimalVideos.length} videos (${dataSize.toFixed(2)}MB)`);
+            logger.info(`✅ Feed videos cached successfully`, {
+                videoCount: minimalVideos.length,
+                dataSize: `${dataSize.toFixed(2)}MB`
+            });
 
         } catch (error) {
-            logger.error('Error caching feed videos', error.message);
+            logger.error('❌ Error caching feed videos', {
+                error: error.message,
+                videoCount: feedVideos.length
+            });
         }
     }, 'cache_feed_videos');
 };
 
 export const getDiscoverCache = async () => {
-    const startTime = Date.now();
+    logger.debug('🔍 Retrieving discover cache');
 
     try {
         // Ultra-fast timestamp check
         const timestamp = await getCacheTimestamp(CACHE_KEYS.FEED_VIDEOS);
         if (!timestamp || isCacheExpired(timestamp, CACHE_EXPIRY.FEED_VIDEOS)) {
-            logger.info('Feed cache expired or missing');
+            logger.info('📅 Feed cache expired or missing', {
+                hasTimestamp: !!timestamp,
+                expired: timestamp ? isCacheExpired(timestamp, CACHE_EXPIRY.FEED_VIDEOS) : true
+            });
             return null;
         }
 
@@ -331,10 +386,14 @@ export const getDiscoverCache = async () => {
         if (cachedFeedVideos) {
             try {
                 const feedVideos = JSON.parse(cachedFeedVideos);
-                logger.debug(`Feed cache loaded: ${feedVideos.length} videos`, `${Date.now() - startTime}ms`);
+                logger.info(`✅ Feed cache loaded successfully`, {
+                    videoCount: feedVideos.length
+                });
                 return feedVideos;
             } catch (parseError) {
-                logger.error('Feed cache corrupted, cleaning up');
+                logger.error('💥 Feed cache corrupted, cleaning up', {
+                    error: parseError.message
+                });
                 // Queue cleanup asynchronously - don't block
                 queueWriteOperation(async () => {
                     await AsyncStorage.removeItem(CACHE_KEYS.FEED_VIDEOS);
@@ -344,10 +403,10 @@ export const getDiscoverCache = async () => {
             }
         }
 
-        logger.info('Feed cache miss');
+        logger.info('📭 Feed cache miss');
         return null;
     } catch (error) {
-        logger.error('Error getting feed cache', error.message);
+        logger.error('❌ Error getting feed cache', { error: error.message });
         return null;
     }
 };
@@ -355,7 +414,7 @@ export const getDiscoverCache = async () => {
 export const getFeedCache = getDiscoverCache;
 
 export const clearFeedCache = () => {
-    logger.info('Clearing feed cache');
+    logger.info('🧹 Clearing feed cache');
     return queueWriteOperation(async () => {
         try {
             await AsyncStorage.multiRemove([
@@ -368,13 +427,16 @@ export const clearFeedCache = () => {
             memoryCache.delete(CACHE_KEYS.FEED_METADATA);
 
         } catch (error) {
-            logger.error('Error clearing feed cache', error.message);
+            logger.error('❌ Error clearing feed cache', { error: error.message });
         }
     }, 'clear_feed_cache');
 };
 
 export const cacheUserProfile = (profileData, userEmail) => {
-    logger.info(`Caching profile for: ${userEmail}`);
+    logger.info(`👤 Caching user profile`, {
+        userEmail,
+        hasVideos: !!(profileData.videos && profileData.videos.length > 0)
+    });
 
     return queueWriteOperation(async () => {
         try {
@@ -414,19 +476,32 @@ export const cacheUserProfile = (profileData, userEmail) => {
                     setMemoryCache(profileVideosCacheKey, videosData);
                 }
                 setCacheTimestamp(profileVideosCacheKey);
+
+                logger.debug(`🎬 Profile videos cached`, {
+                    videoCount: videosToCache.length,
+                    videoSize: `${videoSize.toFixed(2)}MB`
+                });
             }
 
             setCacheTimestamp(profileCacheKey);
-            logger.debug(`Profile cached for: ${userEmail} (${profileSize.toFixed(2)}MB)`);
+
+            logger.info(`✅ Profile cached successfully`, {
+                userEmail,
+                profileSize: `${profileSize.toFixed(2)}MB`,
+                videoCount: profileData.videos?.length || 0
+            });
 
         } catch (error) {
-            logger.error(`Error caching profile for ${userEmail}`, error.message);
+            logger.error(`❌ Error caching profile`, {
+                userEmail,
+                error: error.message
+            });
         }
     }, `cache_profile_${userEmail}`);
 };
 
 export const getProfileCache = async (userEmail) => {
-    const startTime = Date.now();
+    logger.debug('🔍 Retrieving profile cache', { userEmail });
 
     try {
         const profileCacheKey = `${CACHE_KEYS.USER_PROFILE}_${userEmail}`;
@@ -434,7 +509,10 @@ export const getProfileCache = async (userEmail) => {
         // Ultra-fast timestamp check
         const timestamp = await getCacheTimestamp(profileCacheKey);
         if (!timestamp || isCacheExpired(timestamp, CACHE_EXPIRY.USER_PROFILE)) {
-            logger.info(`Profile cache expired for: ${userEmail}`);
+            logger.info(`📅 Profile cache expired`, {
+                userEmail,
+                hasTimestamp: !!timestamp
+            });
             return null;
         }
 
@@ -452,32 +530,46 @@ export const getProfileCache = async (userEmail) => {
                     const cachedProfileVideos = await readCacheInstant(profileVideosCacheKey);
                     if (cachedProfileVideos) {
                         profile.videos = JSON.parse(cachedProfileVideos);
+                        logger.debug(`🎬 Profile videos loaded from cache`, {
+                            videoCount: profile.videos.length
+                        });
                     }
                 }
 
-                logger.debug(`Profile cache loaded for: ${userEmail}`, `${Date.now() - startTime}ms`);
+                logger.info(`✅ Profile cache loaded successfully`, {
+                    userEmail,
+                    hasVideos: !!(profile.videos && profile.videos.length > 0)
+                });
+
                 return profile;
             } catch (parseError) {
-                logger.error(`Profile cache corrupted for: ${userEmail}`);
+                logger.error(`💥 Profile cache corrupted`, {
+                    userEmail,
+                    error: parseError.message
+                });
                 // Queue cleanup asynchronously
                 queueWriteOperation(async () => {
                     await AsyncStorage.removeItem(profileCacheKey);
                     memoryCache.delete(profileCacheKey);
                 }, `cleanup_corrupt_profile_${userEmail}`).catch(() => {});
+
                 return null;
             }
         }
 
-        logger.info(`Profile cache miss for: ${userEmail}`);
+        logger.info(`📭 Profile cache miss`, { userEmail });
         return null;
     } catch (error) {
-        logger.error(`Error getting profile cache for ${userEmail}`, error.message);
+        logger.error(`❌ Error getting profile cache`, {
+            userEmail,
+            error: error.message
+        });
         return null;
     }
 };
 
 export const clearProfileCache = (userEmail) => {
-    logger.info(`Clearing profile cache for: ${userEmail}`);
+    logger.info(`🧹 Clearing profile cache for: ${userEmail}`);
     return queueWriteOperation(async () => {
         try {
             const profileCacheKey = `${CACHE_KEYS.USER_PROFILE}_${userEmail}`;
@@ -490,7 +582,7 @@ export const clearProfileCache = (userEmail) => {
             memoryCache.delete(profileVideosCacheKey);
 
         } catch (error) {
-            logger.error(`Error clearing profile cache for ${userEmail}`, error.message);
+            logger.error(`❌ Error clearing profile cache for ${userEmail}`, { error: error.message });
         }
     }, `clear_profile_${userEmail}`);
 };
@@ -499,7 +591,7 @@ export const clearProfileCache = (userEmail) => {
  * ENHANCED: Emergency cache clearing with memory cleanup
  */
 export const clearAllCaches = async () => {
-    logger.warn('Clearing ALL caches (emergency)');
+    logger.warn('🧹 Clearing ALL caches (emergency operation)');
     isShuttingDown = true;
 
     if (cleanupTimer) {
@@ -522,7 +614,9 @@ export const clearAllCaches = async () => {
 
         if (cacheKeys.length > 0) {
             await AsyncStorage.multiRemove(cacheKeys);
-            logger.debug(`Cleared ${cacheKeys.length} cache entries`);
+            logger.info(`💿 Cleared ${cacheKeys.length} disk cache entries`, {
+                keys: cacheKeys.slice(0, 5).concat(cacheKeys.length > 5 ? ['...'] : [])
+            });
         }
 
         // Clear video cache directory
@@ -531,14 +625,16 @@ export const clearAllCaches = async () => {
             const dirInfo = await FileSystem.getInfoAsync(videoCacheDir);
             if (dirInfo.exists) {
                 await FileSystem.deleteAsync(videoCacheDir, { idempotent: true });
-                logger.debug('Cleared video cache directory');
+                logger.debug('🎬 Cleared video cache directory');
             }
         } catch (videoCacheError) {
-            logger.warn('Error clearing video cache directory:', videoCacheError);
+            logger.warn('⚠️ Error clearing video cache directory', {
+                error: videoCacheError.message
+            });
         }
 
     } catch (error) {
-        logger.error('Error clearing all caches', error.message);
+        logger.error('❌ Error clearing all caches', { error: error.message });
     }
 
     isShuttingDown = false;
@@ -546,7 +642,10 @@ export const clearAllCaches = async () => {
     // Force garbage collection
     if (global.gc) {
         global.gc();
+        logger.debug('♻️ Forced garbage collection after cache clear');
     }
+
+    logger.info('✅ All caches cleared successfully');
 };
 
 export const getCacheStats = async () => {
@@ -564,7 +663,7 @@ export const getCacheStats = async () => {
             }
         }
 
-        return {
+        const stats = {
             totalKeys: cacheKeys.length,
             approximateSize: `${(totalSize / 1024).toFixed(2)} KB`,
             memoryCache: {
@@ -578,7 +677,11 @@ export const getCacheStats = async () => {
                 active: activeWrites
             }
         };
+
+        logger.info('📊 Cache statistics generated', stats);
+        return stats;
     } catch (error) {
+        logger.error('❌ Error getting cache stats', { error: error.message });
         return null;
     }
 };
@@ -587,17 +690,25 @@ export const getCacheStats = async () => {
  * ENHANCED: More aggressive video cache management
  */
 export const manageCacheSize = async (maxCacheSizeMB = 30) => { // Reduced default
+    logger.info('🧹 Managing cache size', { maxSize: `${maxCacheSizeMB}MB` });
+
     return queueWriteOperation(async () => {
         try {
             const maxCacheBytes = maxCacheSizeMB * 1024 * 1024;
             const videoCacheDir = `${FileSystem.cacheDirectory}videos`;
 
             const dirInfo = await FileSystem.getInfoAsync(videoCacheDir);
-            if (!dirInfo.exists) return;
+            if (!dirInfo.exists) {
+                logger.debug('📁 Video cache directory does not exist');
+                return;
+            }
 
             const files = await FileSystem.readDirectoryAsync(videoCacheDir);
             
-            if (files.length === 0) return;
+            if (files.length === 0) {
+                logger.debug('📁 Video cache directory is empty');
+                return;
+            }
 
             // Get all file info at once
             const fileInfoPromises = files.map(async (filename) => {
@@ -618,7 +729,12 @@ export const manageCacheSize = async (maxCacheSizeMB = 30) => { // Reduced defau
             const filesWithInfo = (await Promise.all(fileInfoPromises)).filter(Boolean);
             const totalSize = filesWithInfo.reduce((sum, file) => sum + file.size, 0);
 
-            logger.debug(`Video cache: ${files.length} files, ${(totalSize / 1024 / 1024).toFixed(2)}MB`);
+            logger.info(`📊 Video cache analysis`, {
+                fileCount: files.length,
+                totalSize: `${(totalSize / 1024 / 1024).toFixed(2)}MB`,
+                maxSize: `${maxCacheSizeMB}MB`,
+                needsCleanup: totalSize > maxCacheBytes
+            });
 
             if (totalSize > maxCacheBytes) {
                 // Sort by modification time (oldest first)
@@ -636,14 +752,25 @@ export const manageCacheSize = async (maxCacheSizeMB = 30) => { // Reduced defau
                         currentSize -= file.size;
                         deletedCount++;
                     } catch (deleteError) {
-                        logger.warn(`Failed to delete ${file.name}:`, deleteError);
+                        logger.warn(`❌ Failed to delete cache file`, {
+                            fileName: file.name,
+                            error: deleteError.message
+                        });
                     }
                 }
                 
-                logger.debug(`Deleted ${deletedCount} old video files, saved ${((totalSize - currentSize) / 1024 / 1024).toFixed(2)}MB`);
+                const savedMB = (totalSize - currentSize) / 1024 / 1024;
+                logger.info(`✅ Cache cleanup completed`, {
+                    deletedFiles: deletedCount,
+                    freedSpace: `${savedMB.toFixed(2)}MB`,
+                    remainingSize: `${(currentSize / 1024 / 1024).toFixed(2)}MB`
+                });
             }
         } catch (error) {
-            logger.error('Error managing cache size:', error.message);
+            logger.error('❌ Error managing cache size', {
+                error: error.message,
+                maxSize: `${maxCacheSizeMB}MB`
+            });
         }
     }, 'manage_cache_size');
 };
@@ -683,7 +810,7 @@ const startPeriodicCleanup = () => {
 };
 
 export const shutdownCacheManager = () => {
-    logger.warn('Shutting down cache manager');
+    logger.warn('🚫 Shutting down cache manager');
     isShuttingDown = true;
 
     if (cleanupTimer) {
