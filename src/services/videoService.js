@@ -829,15 +829,71 @@ export const forceResetHasMoreVideos = () => {
 };
 
 /**
- * NEW: Fetch initial musicians for MATCH SCREEN (complete data)
- * Gets complete user profiles for swiping/matching
+ * Fetch initial musicians for MATCH SCREEN with location and filters
+ * Gets complete user profiles for swiping/matching within specified radius and filters
  */
-export const fetchInitialMusiciansForMatch = async (currentUser, limit = 5) => {
+export const fetchInitialMusiciansForMatch = async (currentUser, limit = 5, locationOptions = null, filters = null) => {
     try {
-        logger.info('🎵 Fetching musicians for Match Screen with complete profiles');
+        logger.info('🎵 Fetching musicians for Match Screen with location and filters', {
+            locationEnabled: !!locationOptions,
+            filtersEnabled: !!filters
+        });
 
-        const url = `${MATCH_API_URL}?type=initial&currentUser=${encodeURIComponent(currentUser)}&limit=${limit}`;
-        logger.debug('Match API Request', { url });
+        const params = new URLSearchParams();
+        params.append('type', 'initial');
+        params.append('currentUser', currentUser);
+        params.append('limit', limit.toString());
+
+        // Add location parameters if provided
+        if (locationOptions && !filters?.anywhere) {
+            const { latitude, longitude, maxDistance, unit } = locationOptions;
+            if (latitude && longitude && maxDistance) {
+                params.append('latitude', latitude.toString());
+                params.append('longitude', longitude.toString());
+                params.append('maxDistance', maxDistance.toString());
+                params.append('unit', unit || 'km');
+                logger.info('🌍 Location filtering enabled', {
+                    lat: latitude,
+                    lng: longitude,
+                    radius: `${maxDistance}${unit}`
+                });
+            }
+        }
+
+        // Add filter parameters if provided
+        if (filters) {
+            // Instruments filter with smart matching
+            if (filters.selectedInstruments && filters.selectedInstruments.length > 0) {
+                const expandedInstruments = {};
+                filters.selectedInstruments.forEach(selectedInstrument => {
+                    const skillLevel = filters.selectedSkill && filters.selectedSkill.length > 0 ? filters.selectedSkill[0] : "any";
+                    const variations = INSTRUMENT_VARIATIONS[selectedInstrument] || [selectedInstrument];
+
+                    variations.forEach(variation => {
+                        expandedInstruments[variation] = skillLevel;
+                    });
+                });
+                params.append('instruments', JSON.stringify(expandedInstruments));
+                logger.info('🎸 Instruments filter applied', { instruments: filters.selectedInstruments });
+            }
+
+            // Genres filter
+            if (filters.selectedGenres && filters.selectedGenres.length > 0) {
+                params.append('genres', JSON.stringify(filters.selectedGenres));
+                logger.info('🎵 Genres filter applied', { genres: filters.selectedGenres });
+            }
+
+            // Gender filter
+            if (filters.selectedGender && filters.selectedGender !== 'Any') {
+                params.append('gender', JSON.stringify([filters.selectedGender.toLowerCase()]));
+                logger.info('👤 Gender filter applied', { gender: filters.selectedGender });
+            }
+        }
+
+        const url = `${MATCH_API_URL}?${params.toString()}`;
+        logger.debug('Match API Request with location and filters', {
+            url: url.replace(/latitude=[\d.-]+/g, 'latitude=***').replace(/longitude=[\d.-]+/g, 'longitude=***')
+        });
 
         const response = await axios.get(url);
 
@@ -852,9 +908,7 @@ export const fetchInitialMusiciansForMatch = async (currentUser, limit = 5) => {
             return [];
         }
 
-        logger.info(`✅ Successfully fetched ${response.data.length} complete musician profiles`);
-        logger.debug('Sample Match API data', { sample: response.data[0] });
-
+        logger.info(`✅ Successfully fetched ${response.data.length} filtered musician profiles`);
         return formatMatchResponse(response.data);
     } catch (error) {
         logger.error('Failed to fetch musicians from Match API', { error: error.message });
@@ -863,19 +917,68 @@ export const fetchInitialMusiciansForMatch = async (currentUser, limit = 5) => {
 };
 
 /**
- * NEW: Load more musicians for MATCH SCREEN (complete data)
- * Gets additional complete user profiles for swiping/matching
+ * Load more musicians for MATCH SCREEN with location and filters
+ * Gets additional complete user profiles for swiping/matching within specified radius and filters
  */
-export const loadMoreMusiciansForMatch = async (currentUser, limit = 3) => {
+export const loadMoreMusiciansForMatch = async (currentUser, limit = 3, locationOptions = null, filters = null) => {
     try {
-        logger.info('🎵 Loading additional musicians for Match Screen');
+        logger.info('🎵 Loading additional musicians for Match Screen', {
+            locationEnabled: !!locationOptions,
+            filtersEnabled: !!filters
+        });
 
         const params = new URLSearchParams();
         params.append('type', 'filter');
         params.append('username', currentUser);
-        
+        params.append('limit', limit.toString());
+
+        // Add location parameters if provided
+        if (locationOptions && !filters?.anywhere) {
+            const { latitude, longitude, maxDistance, unit } = locationOptions;
+            if (latitude && longitude && maxDistance) {
+                params.append('latitude', latitude.toString());
+                params.append('longitude', longitude.toString());
+                params.append('maxDistance', maxDistance.toString());
+                params.append('unit', unit || 'km');
+                logger.info('🌍 Location filtering enabled for load more', {
+                    lat: latitude,
+                    lng: longitude,
+                    radius: `${maxDistance}${unit}`
+                });
+            }
+        }
+
+        // Add filter parameters if provided
+        if (filters) {
+            // Instruments filter with smart matching
+            if (filters.selectedInstruments && filters.selectedInstruments.length > 0) {
+                const expandedInstruments = {};
+                filters.selectedInstruments.forEach(selectedInstrument => {
+                    const skillLevel = filters.selectedSkill && filters.selectedSkill.length > 0 ? filters.selectedSkill[0] : "any";
+                    const variations = INSTRUMENT_VARIATIONS[selectedInstrument] || [selectedInstrument];
+
+                    variations.forEach(variation => {
+                        expandedInstruments[variation] = skillLevel;
+                    });
+                });
+                params.append('instruments', JSON.stringify(expandedInstruments));
+            }
+
+            // Genres filter
+            if (filters.selectedGenres && filters.selectedGenres.length > 0) {
+                params.append('genres', JSON.stringify(filters.selectedGenres));
+            }
+
+            // Gender filter
+            if (filters.selectedGender && filters.selectedGender !== 'Any') {
+                params.append('gender', JSON.stringify([filters.selectedGender.toLowerCase()]));
+            }
+        }
+
         const url = `${MATCH_API_URL}?${params.toString()}`;
-        logger.debug('Match API Load More Request', { url });
+        logger.debug('Match API Load More Request with location and filters', {
+            url: url.replace(/latitude=[\d.-]+/g, 'latitude=***').replace(/longitude=[\d.-]+/g, 'longitude=***')
+        });
 
         const response = await axios.get(url);
 
@@ -890,20 +993,14 @@ export const loadMoreMusiciansForMatch = async (currentUser, limit = 3) => {
             return [];
         }
 
-        logger.info(`✅ Successfully loaded ${response.data.length} additional musicians`);
-        logger.debug('Sample additional Match API data', { sample: response.data[0] });
-
+        logger.info(`✅ Successfully loaded ${response.data.length} additional filtered musicians`);
         return formatMatchResponse(response.data);
     } catch (error) {
         logger.error('Failed to load more musicians from Match API', {
             error: error.message,
             status: error.response?.status,
             statusText: error.response?.statusText,
-            url: error.config?.url
         });
-        
-        // Return empty array to prevent infinite loops
-        logger.info('🔄 Returning empty array to prevent retry loops');
         return [];
     }
 };

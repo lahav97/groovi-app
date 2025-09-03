@@ -7,9 +7,11 @@ import {
     StatusBar,
     TouchableOpacity,
     FlatList,
-    KeyboardAvoidingView,
     Platform,
-    Alert
+    Alert,
+    SafeAreaView,
+    Keyboard,
+    Dimensions
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useNavigation } from '@react-navigation/native';
@@ -24,6 +26,7 @@ import { getCurrentUserEmail } from '../../utils/userUtils';
 import { createLogger } from '../../utils/Logger';
 
 const logger = createLogger('ChatScreen');
+const { height: SCREEN_HEIGHT } = Dimensions.get('window');
 
 const ChatScreen = () => {
     const route = useRoute();
@@ -39,6 +42,7 @@ const ChatScreen = () => {
     const [isLoadingHistory, setIsLoadingHistory] = useState(false);
     const [connectionError, setConnectionError] = useState('');
     const [isSending, setIsSending] = useState(false);
+    const [keyboardHeight, setKeyboardHeight] = useState(0);
 
     // MESSAGES STATE - Replace mock with real data
     const [messages, setMessages] = useState([]);
@@ -50,6 +54,44 @@ const ChatScreen = () => {
     // REFS
     const flatListRef = useRef(null);
     const messageListenerRef = useRef(null);
+
+    // ===================================
+    // KEYBOARD HANDLING
+    // ===================================
+
+    useEffect(() => {
+        const keyboardWillShow = (event) => {
+            const height = event.endCoordinates.height;
+            setKeyboardHeight(height);
+        };
+
+        const keyboardWillHide = () => {
+            setKeyboardHeight(0);
+        };
+
+        const keyboardDidShow = (event) => {
+            const height = event.endCoordinates.height;
+            setKeyboardHeight(height);
+        };
+
+        const keyboardDidHide = () => {
+            setKeyboardHeight(0);
+        };
+
+        // Use appropriate listeners based on platform
+        const showSubscription = Platform.OS === 'ios'
+            ? Keyboard.addListener('keyboardWillShow', keyboardWillShow)
+            : Keyboard.addListener('keyboardDidShow', keyboardDidShow);
+
+        const hideSubscription = Platform.OS === 'ios'
+            ? Keyboard.addListener('keyboardWillHide', keyboardWillHide)
+            : Keyboard.addListener('keyboardDidHide', keyboardDidHide);
+
+        return () => {
+            showSubscription?.remove();
+            hideSubscription?.remove();
+        };
+    }, []);
 
     // ===================================
     // GET CURRENT USERNAME FOR MESSAGE IDENTIFICATION
@@ -530,10 +572,7 @@ const ChatScreen = () => {
     // ===================================
 
     return (
-        <KeyboardAvoidingView
-            style={styles.container}
-            behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
-        >
+        <SafeAreaView style={styles.container}>
             <StatusBar barStyle="dark-content" backgroundColor="white" />
 
             {/* Chat Header */}
@@ -582,17 +621,27 @@ const ChatScreen = () => {
                             if (messages.length > 0 && !showScrollButton) {
                                 flatListRef.current?.scrollToEnd({ animated: true });
                             }
-                        }}
-                        onScroll={(event) => {
-                            const { contentOffset, contentSize, layoutMeasurement } = event.nativeEvent;
-                            const isAtBottom = contentOffset.y >= (contentSize.height - layoutMeasurement.height - 50);
-                            setShowScrollButton(!isAtBottom && messages.length > 0);
-                        }}
-                        scrollEventThrottle={100}
-                        showsVerticalScrollIndicator={false}
-                    />
+                            }}
+                            onScroll={(event) => {
+                                const { contentOffset, contentSize, layoutMeasurement } = event.nativeEvent;
+                                const isAtBottom = contentOffset.y >= (contentSize.height - layoutMeasurement.height - 50);
+                                setShowScrollButton(!isAtBottom && messages.length > 0);
+                            }}
+                            scrollEventThrottle={100}
+                            showsVerticalScrollIndicator={false}
+                            contentContainerStyle={{ flexGrow: 1 }}
+                        />
                 )}
             </View>
+
+            {/* Chat Input */}
+            {!connectionError && (
+                <ChatInput
+                    onSendMessage={handleSendMessage}
+                    disabled={isSending || isLoadingHistory}
+                    placeholder={isSending ? "Sending..." : "Type a message..."}
+                />
+            )}
 
             {/* Scroll to Bottom Button */}
             {showScrollButton && (
@@ -603,16 +652,7 @@ const ChatScreen = () => {
                     <Ionicons name="chevron-down" size={20} color="white" />
                 </TouchableOpacity>
             )}
-
-            {/* Chat Input */}
-            {!connectionError && (
-                <ChatInput
-                    onSendMessage={handleSendMessage}
-                    disabled={isSending || isLoadingHistory}
-                    placeholder={isSending ? "Sending..." : "Type a message..."}
-                />
-            )}
-        </KeyboardAvoidingView>
+        </SafeAreaView>
     );
 };
 
@@ -733,6 +773,12 @@ const styles = StyleSheet.create({
         fontSize: 16,
         color: '#666',
         marginTop: 16,
+    },
+
+    // KEYBOARD AVOIDING VIEW
+    keyboardAvoidingContainer: {
+        flex: 1,
+        justifyContent: 'space-between',
     },
 });
 

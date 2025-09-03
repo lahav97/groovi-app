@@ -6,8 +6,6 @@ import {
     Dimensions,
     TouchableOpacity,
     ActivityIndicator,
-    ScrollView,
-    Modal,
     Alert,
 } from 'react-native';
 import { Video } from 'expo-av';
@@ -27,6 +25,7 @@ import { LinearGradient } from 'expo-linear-gradient';
 import { useNavigation, useIsFocused } from '@react-navigation/native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useAuth } from '../../context/AuthContext';
+import { useFilters } from '../../context/FiltersContext';
 
 import {
     fetchInitialMusiciansForMatch,
@@ -35,6 +34,7 @@ import {
     forceResetHasMoreVideos,
 } from '../../services/videoService';
 
+import LocationService from '../../services/LocationService';
 import BottomNavigation from '../../components/navigationBar/BottomNavigation';
 import { LAYOUT, COLORS } from '../../styles/theme';
 import { handleError, ERROR_MESSAGES } from '../../utils/errors';
@@ -82,6 +82,7 @@ const MatchScreen = () => {
     const insets = useSafeAreaInsets();
     const isFocused = useIsFocused();
     const { user } = useAuth();
+    const { filters } = useFilters();
 
     // FIXED: Proper fallback for email
     const currentUserEmail = useMemo(() =>
@@ -103,6 +104,14 @@ const MatchScreen = () => {
     // MATCH MODAL
     const [showMatchModal, setShowMatchModal] = useState(false);
     const [matchedMusician, setMatchedMusician] = useState(null);
+
+    // Location and Filter state
+    const [showLocationModal, setShowLocationModal] = useState(false);
+    const [showFilterModal, setShowFilterModal] = useState(false);
+    const [locationOptions, setLocationOptions] = useState(null);
+    const [currentLocation, setCurrentLocation] = useState(null);
+    const [locationEnabled, setLocationEnabled] = useState(true);
+    const [searchRadius, setSearchRadius] = useState(50);
 
     // Refs
     const videoRef = useRef(null);
@@ -135,8 +144,18 @@ const MatchScreen = () => {
         setError(null);
 
         try {
-            console.log('Loading initial musicians...');
-            const fresh = await fetchInitialMusiciansForMatch(currentUserEmail, INITIAL_BATCH_SIZE);
+            console.log('Loading initial musicians with filters...', {
+                hasFilters: !!filters,
+                hasLocation: !!locationOptions
+            });
+
+            // Fetch with location and filters
+            const fresh = await fetchInitialMusiciansForMatch(
+                currentUserEmail,
+                INITIAL_BATCH_SIZE,
+                locationOptions,
+                filters
+            );
 
             if (!mountedRef.current) return;
             if (!fresh || fresh.length === 0) {
@@ -163,7 +182,7 @@ const MatchScreen = () => {
             setMusicians(transformed);
             setCurrentIndex(0);
             setCurrentVideoIndex(0);
-            console.log(`Loaded ${transformed.length} musicians`);
+            console.log(`Loaded ${transformed.length} musicians with filtering`);
         } catch (e) {
             console.error('Error loading initial musicians:', e);
             if (mountedRef.current) {
@@ -174,15 +193,21 @@ const MatchScreen = () => {
                 setLoading(false);
             }
         }
-    }, [currentUserEmail]);
+    }, [currentUserEmail, locationOptions, filters]);
 
     const loadAdditionalMusicians = useCallback(async () => {
         if (!mountedRef.current || isPreloading) return;
         setIsPreloading(true);
-        console.log('Preloading more musicians...');
+        console.log('Preloading more musicians with filters...');
 
         try {
-            const more = await loadMoreMusiciansForMatch(currentUserEmail, LOAD_MORE_BATCH_SIZE);
+            const more = await loadMoreMusiciansForMatch(
+                currentUserEmail,
+                LOAD_MORE_BATCH_SIZE,
+                locationOptions,
+                filters
+            );
+
             if (more && more.length && mountedRef.current) {
                 const append = more.map((m, idx) => ({
                     ...m,
@@ -200,9 +225,9 @@ const MatchScreen = () => {
                     loadedAt: Date.now(),
                 }));
                 setMusicians((prev) => [...prev, ...append]);
-                console.log(`Added ${append.length} more musicians`);
+                console.log(`Added ${append.length} more filtered musicians`);
             } else {
-                console.log('No additional musicians received');
+                console.log('No additional filtered musicians received');
             }
         } catch (e) {
             console.error('Error preloading musicians:', e);
@@ -211,7 +236,7 @@ const MatchScreen = () => {
                 setIsPreloading(false);
             }
         }
-    }, [currentUserEmail, isPreloading, musicians.length]);
+    }, [currentUserEmail, isPreloading, musicians.length, locationOptions, filters]);
 
     // Navigation helper
     const moveToNextMusician = useCallback(() => {
@@ -774,6 +799,71 @@ const MatchScreen = () => {
         };
     }, [currentIndex, musicians.length, isPreloading, loadAdditionalMusicians]);
 
+    // Location update handler
+    const handleLocationUpdate = useCallback(async (locationData) => {
+        console.log('📍 Location updated:', locationData);
+
+        setLocationEnabled(locationData.enabled);
+        setSearchRadius(locationData.distance);
+        setCurrentLocation(locationData.currentLocation);
+        setLocationOptions(locationData.locationOptions);
+
+        // Reload musicians with new location settings
+        setMusicians([]);
+        setCurrentIndex(0);
+        setTimeout(() => {
+            loadInitialMusicians();
+        }, 100);
+    }, [loadInitialMusicians]);
+
+    // Filter modal handler
+    const handleShowFilters = useCallback(() => {
+        // Navigate to filter screen
+        navigation.navigate('FilterScreen');
+    }, [navigation]);
+
+    // Initialize location on mount
+    useEffect(() => {
+        const initializeLocation = async () => {
+            try {
+                const preferences = await LocationService.getLocationPreferences();
+                setLocationEnabled(preferences.locationEnabled);
+                setSearchRadius(preferences.maxDistance);
+
+                if (preferences.locationEnabled) {
+                    const locationResult = await LocationService.getLocationForMatching();
+                    if (locationResult.success) {
+                        const options = {
+                            latitude: locationResult.location.latitude,
+                            longitude: locationResult.location.longitude,
+                            maxDistance: preferences.maxDistance,
+                            unit: preferences.unit || 'km'
+                        };
+                        setLocationOptions(options);
+                        setCurrentLocation(locationResult.location);
+                        console.log('📍 Location initialized for matching');
+                    }
+                }
+            } catch (error) {
+                console.warn('Failed to initialize location:', error);
+            }
+        };
+
+        initializeLocation();
+    }, []);
+
+    // Reload when filters change
+    useEffect(() => {
+        if (filters && Object.keys(filters).length > 0) {
+            console.log('🔄 Filters changed, reloading musicians...');
+            setMusicians([]);
+            setCurrentIndex(0);
+            setTimeout(() => {
+                loadInitialMusicians();
+            }, 100);
+        }
+    }, [filters, loadInitialMusicians]);
+
     // Render states
     if (loading) {
         return (
@@ -855,6 +945,16 @@ const MatchScreen = () => {
     return (
         <>
             <View style={styles.container}>
+                {/* Filter Icon */}
+                <TouchableOpacity
+                    style={[styles.filterButton, { top: insets.top + 10 }]}
+                    onPress={() => navigation.navigate('FilterScreen')}
+                >
+                    <View style={styles.filterIconContainer}>
+                        <Icon name="filter" size={24} color="#333" />
+                    </View>
+                </TouchableOpacity>
+
                 <View
                     style={styles.cardDeckContainer}
                     pointerEvents={showMatchModal ? 'none' : 'auto'}
@@ -900,20 +1000,41 @@ const MatchScreen = () => {
 };
 
 // StyleSheet moved outside component for better performance
+// Only showing the style changes needed - update your MatchScreen.js styles object
+
 const styles = StyleSheet.create({
     container: {
         flex: 1,
         backgroundColor: '#f8f9fa',
-        paddingTop: 60
     },
-    cardDeckContainer: {
-        width: '100%',
-        height: CARD_HEIGHT,
+    filterButton: {
+        position: 'absolute',
+        left: 20,
+        zIndex: 100,
+        elevation: 10,
+    },
+    filterIconContainer: {
+        backgroundColor: 'rgba(255,255,255,0.9)',
+        borderRadius: 20,
+        width: 40,
+        height: 40,
         justifyContent: 'center',
         alignItems: 'center',
-        position: 'relative',
-        flex: 1,
-        marginBottom: 10
+        shadowColor: '#000',
+        shadowOffset: { width: 0, height: 2 },
+        shadowOpacity: 0.2,
+        shadowRadius: 4,
+        elevation: 5,
+    },
+    // FIXED: Properly centered cards accounting for top/bottom elements
+    cardDeckContainer: {
+        position: 'absolute',
+        top: 95, // Account for filter button and safe area
+        bottom: LAYOUT.navHeight, // Account for bottom nav
+        left: 0,
+        right: 0,
+        justifyContent: 'center',
+        alignItems: 'center',
     },
     card: {
         width: CARD_WIDTH,
@@ -925,18 +1046,20 @@ const styles = StyleSheet.create({
         shadowOpacity: 0.25,
         shadowRadius: 25,
         elevation: 25,
-        overflow: 'hidden',
         borderWidth: 1,
         borderColor: 'rgba(0,0,0,0.05)',
+        overflow: 'hidden',
     },
+
+    // ... rest of your existing styles remain the same
 
     // Video container
     videoContainer: {
         height: VIDEO_HEIGHT,
         position: 'relative',
         backgroundColor: '#000',
-        borderTopLeftRadius: 28,
-        borderTopRightRadius: 28,
+        borderTopLeftRadius: 38,
+        borderTopRightRadius: 38,
         overflow: 'hidden'
     },
     video: { width: '100%', height: '100%' },
@@ -1045,6 +1168,8 @@ const styles = StyleSheet.create({
         backgroundColor: '#FFFFFF',
         position: 'relative',
         minHeight: CARD_HEIGHT - VIDEO_HEIGHT,
+        borderBottomLeftRadius: 38,
+        borderBottomRightRadius: 38,
     },
     profileScrollView: {
         flex: 1,
@@ -1268,18 +1393,6 @@ const styles = StyleSheet.create({
         elevation: 20,
         marginHorizontal: 20,
     },
-    closeButton: {
-        position: 'absolute',
-        top: 10,
-        right: 10,
-        width: 30,
-        height: 30,
-        borderRadius: 15,
-        backgroundColor: '#f0f0f0',
-        justifyContent: 'center',
-        alignItems: 'center',
-        zIndex: 10,
-    },
     matchTitle: {
         fontSize: 24,
         fontWeight: 'bold',
@@ -1319,13 +1432,6 @@ const styles = StyleSheet.create({
     },
     chatBtn: {
         backgroundColor: '#ff6ec4',
-    },
-    chatBtnGradient: {
-        width: '100%',
-        height: '100%',
-        justifyContent: 'center',
-        alignItems: 'center',
-        borderRadius: 25,
     },
     browseText: {
         color: '#ff6ec4',

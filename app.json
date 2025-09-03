@@ -20,7 +20,16 @@
     },
     "plugins": [
       "expo-localization",
-      "@config-plugins/ffmpeg-kit-react-native"
+      "@config-plugins/ffmpeg-kit-react-native",
+      [
+        "expo-notifications",
+        {
+          "icon": "./assets/notification-icon.png",
+          "color": "#ffffff",
+          "sounds": ["./assets/notification-sound.wav"],
+          "mode": "production"
+        }
+      ]
     ],
     "scheme": "groovi",
     "extra": {

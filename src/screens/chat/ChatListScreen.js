@@ -7,7 +7,8 @@ import {
     FlatList,
     TextInput,
     useColorScheme,
-    SafeAreaView
+    SafeAreaView,
+    Alert
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useNavigation } from '@react-navigation/native';
@@ -19,7 +20,6 @@ import { useAuth } from '../../context/AuthContext';
 import { fetchUserProfile, getUsernameForChat } from '../../services/profileService';
 import { getCurrentUserEmail } from '../../utils/userUtils';
 import { createLogger } from '../../utils/Logger';
-
 const logger = createLogger('ChatListScreen');
 
 const ChatListScreen = () => {

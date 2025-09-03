@@ -142,11 +142,24 @@ class ChatService {
      * @private
      * @returns {Promise<void>}
      */
-    _establishWebSocketConnection() {
-        return new Promise((resolve, reject) => {
+    async _establishWebSocketConnection() {
+        return new Promise(async (resolve, reject) => {
             try {
-                // Construct WebSocket URL
-                const wsUrl = `${CONFIG.WEBSOCKET_URL}?username=${encodeURIComponent(this.username)}`;
+                // Construct WebSocket URL with username
+                let wsUrl = `${CONFIG.WEBSOCKET_URL}?username=${encodeURIComponent(this.username)}`;
+
+                logger.info('🔗 Connecting to WebSocket', {
+                    username: this.username,
+                    urlLength: wsUrl.length
+                });
+
+                // Log the final WebSocket URL structure (without exposing sensitive data)
+                const urlParts = wsUrl.split('?')[1]?.split('&') || [];
+                logger.info('🔗 WebSocket URL parameters', {
+                    paramCount: urlParts.length,
+                    hasUsername: urlParts.some(p => p.startsWith('username=')),
+                    baseUrl: CONFIG.WEBSOCKET_URL
+                });
 
                 // Create WebSocket instance
                 this.ws = new WebSocket(wsUrl);
@@ -288,93 +301,146 @@ class ChatService {
     }
 
     /**
-     * Handle WebSocket errors
+     * Handle WebSocket errors with better error classification and recovery
      * @private
      */
     handleWebSocketError(error) {
-        logger.error('❌ WebSocket error occurred', { error: error.message || error });
+        const errorMessage = error.message || error.toString() || 'Unknown WebSocket error';
 
-        this.connectionError = error.message || 'WebSocket error occurred';
+        // Classify the error type
+        const errorType = this.classifyWebSocketError(errorMessage);
 
-        // Notify error handlers
-        this.notifyErrorHandlers({
-            type: 'websocket_error',
-            message: this.connectionError,
-            error
+        logger.info('⚠️ WebSocket error classified', {
+            errorType,
+            originalMessage: errorMessage,
+            connectionState: this.connectionState,
+            reconnectAttempts: this.reconnectAttempts
         });
-    }
 
-    /**
-     * Handle incoming WebSocket messages
-     * @private
-     */
-    handleWebSocketMessage(event) {
-        try {
-            const data = JSON.parse(event.data);
-
-            this.metrics.messagesReceived++;
-
-            // Handle different message types
-            this.processIncomingMessage(data);
-
-        } catch (error) {
-            logger.error('❌ Failed to parse WebSocket message', {
-                error: error.message,
-                rawData: event.data
-            });
+        // Update connection state based on error type
+        if (errorType.shouldReconnect && !this.isIntentionalDisconnect) {
+            this.connectionState = CONNECTION_STATES.RECONNECTING;
+            this.connectionError = `${errorType.category}: ${errorType.friendlyMessage}`;
+        } else {
+            this.connectionState = CONNECTION_STATES.FAILED;
+            this.connectionError = errorType.friendlyMessage;
         }
-    }
 
-    // ===================================
-    // KEEP-ALIVE SYSTEM
-    // ===================================
-
-    /**
-     * Start the keep-alive ping interval
-     * @private
-     */
-    startPingInterval() {
+        // Stop ping interval on error
         this.stopPingInterval();
 
-        this.pingInterval = setInterval(() => {
-            if (this.connectionState === CONNECTION_STATES.CONNECTED && this.ws?.readyState === WebSocket.OPEN) {
-                this.sendKeepAlivePing();
-            }
-        }, CONFIG.PING_INTERVAL);
-    }
+        // Notify error handlers with classified error
+        this.notifyErrorHandlers({
+            type: 'websocket_error',
+            category: errorType.category,
+            message: errorType.friendlyMessage,
+            originalError: errorMessage,
+            shouldReconnect: errorType.shouldReconnect,
+            error
+        });
 
-    /**
-     * Stop the keep-alive ping interval
-     * @private
-     */
-    stopPingInterval() {
-        if (this.pingInterval) {
-            clearInterval(this.pingInterval);
-            this.pingInterval = null;
+        // Notify connection handlers about the error state
+        this.notifyConnectionHandlers({
+            state: this.connectionState,
+            connected: false,
+            error: errorType.friendlyMessage,
+            shouldReconnect: errorType.shouldReconnect
+        });
+
+        // Trigger reconnection for recoverable errors
+        if (errorType.shouldReconnect && !this.isIntentionalDisconnect) {
+            logger.info('🔄 Scheduling reconnection due to recoverable error');
+            // Small delay before reconnection to avoid rapid retries
+            setTimeout(() => {
+                if (!this.isIntentionalDisconnect && this.connectionState === CONNECTION_STATES.RECONNECTING) {
+                    this.handleReconnection();
+                }
+            }, 1000);
         }
     }
 
     /**
-     * Send keep-alive ping to server
+     * Classify WebSocket errors to determine appropriate handling
      * @private
+     * @param {string} errorMessage - The error message to classify
+     * @returns {Object} Error classification with handling strategy
      */
-    sendKeepAlivePing() {
-        if (!this.username) return;
+    classifyWebSocketError(errorMessage) {
+        const message = errorMessage.toLowerCase();
 
-        this.lastPingTime = Date.now();
+        // Network connectivity issues (recoverable)
+        if (message.includes('software caused connection abort') ||
+            message.includes('connection reset') ||
+            message.includes('network is unreachable') ||
+            message.includes('connection timed out') ||
+            message.includes('connection lost') ||
+            message.includes('network error')) {
+            return {
+                category: 'NETWORK_ERROR',
+                friendlyMessage: 'Network connection interrupted',
+                shouldReconnect: true,
+                isTemporary: true
+            };
+        }
 
-        const pingPayload = {
-            action: 'chat_keep_alive',
-            username: this.username,
-            timestamp: new Date().toISOString()
+        // DNS/Host resolution issues (recoverable)
+        if (message.includes('host not found') ||
+            message.includes('dns') ||
+            message.includes('name resolution')) {
+            return {
+                category: 'DNS_ERROR',
+                friendlyMessage: 'Unable to connect to chat server',
+                shouldReconnect: true,
+                isTemporary: true
+            };
+        }
+
+        // Server-side issues (recoverable)
+        if (message.includes('server') ||
+            message.includes('503') ||
+            message.includes('502') ||
+            message.includes('504')) {
+            return {
+                category: 'SERVER_ERROR',
+                friendlyMessage: 'Chat server temporarily unavailable',
+                shouldReconnect: true,
+                isTemporary: true
+            };
+        }
+
+        // Authentication/Authorization issues (not recoverable)
+        if (message.includes('unauthorized') ||
+            message.includes('forbidden') ||
+            message.includes('401') ||
+            message.includes('403')) {
+            return {
+                category: 'AUTH_ERROR',
+                friendlyMessage: 'Authentication required',
+                shouldReconnect: false,
+                isTemporary: false
+            };
+        }
+
+        // Protocol/Format issues (not recoverable)
+        if (message.includes('protocol') ||
+            message.includes('handshake') ||
+            message.includes('upgrade')) {
+            return {
+                category: 'PROTOCOL_ERROR',
+                friendlyMessage: 'Connection protocol error',
+                shouldReconnect: false,
+                isTemporary: false
+            };
+        }
+
+        // Default: treat as temporary network issue
+        return {
+            category: 'UNKNOWN_ERROR',
+            friendlyMessage: 'Connection error occurred',
+            shouldReconnect: true,
+            isTemporary: true
         };
-
-        this.sendAction('chat_keep_alive', pingPayload);
     }
-
-    // ===================================
-    // RECONNECTION LOGIC
-    // ===================================
 
     /**
      * Handle reconnection attempts with exponential backoff
@@ -906,6 +972,74 @@ class ChatService {
                 logger.error('❌ Error in error callback', { error: err.message });
             }
         });
+    }
+
+    /**
+     * Handle incoming WebSocket messages
+     * @private
+     */
+    handleWebSocketMessage(event) {
+        try {
+            const data = JSON.parse(event.data);
+
+            this.metrics.messagesReceived++;
+
+            // Handle different message types
+            this.processIncomingMessage(data);
+
+        } catch (error) {
+            logger.error('❌ Failed to parse WebSocket message', {
+                error: error.message,
+                rawData: event.data
+            });
+        }
+    }
+
+    // ===================================
+    // KEEP-ALIVE SYSTEM
+    // ===================================
+
+    /**
+     * Start the keep-alive ping interval
+     * @private
+     */
+    startPingInterval() {
+        this.stopPingInterval();
+
+        this.pingInterval = setInterval(() => {
+            if (this.connectionState === CONNECTION_STATES.CONNECTED && this.ws?.readyState === WebSocket.OPEN) {
+                this.sendKeepAlivePing();
+            }
+        }, CONFIG.PING_INTERVAL);
+    }
+
+    /**
+     * Stop the keep-alive ping interval
+     * @private
+     */
+    stopPingInterval() {
+        if (this.pingInterval) {
+            clearInterval(this.pingInterval);
+            this.pingInterval = null;
+        }
+    }
+
+    /**
+     * Send keep-alive ping to server
+     * @private
+     */
+    sendKeepAlivePing() {
+        if (!this.username) return;
+
+        this.lastPingTime = Date.now();
+
+        const pingPayload = {
+            action: 'chat_keep_alive',
+            username: this.username,
+            timestamp: new Date().toISOString()
+        };
+
+        this.sendAction('chat_keep_alive', pingPayload);
     }
 }
 

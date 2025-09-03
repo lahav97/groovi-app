@@ -8,13 +8,12 @@ import {
   Dimensions,
   useColorScheme,
   ActivityIndicator,
-  InteractionManager,
 } from 'react-native';
 import { Video } from 'expo-av';
 import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
 import { COLORS } from '../../styles/theme';
-import { useIsFocused } from '@react-navigation/native';
+import { useIsFocused, useNavigation } from '@react-navigation/native';
 import * as FileSystem from 'expo-file-system';
 import { createLogger } from '../../utils/Logger';
 
@@ -141,6 +140,7 @@ const processCacheQueue = async () => {
 const VideoItem = memo(({ item, isVisible, height, shouldCache = false }) => {
   const videoRef = useRef(null);
   const isFocused = useIsFocused();
+  const navigation = useNavigation();
 
   // Video state management
   const [userPaused, setUserPaused] = useState(false);
@@ -189,9 +189,28 @@ const VideoItem = memo(({ item, isVisible, height, shouldCache = false }) => {
   }, [getUserDisplayName]);
 
   const handleUserPress = useCallback(() => {
-    logger.info('👤 User profile pressed', { username: getUserDisplayName() });
-    // TODO: Navigate to user profile screen
-  }, [getUserDisplayName]);
+    try {
+      const username = getUserDisplayName();
+      logger.info('👤 User profile pressed', { username });
+
+      if (!username || username === 'Unknown User') {
+        logger.warn('No valid username available for profile navigation');
+        return;
+      }
+
+      // Navigate to MusicianProfileScreen with username and any additional user data
+      navigation.navigate('MusicianProfile', {
+        username: username,
+        ...(item.user_id && { userId: item.user_id }),
+        ...(item.id && { videoId: item.id })
+      });
+    } catch (error) {
+      logger.error('Failed to navigate to musician profile', {
+        error: error.message,
+        username: getUserDisplayName()
+      });
+    }
+  }, [getUserDisplayName, navigation, item.user_id, item.id]);
 
   // Register video with global manager
   useEffect(() => {
@@ -313,11 +332,9 @@ const VideoItem = memo(({ item, isVisible, height, shouldCache = false }) => {
   const handleVideoError = useCallback((error) => {
     if (!componentMountedRef.current) return;
 
-    logger.error('❌ Video error:', error);
-
     const errorString = error?.toString() || '';
 
-    // FIXED: Better handling of cache file errors
+    // Don't log error if it's just a cache file issue - handle it silently
     if (localVideoUri && (
       errorString.includes('j7.x$b') ||
       errorString.includes('could read') ||
@@ -332,22 +349,31 @@ const VideoItem = memo(({ item, isVisible, height, shouldCache = false }) => {
       cacheAttemptedRef.current = false;
       stableVideoSourceRef.current = item.videoUrl;
 
-      // Try to reload with original URL
+      // Try to reload with original URL silently
       if (videoRef.current) {
         videoRef.current.unloadAsync().then(() => {
           if (componentMountedRef.current) {
             videoRef.current.loadAsync({ uri: item.videoUrl }, {}, false);
           }
         }).catch(() => {
-          // If reload fails, mark as error
-          setHasError(true);
-          setIsLoading(false);
-          setIsPlaying(false);
-          setVideoLoaded(false);
+          // Only set error if we can't recover
+          if (componentMountedRef.current) {
+            setHasError(true);
+            setIsLoading(false);
+            setIsPlaying(false);
+            setVideoLoaded(false);
+          }
         });
       }
-      return; // Don't set error state, try to recover
+      return; // Don't proceed to error handling
     }
+
+    // Only log actual errors, not cache fallbacks
+    logger.error('❌ Video playback error:', {
+      error: errorString.substring(0, 100),
+      hasLocalCache: !!localVideoUri,
+      videoId: videoId
+    });
 
     setHasError(true);
     setIsLoading(false);
@@ -362,7 +388,7 @@ const VideoItem = memo(({ item, isVisible, height, shouldCache = false }) => {
         }
       }, 1000);
     }
-  }, [localVideoUri, item.videoUrl]);
+  }, [localVideoUri, item.videoUrl, videoId]);
 
   // Handle playback status updates from the video
   const handlePlaybackStatusUpdate = useCallback((status) => {

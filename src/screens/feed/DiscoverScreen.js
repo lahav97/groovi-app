@@ -1,4 +1,3 @@
-// DiscoverScreen.js - OPTIMIZED VERSION with Filter Integration - FIXED for compatibility
 import React, { useRef, useState, useEffect, useCallback, useMemo } from 'react';
 import {
     View,
@@ -112,24 +111,21 @@ const DiscoverScreen = () => {
             // Quick cache check only for non-filtered results
             if (!filters.isActive) {
                 try {
-                    // FIXED: Use the correct method signature from fixed BackgroundDataService
-                    const backgroundStatus = BackgroundDataService.getSeparatedSystemStatus();
-                    if (backgroundStatus.feed.loaded) {
-                        const cachedVideos = await getDiscoverCache();
-                        if (cachedVideos && cachedVideos.length > 0) {
-                            console.log(`⚡ Using ${cachedVideos.length} cached musician videos`);
+                    // FIXED: Removed call to non-existent getSeparatedSystemStatus method
+                    const cachedVideos = await getDiscoverCache();
+                    if (cachedVideos && cachedVideos.length > 0) {
+                        console.log(`⚡ Using ${cachedVideos.length} cached musician videos`);
 
-                            InteractionManager.runAfterInteractions(() => {
-                                if (mountedRef.current) {
-                                    setMusicianVideos(cachedVideos);
-                                    setCurrentIndex(0);
-                                    currentIndexRef.current = 0;
-                                    setIsInitialLoading(false);
-                                    isLoadingRef.current = false;
-                                }
-                            });
-                            return;
-                        }
+                        InteractionManager.runAfterInteractions(() => {
+                            if (mountedRef.current) {
+                                setMusicianVideos(cachedVideos);
+                                setCurrentIndex(0);
+                                currentIndexRef.current = 0;
+                                setIsInitialLoading(false);
+                                isLoadingRef.current = false;
+                            }
+                        });
+                        return;
                     }
                 } catch (cacheError) {
                     console.warn('⚠️ Cache check failed:', cacheError);

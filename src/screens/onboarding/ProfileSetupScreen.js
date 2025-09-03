@@ -40,6 +40,7 @@ import {
     handleError
 } from '../../utils/errors';
 import { createLogger } from '../../utils/Logger';
+import NotificationService from '../../services/NotificationService';
 
 const BUILD_PROFILE_API_URL = 'https://9u6y4sfrn2.execute-api.us-east-1.amazonaws.com/groovi/build_profile';
 const predefinedGenres = ['Pop', 'Rock', 'Metal', 'Jazz', 'Hip Hop', 'Classical', 'Electronic', 'R&B'];
@@ -557,6 +558,20 @@ const ProfileSetupScreen = () => {
                 return;
             } else {
                 logger.info('✅ Onboarding marked complete');
+            }
+
+            // Initialize push notifications after successful profile setup
+            try {
+                const username = completeUser.username;
+                if (username) {
+                    await NotificationService.initialize(username);
+                    logger.info('✅ Push notifications initialized for user', { username });
+                } else {
+                    logger.warn('⚠️ No username available for notification initialization');
+                }
+            } catch (notificationError) {
+                logger.error('❌ Failed to initialize push notifications', { error: notificationError.message });
+                // Don't block the flow if notifications fail
             }
 
             // Display appropriate completion message

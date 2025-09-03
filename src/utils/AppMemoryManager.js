@@ -149,13 +149,7 @@ class AppMemoryManager {
                 
                 await manageCacheSize(maxCacheSize);
 
-                const systemStatus = BackgroundDataService.getSeparatedSystemStatus();
-                if (systemStatus.feed.hasError || systemStatus.profile.hasError) {
-                    logger.warn('⚠️ System issues detected', {
-                        feedError: systemStatus.feed.error,
-                        profileError: systemStatus.profile.error
-                    });
-                }
+                logger.debug('✅ Active cleanup completed', { maxCacheSize });
 
             } catch (error) {
                 logger.error('🚨 Active cleanup error', { error: error.message });
@@ -165,13 +159,7 @@ class AppMemoryManager {
 
     async performPeriodicCleanup() {
         try {
-            const systemStatus = BackgroundDataService.getSeparatedSystemStatus();
-            if (systemStatus.feed.hasError || systemStatus.profile.hasError) {
-                logger.warn('⚠️ System issues detected', {
-                    feedError: systemStatus.feed.error,
-                    profileError: systemStatus.profile.error
-                });
-            }
+            logger.debug('🔄 Performing periodic cleanup');
 
             const maxCacheSize = this.memoryPressureLevel === 'critical' ? 25 :
                                this.memoryPressureLevel === 'warning' ? 40 : 60;

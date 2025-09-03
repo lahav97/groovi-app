@@ -95,7 +95,8 @@ class Logger {
     // Error level logging
     error(message, data = {}) {
         console.error(this.formatMessage('ERROR', message, data));
-        if (Object.keys(data).length > 0) {
+        // Safely check if data exists and has properties before logging
+        if (data && typeof data === 'object' && Object.keys(data).length > 0) {
             console.error(data);
         }
     }
