@@ -18,9 +18,9 @@ import ChatService from '../../services/ChatService';
 import { useAuth } from '../../context/AuthContext';
 import { fetchUserProfile, getUsernameForChat } from '../../services/profileService';
 import { getCurrentUserEmail } from '../../utils/userUtils';
-import Logger from '../../utils/Logger';
+import { createLogger } from '../../utils/Logger';
 
-const logger = Logger.createLogger('ChatListScreen');
+const logger = createLogger('ChatListScreen');
 
 const ChatListScreen = () => {
     // Theme detection
@@ -68,9 +68,6 @@ const ChatListScreen = () => {
                     // Only increment unread count if this is a received message
                     newUnreadCount = newUnreadCount + 1;
                     newReadStatus = 'unread';
-                } else {
-                    // If it's a sent message, don't change the unread count for this conversation
-                    logger.debug('Sent message processed', { otherUser });
                 }
 
                 // Update conversation data
@@ -99,7 +96,7 @@ const ChatListScreen = () => {
                     readStatus: isReceived ? 'unread' : 'read'
                 };
 
-                logger.info('New conversation created', { otherUser });
+                logger.info('💬 New conversation created', { otherUser });
 
                 // Add to top of the list
                 return [newConversation, ...prevConversations];
@@ -132,32 +129,29 @@ const ChatListScreen = () => {
 
             try {
                 setIsLoadingProfile(true);
-                logger.debug('Fetching user profile for chat');
 
                 const userEmail = user?.email || await getCurrentUserEmail();
                 if (!userEmail) {
-                    logger.warn('No user email found');
+                    logger.warn('❌ No user email found');
                     setCurrentUsername(null);
                     setIsLoadingProfile(false);
                     return;
                 }
 
-                logger.debug('Fetching profile by email for chat', { email: userEmail });
-
                 const profileResult = await fetchUserProfile('email', userEmail);
 
                 if (profileResult && profileResult.profile && profileResult.profile.username) {
                     setCurrentUsername(profileResult.profile.username);
-                    logger.info('Profile loaded for chat', { username: profileResult.profile.username });
+                    logger.info('✅ Profile loaded for chat', { username: profileResult.profile.username });
                 } else if (profileResult && profileResult.username) {
                     setCurrentUsername(profileResult.username);
-                    logger.info('Profile loaded for chat', { username: profileResult.username });
+                    logger.info('✅ Profile loaded for chat', { username: profileResult.username });
                 } else {
-                    logger.warn('No username found in profile data');
+                    logger.warn('❌ No username found in profile data');
                     setCurrentUsername(null);
                 }
             } catch (error) {
-                logger.error('Failed to load user profile', { error: error.message });
+                logger.error('❌ Failed to load user profile', { error: error.message });
                 setCurrentUsername(null);
             } finally {
                 setIsLoadingProfile(false);
@@ -179,7 +173,7 @@ const ChatListScreen = () => {
             return;
         }
 
-        logger.info('Initializing chat connection', { username: currentUsername });
+        logger.info('🚀 Initializing chat connection', { username: currentUsername });
 
         let chatListUnsubscribe = null;
         let connectionUnsubscribe = null;
@@ -191,7 +185,7 @@ const ChatListScreen = () => {
             if (message.type === 'message_received') {
                 // Ensure we have the current username before processing
                 if (!currentUsername) {
-                    logger.warn('Current username not available, skipping message processing');
+                    logger.warn('⚠️ Current username not available, skipping message processing');
                     return;
                 }
 
@@ -204,7 +198,7 @@ const ChatListScreen = () => {
                 });
             } else if (message.type === 'message_sent') {
                 if (!currentUsername) {
-                    logger.warn('Current username not available, skipping sent message processing');
+                    logger.warn('⚠️ Current username not available, skipping sent message processing');
                     return;
                 }
 
@@ -219,7 +213,7 @@ const ChatListScreen = () => {
             // Handle real-time messages without proper type (like web app receives)
             else if (message.from && message.message && !message.type) {
                 if (!currentUsername) {
-                    logger.warn('Current username not available, skipping real-time message processing');
+                    logger.warn('⚠️ Current username not available, skipping real-time message processing');
                     return;
                 }
 
@@ -248,7 +242,6 @@ const ChatListScreen = () => {
                         }
 
                         if (conversationMatch) {
-                            logger.debug('Conversation marked as read', { conversation: conv.name });
                             return {
                                 ...conv,
                                 unreadCount: 0,
@@ -273,7 +266,6 @@ const ChatListScreen = () => {
                     setConversations(prevConversations => {
                         return prevConversations.map(conv => {
                             if (conv.name === otherUser) {
-                                logger.debug('Conversation marked as read via fallback handler', { conversation: otherUser });
                                 return {
                                     ...conv,
                                     unreadCount: 0,
@@ -284,16 +276,16 @@ const ChatListScreen = () => {
                         });
                     });
                 } else {
-                    logger.warn('Mark as read response received but no user specified', { message });
+                    logger.warn('⚠️ Mark as read response received but no user specified', { message });
                 }
             }
             // Handle success responses that might contain mark as read confirmations
             else if (message.statusCode === 200 && message.message && typeof message.message === 'string') {
                 if (message.message.includes('marked as read') || message.message.includes('read status updated')) {
-                    logger.debug('Mark as read success response received');
+                    // Success response handled
                 }
             } else if (message.type === 'conversations_list' && Array.isArray(message.data)) {
-                logger.info('Processing conversations list', { count: message.data.length });
+                logger.info('📋 Processing conversations list', { count: message.data.length });
 
                 const transformedConversations = message.data.map(conv => ({
                     id: conv.SK || conv.id || `conv_${Date.now()}_${Math.random()}`,
@@ -308,9 +300,6 @@ const ChatListScreen = () => {
                 setConversations(transformedConversations);
                 setIsLoadingChats(false);
                 hasReceivedChatData.current = true;
-            } else if (__DEV__) {
-                // Only log unknown messages in development
-                logger.debug('Unknown message type received', { type: message.type });
             }
         });
 
@@ -321,14 +310,12 @@ const ChatListScreen = () => {
 
                 // Step 1: Connect to WebSocket
                 await ChatService.connectUserToWebSocket(currentUsername);
-                logger.info('WebSocket connected successfully');
 
                 // Step 2: Set up chat list listener
                 chatListUnsubscribe = ChatService.onChatListUpdate((data) => {
                     // Handle both 'chat_list' and 'conversations_list' message types
                     if ((data.type === 'chat_list' || data.type === 'conversations_list') && Array.isArray(data.conversations || data.data)) {
                         const conversationsArray = data.conversations || data.data;
-                        logger.debug('Processing chat list update', { count: conversationsArray.length });
 
                         // Transform backend data to match your UI expectations
                         const transformedConversations = conversationsArray.map(conv => ({
@@ -346,15 +333,13 @@ const ChatListScreen = () => {
                         setIsLoadingChats(false);
                         hasReceivedChatData.current = true;
                     } else {
-                        logger.warn('Unexpected chat list data format', { type: data.type });
+                        logger.warn('⚠️ Unexpected chat list data format', { type: data.type });
                         setIsLoadingChats(false);
                     }
                 });
 
                 // Step 3: Set up connection state listener
                 connectionUnsubscribe = ChatService.onConnectionChange((connectionData) => {
-                    logger.debug('Connection state changed', { state: connectionData.state });
-
                     if (connectionData.state === 'CONNECTED') {
                         setIsConnecting(false);
                         setConnectionError('');
@@ -384,7 +369,7 @@ const ChatListScreen = () => {
                 }, 5000);
 
             } catch (error) {
-                logger.error('Failed to initialize chat', { error: error.message });
+                logger.error('❌ Failed to initialize chat', { error: error.message });
                 setIsConnecting(false);
                 setConnectionError(error.message || 'Failed to connect to chat');
                 setIsLoadingChats(false);
@@ -395,8 +380,6 @@ const ChatListScreen = () => {
 
         // CLEANUP
         return () => {
-            logger.debug('Cleaning up ChatListScreen');
-
             if (chatListUnsubscribe) chatListUnsubscribe();
             if (connectionUnsubscribe) connectionUnsubscribe();
             if (directMessageUnsubscribe) directMessageUnsubscribe();
@@ -408,7 +391,6 @@ const ChatListScreen = () => {
         const unsubscribe = navigation.addListener('focus', () => {
             // When returning to chat list, refresh the data from backend
             if (currentUsername && ChatService.isConnected()) {
-                logger.debug('Refreshing chat list on focus');
                 ChatService.loadChatList(currentUsername);
             }
         });
@@ -422,7 +404,6 @@ const ChatListScreen = () => {
 
     // Handle conversation selection
     const handleConversationPress = async (conversation) => {
-        logger.debug('Conversation selected', { conversationName: conversation.name, unreadCount: conversation.unreadCount });
 
         // Store original unread count for potential rollback
         const originalUnreadCount = conversation.unreadCount;
@@ -447,12 +428,12 @@ const ChatListScreen = () => {
                 const success = ChatService.markMessagesAsRead(conversation.name);
 
                 if (!success) {
-                    logger.warn('Failed to send mark as read request', { conversationName: conversation.name });
+                    logger.warn('⚠️ Failed to send mark as read request', { conversationName: conversation.name });
                     rollbackReadStatus(conversation.id, originalUnreadCount);
                 }
             }
         } catch (error) {
-            logger.error('Error marking messages as read', { error: error.message, conversationName: conversation.name });
+            logger.error('❌ Error marking messages as read', { error: error.message, conversationName: conversation.name });
             rollbackReadStatus(conversation.id, originalUnreadCount);
         }
 
@@ -472,9 +453,9 @@ const ChatListScreen = () => {
             setConnectionError('');
             await ChatService.connectUserToWebSocket(currentUsername);
             ChatService.loadChatList(currentUsername);
-            logger.info('Chat connection retry successful');
+            logger.info('✅ Chat connection retry successful');
         } catch (error) {
-            logger.error('Chat connection retry failed', { error: error.message });
+            logger.error('❌ Chat connection retry failed', { error: error.message });
             setConnectionError('Failed to connect. Tap to retry.');
             setIsConnecting(false);
         }

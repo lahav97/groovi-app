@@ -209,7 +209,10 @@ export const AuthProvider = ({ children }) => {
         throw new Error('No user found');
       }
 
-      await Auth.updateUserAttributes(user, {
+      // Get the actual Cognito user object for updateUserAttributes
+      const cognitoUser = await Auth.currentAuthenticatedUser();
+
+      await Auth.updateUserAttributes(cognitoUser, {
         'custom:onboardingCompleted': 'true'
       });
 

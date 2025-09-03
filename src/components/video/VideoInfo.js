@@ -4,8 +4,10 @@ import { COLORS, SIZES } from '../../styles/theme';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useNavigation } from '@react-navigation/native';
 import { handleError } from '../../utils/errors';
+import { createLogger } from '../../utils/Logger';
 
 const { height: SCREEN_HEIGHT } = Dimensions.get('window');
+const logger = createLogger('VideoInfo');
 
 const VideoInfo = ({ video }) => {
   const colorScheme = useColorScheme();
@@ -15,30 +17,33 @@ const VideoInfo = ({ video }) => {
 
   // Handle missing or malformed video prop
   if (!video || typeof video !== 'object') {
-    console.error(handleError(new Error('Invalid video data'), 'VideoInfo'));
+    logger.error('Invalid video data provided to VideoInfo component');
     return null;
   }
 
   /**
-   * Navigate to musician profile
+   * Navigate to musician profile screen
+   * Handles both username and userId parameters for flexible navigation
    */
   const handleUsernamePress = () => {
     try {
       if (!video?.username) {
-        console.warn('⚠️ No username available for navigation');
+        logger.warn('No username available for profile navigation');
         return;
       }
 
-      console.log(`🔍 Navigating to profile: ${video.username}`);
-      
-      // Navigate to MusicianProfileScreen with username parameter
+      logger.info(`🔍 Navigating to musician profile: ${video.username}`);
+
+      // Navigate to MusicianProfileScreen with available parameters
       navigation.navigate('MusicianProfile', {
         username: video.username,
-        // If userId is available in video object, pass it too
         ...(video.userId && { userId: video.userId })
       });
     } catch (error) {
-      console.error('❌ Error navigating to profile:', handleError(error, 'VideoInfo/handleUsernamePress'));
+      logger.error('Failed to navigate to musician profile', {
+        error: error.message,
+        username: video?.username
+      });
     }
   };
 
@@ -51,7 +56,7 @@ const VideoInfo = ({ video }) => {
         </Text>
       </TouchableOpacity>
       
-      {/* Description */}
+      {/* Video Description */}
       <Text style={[styles.description, { color: theme.icon }]} numberOfLines={2}>
         {video?.description}
       </Text>

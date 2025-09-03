@@ -1,7 +1,7 @@
 import axios from 'axios';
-import Logger from '../utils/Logger';
+import { createLogger } from '../utils/Logger';
 
-const logger = Logger.createLogger('ProfileService');
+const logger = createLogger('ProfileService');
 
 const PROFILE_API_URL = 'https://lynqhqnijd.execute-api.us-east-1.amazonaws.com/groovi/load_profile';
 

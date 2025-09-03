@@ -14,9 +14,9 @@ import {
   createVideoKey
 } from './videoService';
 import { handleError } from '../utils/errors';
-import Logger from '../utils/Logger';
+import { createLogger } from '../utils/Logger';
 
-const logger = Logger.createLogger('UploadFileService');
+const logger = createLogger('UploadFileService');
 
 /**
  * Configuration for upload endpoints
@@ -110,6 +110,102 @@ class UploadFileService {
   }
 
   /**
+   * @method createVideoKey
+   * @description Creates a unique key for video deduplication
+   */
+  createVideoKey(fileName, size, duration) {
+    return `${fileName}_${size}_${Math.round(duration * 10)}`;
+  }
+
+  /**
+   * @method getPresignedUrl
+   * @description Gets a pre-signed URL from Lambda for S3 upload
+   */
+  async getPresignedUrl(fileName, mimeType) {
+    try {
+      const response = await axios.put(UPLOAD_CONFIG.VIDEO_UPLOAD_URL, null, {
+        headers: {
+          'file-name': fileName,
+          'content-type': mimeType || 'video/mp4',
+        }
+      });
+
+      if (response.data && response.data.uploadUrl && response.data.fileUrl) {
+        return {
+          success: true,
+          uploadUrl: response.data.uploadUrl,
+          fileUrl: response.data.fileUrl
+        };
+      } else {
+        throw new Error('Invalid response from presigned URL service');
+      }
+    } catch (error) {
+      logger.error('Failed to get presigned URL:', handleError(error, 'UploadFileService/getPresignedUrl'));
+      return {
+        success: false,
+        error: handleError(error, 'UploadFileService/getPresignedUrl') || error.message || 'Failed to get presigned URL'
+      };
+    }
+  }
+
+  /**
+   * @method uploadToS3
+   * @description Upload file directly to S3 using pre-signed URL
+   */
+  async uploadToS3(fileUri, uploadUrl, mimeType, onProgress) {
+    try {
+      return new Promise((resolve, reject) => {
+        const xhr = new XMLHttpRequest();
+
+        xhr.upload.onprogress = (event) => {
+          if (event.lengthComputable && onProgress) {
+            onProgress({
+              loaded: event.loaded,
+              total: event.total
+            });
+          }
+        };
+
+        xhr.onload = () => {
+          if (xhr.status >= 200 && xhr.status < 300) {
+            resolve({ success: true });
+          } else {
+            reject(new Error(`Upload failed with status ${xhr.status}`));
+          }
+        };
+
+        xhr.onerror = () => {
+          reject(new Error('Network error during upload'));
+        };
+
+        xhr.ontimeout = () => {
+          reject(new Error('Upload timed out'));
+        };
+
+        xhr.open('PUT', uploadUrl);
+        xhr.setRequestHeader('Content-Type', mimeType || 'video/mp4');
+        xhr.timeout = 300000; // 5 minutes
+
+        // For React Native, we need to handle file upload differently
+        fetch(fileUri)
+          .then(response => response.blob())
+          .then(blob => {
+            xhr.send(blob);
+          })
+          .catch(error => {
+            reject(new Error(`Failed to read file: ${error.message}`));
+          });
+      });
+    } catch (error) {
+      logger.error('S3 upload error:', handleError(error, 'UploadFileService/uploadToS3'));
+      return {
+        success: false,
+        error: handleError(error, 'UploadFileService/uploadToS3') || error.message || 'S3 upload failed'
+      };
+    }
+  }
+
+  /**
    * @method uploadToLambda
    * @description Core upload method using XHR with progress tracking and retry logic
    */
@@ -123,69 +219,46 @@ class UploadFileService {
         const customFileName = this.generateFileName(fileData.fileName, 'video', index);
         logger.info(`Using filename: ${customFileName}`);
 
-        // Create the upload promise
-        const uploadResult = await new Promise((resolve, reject) => {
-          const xhr = new XMLHttpRequest();
+        // Step 1: Get pre-signed URL from Lambda
+        const presignedUrlResult = await this.getPresignedUrl(customFileName, fileData.mimeType);
 
-          xhr.open('PUT', UPLOAD_CONFIG.VIDEO_UPLOAD_URL);
-          xhr.setRequestHeader('file-name', customFileName);
-          xhr.setRequestHeader('Content-Type', fileData.mimeType || 'video/mp4');
+        if (!presignedUrlResult.success) {
+          throw new Error(presignedUrlResult.error);
+        }
 
-          // Track upload progress
-          xhr.upload.onprogress = (event) => {
-            if (event.lengthComputable && onProgress) {
-              const progress = Math.round((event.loaded / event.total) * 100);
+        const { uploadUrl, fileUrl } = presignedUrlResult;
+
+        // Step 2: Upload directly to S3 using pre-signed URL
+        const uploadResult = await this.uploadToS3(
+          fileData.uri,
+          uploadUrl,
+          fileData.mimeType,
+          (progressEvent) => {
+            if (onProgress) {
+              const progress = Math.round((progressEvent.loaded / progressEvent.total) * 100);
               onProgress({
                 progress,
-                loaded: event.loaded,
-                total: event.total,
+                loaded: progressEvent.loaded,
+                total: progressEvent.total,
                 stage: 'uploading',
                 attempt,
                 index
               });
             }
+          }
+        );
+
+        if (uploadResult.success) {
+          logger.info(`File ${index + 1} uploaded successfully on attempt ${attempt}!`);
+          return {
+            success: true,
+            url: fileUrl,
+            fileName: customFileName,
+            originalData: fileData
           };
-
-          xhr.onload = () => {
-            if (xhr.status >= 200 && xhr.status < 300) {
-              logger.info(`File ${index + 1} uploaded successfully on attempt ${attempt}!`);
-
-              try {
-                const response = JSON.parse(xhr.responseText);
-                const fileUrl = response.url || `${UPLOAD_CONFIG.S3_BUCKET_BASE_URL}${customFileName}`;
-
-                resolve({
-                  success: true,
-                  url: fileUrl,
-                  fileName: customFileName,
-                  originalData: fileData
-                });
-              } catch (error) {
-                const fallbackUrl = `${UPLOAD_CONFIG.S3_BUCKET_BASE_URL}${customFileName}`;
-                resolve({
-                  success: true,
-                  url: fallbackUrl,
-                  fileName: customFileName,
-                  originalData: fileData
-                });
-              }
-            } else {
-              reject(new Error(`Upload failed with status ${xhr.status}`));
-            }
-          };
-
-          xhr.onerror = () => {
-            reject(new Error('Network error during upload'));
-          };
-
-          // Get the blob from the URI and send it
-          fetch(fileData.uri)
-            .then(res => res.blob())
-            .then(blob => xhr.send(blob))
-            .catch(error => reject(error));
-        });
-
-        return uploadResult;
+        } else {
+          throw new Error(uploadResult.error);
+        }
 
       } catch (error) {
         logger.error(`Upload attempt ${attempt} failed:`, handleError(error, 'UploadFileService/uploadToLambda'));
@@ -202,6 +275,12 @@ class UploadFileService {
         }
       }
     }
+
+    // Fallback return in case the loop completes unexpectedly
+    return {
+      success: false,
+      error: 'Upload failed after all retry attempts'
+    };
   }
 
   /**
@@ -502,5 +581,14 @@ class UploadFileService {
     };
   }
 }
+
+/**
+ * @function getUploadService
+ * @description Factory function to create upload service instance
+ */
+export const getUploadService = (user) => {
+    return new UploadFileService(user);
+};
+
 
 export default UploadFileService;

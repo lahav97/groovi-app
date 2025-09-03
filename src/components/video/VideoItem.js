@@ -11,15 +11,17 @@ import {
   InteractionManager,
 } from 'react-native';
 import { Video } from 'expo-av';
-import Icon from 'react-native-vector-icons/Ionicons';
+import { Ionicons } from '@expo/vector-icons';
+import { LinearGradient } from 'expo-linear-gradient';
 import { COLORS } from '../../styles/theme';
 import { useIsFocused } from '@react-navigation/native';
-import VideoInfo from './VideoInfo';
 import * as FileSystem from 'expo-file-system';
+import { createLogger } from '../../utils/Logger';
 
+const logger = createLogger('VideoItem');
 const { width, height: SCREEN_HEIGHT } = Dimensions.get('window');
 
-// SIMPLIFIED VIDEO MANAGER - More reliable state management
+// Global Video Manager to handle play/pause across the app
 class GlobalVideoManager {
   constructor() {
     this.currentActiveVideo = null;
@@ -56,18 +58,18 @@ class GlobalVideoManager {
       }
 
       this.currentActiveVideo = videoId;
-      
+
       // Start the new video
       if (videoRef.current) {
         try {
           await videoRef.current.playAsync();
-          console.log(`▶️ Video playing: ${videoId}`);
+          logger.info(`▶️ Video playing: ${videoId}`);
         } catch (error) {
-          console.warn('Failed to play video:', error);
+          logger.warn('⚠️ Failed to play video:', error);
         }
       }
     } catch (error) {
-      console.error('Error setting active video:', error);
+      logger.error('❌ Error setting active video:', error);
     }
   }
 
@@ -80,16 +82,16 @@ class GlobalVideoManager {
         if (this.currentActiveVideo === videoId) {
           this.currentActiveVideo = null;
         }
-        console.log(`⏸️ Video paused: ${videoId}`);
+        logger.info(`⏸️ Video paused: ${videoId}`);
       }
     } catch (error) {
-      console.error('Error pausing video:', error);
+      logger.error('❌ Error pausing video:', error);
     }
   }
 
   async pauseAllVideos() {
     const pausePromises = [];
-    
+
     for (const [id, ref] of this.allVideoRefs) {
       if (ref.current) {
         pausePromises.push(
@@ -97,7 +99,7 @@ class GlobalVideoManager {
         );
       }
     }
-    
+
     await Promise.all(pausePromises);
     this.currentActiveVideo = null;
   }
@@ -113,34 +115,34 @@ class GlobalVideoManager {
 
 const globalVideoManager = new GlobalVideoManager();
 
-// Background cache queue
+
+// Cache processing for downloaded videos
 const cacheQueue = [];
 let isProcessingCacheQueue = false;
 
 const processCacheQueue = async () => {
   if (isProcessingCacheQueue || cacheQueue.length === 0) return;
-  
+
   isProcessingCacheQueue = true;
-  
+
   while (cacheQueue.length > 0) {
     const cacheOperation = cacheQueue.shift();
     try {
       await cacheOperation();
     } catch (error) {
-      // Silent fail
     }
     await new Promise(resolve => setTimeout(resolve, 10));
   }
-  
+
   isProcessingCacheQueue = false;
 };
 
-// FIXED: Improved VideoItem with better pause/play handling
+// ENHANCED VideoItem with Profile Picture and Better User Info Display
 const VideoItem = memo(({ item, isVisible, height, shouldCache = false }) => {
   const videoRef = useRef(null);
   const isFocused = useIsFocused();
-  
-  // SIMPLIFIED state management
+
+  // Video state management
   const [userPaused, setUserPaused] = useState(false);
   const [showPlayIcon, setShowPlayIcon] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
@@ -148,29 +150,50 @@ const VideoItem = memo(({ item, isVisible, height, shouldCache = false }) => {
   const [localVideoUri, setLocalVideoUri] = useState(null);
   const [isPlaying, setIsPlaying] = useState(false);
   const [videoLoaded, setVideoLoaded] = useState(false);
-  
+
   // Refs
   const retryCountRef = useRef(0);
   const componentMountedRef = useRef(true);
   const cacheAttemptedRef = useRef(false);
   const stableVideoSourceRef = useRef(null);
-  
+
   const videoId = useRef(`video-${item.id || 'unknown'}-${Date.now()}`).current;
-  
+
   const colorScheme = useColorScheme();
   const COLOR = colorScheme === 'dark' ? COLORS.dark : COLORS.light;
 
   // Stable video source
   const videoSource = stableVideoSourceRef.current || localVideoUri || item.videoUrl;
-  
-  // Initialize stable source
-  useEffect(() => {
-    if (!stableVideoSourceRef.current) {
-      stableVideoSourceRef.current = item.videoUrl;
-    }
-  }, [item.videoUrl]);
 
-  // Register with global video manager
+  // Helper functions for user info
+  const getUserDisplayName = useCallback(() => {
+    return item.user || item.username || 'Unknown User';
+  }, [item.user, item.username]);
+
+  const getInstrumentsText = useCallback(() => {
+    if (Array.isArray(item.instruments)) {
+      return item.instruments.join(', ');
+    }
+    return item.description || item.instruments || 'Music Video';
+  }, [item.instruments, item.description]);
+
+  const getUserInitials = useCallback(() => {
+    const name = getUserDisplayName();
+    if (name === 'Unknown User') return 'U';
+
+    const parts = name.split(' ');
+    if (parts.length >= 2) {
+      return (parts[0][0] + parts[1][0]).toUpperCase();
+    }
+    return name.substring(0, 2).toUpperCase();
+  }, [getUserDisplayName]);
+
+  const handleUserPress = useCallback(() => {
+    logger.info('👤 User profile pressed', { username: getUserDisplayName() });
+    // TODO: Navigate to user profile screen
+  }, [getUserDisplayName]);
+
+  // Register video with global manager
   useEffect(() => {
     globalVideoManager.registerVideo(videoRef, videoId);
     return () => {
@@ -178,7 +201,7 @@ const VideoItem = memo(({ item, isVisible, height, shouldCache = false }) => {
     };
   }, [videoId]);
 
-  // FIXED: Simplified playback control
+  // Update playback state based on visibility and focus
   const updatePlaybackState = useCallback(async () => {
     if (!componentMountedRef.current || !videoLoaded) return;
 
@@ -186,10 +209,8 @@ const VideoItem = memo(({ item, isVisible, height, shouldCache = false }) => {
     const isCurrentlyActive = globalVideoManager.isActive(videoId);
 
     if (shouldPlay && !isCurrentlyActive) {
-      // Need to start playing
       await globalVideoManager.setActiveVideo(videoRef, videoId, false);
     } else if (!shouldPlay && isCurrentlyActive) {
-      // Need to stop playing (but don't mark as manually paused unless user did it)
       if (videoRef.current) {
         try {
           await videoRef.current.pauseAsync();
@@ -200,24 +221,22 @@ const VideoItem = memo(({ item, isVisible, height, shouldCache = false }) => {
     }
   }, [isVisible, isFocused, userPaused, videoLoaded, videoId]);
 
-  // Update playback state when dependencies change
   useEffect(() => {
     const timeoutId = setTimeout(updatePlaybackState, 100);
     return () => clearTimeout(timeoutId);
   }, [updatePlaybackState]);
 
-  // Screen focus handling
   useEffect(() => {
     if (!isFocused) {
       globalVideoManager.pauseAllVideos();
     }
   }, [isFocused]);
 
-  // Background caching
+  // Caching logic for video files
   const cacheVideoInBackground = async (videoUrl) => {
     if (!shouldCache || cacheAttemptedRef.current || !componentMountedRef.current) return;
     cacheAttemptedRef.current = true;
-    
+
     const cacheOperation = async () => {
       try {
         if (!videoUrl || typeof videoUrl !== 'string' || !videoUrl.startsWith('http')) {
@@ -226,7 +245,7 @@ const VideoItem = memo(({ item, isVisible, height, shouldCache = false }) => {
 
         const filename = videoUrl.split('/').pop() || `video_${Date.now()}.mp4`;
         const localUri = `${FileSystem.cacheDirectory}videos/${filename}`;
-        
+
         const dirInfo = await FileSystem.getInfoAsync(`${FileSystem.cacheDirectory}videos`);
         if (!dirInfo.exists) {
           await FileSystem.makeDirectoryAsync(`${FileSystem.cacheDirectory}videos`, { intermediates: true });
@@ -237,109 +256,104 @@ const VideoItem = memo(({ item, isVisible, height, shouldCache = false }) => {
           setLocalVideoUri(localUri);
           return localUri;
         }
-        
+
         if (shouldCache && isVisible) {
           const downloadResult = await FileSystem.downloadAsync(videoUrl, localUri);
-          
+
           if (downloadResult.status === 200 && componentMountedRef.current) {
             setLocalVideoUri(localUri);
             return localUri;
           }
         }
-        
+
         return null;
       } catch (error) {
         return null;
       }
     };
-    
+
     cacheQueue.push(cacheOperation);
     setTimeout(processCacheQueue, 0);
   };
 
-  // Cache trigger
   useEffect(() => {
     if (item.videoUrl && shouldCache && isVisible && componentMountedRef.current) {
       cacheVideoInBackground(item.videoUrl);
     }
   }, [item.videoUrl, shouldCache, isVisible]);
 
-  // Play icon timeout
-  useEffect(() => {
-    if (showPlayIcon) {
-      const timeout = setTimeout(() => setShowPlayIcon(false), 800);
-      return () => clearTimeout(timeout);
-    }
-  }, [showPlayIcon]);
-
-  // Loading timeout
-  useEffect(() => {
-    if (isLoading && isPlaying) {
-      const timer = setTimeout(() => setIsLoading(false), 2000);
-      return () => clearTimeout(timer);
-    }
-  }, [isLoading, isPlaying]);
-
-  // Clear error when playing
-  useEffect(() => {
-    if (isPlaying && hasError) {
-      setHasError(false);
-    }
-  }, [isPlaying, hasError]);
-
-  // FIXED: Better user pause/play toggle
+  // Handle play/pause toggle
   const handleTogglePlayback = useCallback(async () => {
     if (!componentMountedRef.current || !videoLoaded) return;
-    
+
     const newUserPaused = !userPaused;
     setUserPaused(newUserPaused);
     setShowPlayIcon(true);
-    
+
     if (newUserPaused) {
-      // User wants to pause
       await globalVideoManager.pauseVideo(videoId);
     } else {
-      // User wants to play
       await globalVideoManager.setActiveVideo(videoRef, videoId, true);
     }
   }, [userPaused, videoLoaded, videoId]);
 
-  // Video load handler
+  // Handle video load event
   const handleVideoLoad = useCallback(() => {
     if (!componentMountedRef.current) return;
-    
+
     setVideoLoaded(true);
     setIsLoading(false);
     setHasError(false);
     retryCountRef.current = 0;
-    
-    // Trigger playback state update after load
+
     setTimeout(updatePlaybackState, 50);
   }, [updatePlaybackState]);
 
-  // Error handling
+  // Handle video error event
   const handleVideoError = useCallback((error) => {
     if (!componentMountedRef.current) return;
-    
-    console.warn('Video error:', error);
-    
+
+    logger.error('❌ Video error:', error);
+
     const errorString = error?.toString() || '';
-    
-    // Handle corrupted cache
-    if (localVideoUri && (errorString.includes('j7.x$b') || errorString.includes('could read'))) {
-      if (!isPlaying) {
-        setLocalVideoUri(null);
-        cacheAttemptedRef.current = false;
-        stableVideoSourceRef.current = item.videoUrl;
+
+    // FIXED: Better handling of cache file errors
+    if (localVideoUri && (
+      errorString.includes('j7.x$b') ||
+      errorString.includes('could read') ||
+      errorString.includes('FileNotFoundException') ||
+      errorString.includes('ENOENT') ||
+      errorString.includes('No such file or directory')
+    )) {
+      logger.warn('⚠️ Cached video file not found, falling back to original URL');
+
+      // Clear the corrupted cache and reset to original source
+      setLocalVideoUri(null);
+      cacheAttemptedRef.current = false;
+      stableVideoSourceRef.current = item.videoUrl;
+
+      // Try to reload with original URL
+      if (videoRef.current) {
+        videoRef.current.unloadAsync().then(() => {
+          if (componentMountedRef.current) {
+            videoRef.current.loadAsync({ uri: item.videoUrl }, {}, false);
+          }
+        }).catch(() => {
+          // If reload fails, mark as error
+          setHasError(true);
+          setIsLoading(false);
+          setIsPlaying(false);
+          setVideoLoaded(false);
+        });
       }
+      return; // Don't set error state, try to recover
     }
-    
+
     setHasError(true);
     setIsLoading(false);
     setIsPlaying(false);
     setVideoLoaded(false);
-    
-    // Retry logic
+
     if (retryCountRef.current < 1) {
       retryCountRef.current += 1;
       setTimeout(() => {
@@ -348,22 +362,21 @@ const VideoItem = memo(({ item, isVisible, height, shouldCache = false }) => {
         }
       }, 1000);
     }
-  }, [localVideoUri, isPlaying, item.videoUrl]);
+  }, [localVideoUri, item.videoUrl]);
 
-  // Playback status handler
+  // Handle playback status updates from the video
   const handlePlaybackStatusUpdate = useCallback((status) => {
     if (!componentMountedRef.current) return;
-    
+
     if (status.isLoaded) {
       const newIsPlaying = status.isPlaying && !status.isPaused;
       setIsPlaying(newIsPlaying);
-      
+
       if (newIsPlaying) {
         setIsLoading(false);
         setHasError(false);
       }
-      
-      // Auto-replay when finished
+
       if (status.didJustFinish && !status.isLooping && videoRef.current) {
         const shouldStillPlay = isVisible && isFocused && !userPaused;
         if (shouldStillPlay) {
@@ -373,9 +386,10 @@ const VideoItem = memo(({ item, isVisible, height, shouldCache = false }) => {
     }
   }, [isVisible, isFocused, userPaused]);
 
+  // Retry loading the video after an error
   const retryLoadVideo = useCallback(async () => {
     if (!componentMountedRef.current || !item.videoUrl) return;
-    
+
     try {
       if (videoRef.current) {
         await videoRef.current.unloadAsync();
@@ -387,13 +401,13 @@ const VideoItem = memo(({ item, isVisible, height, shouldCache = false }) => {
     }
   }, [item.videoUrl]);
 
-  // Component cleanup
+  // Component mount/unmount logic
   useEffect(() => {
     componentMountedRef.current = true;
-    
+
     return () => {
       componentMountedRef.current = false;
-      
+
       if (videoRef.current) {
         videoRef.current.pauseAsync().catch(() => {});
         videoRef.current.unloadAsync().catch(() => {});
@@ -406,14 +420,25 @@ const VideoItem = memo(({ item, isVisible, height, shouldCache = false }) => {
     return (
       <View style={[styles.videoContainer, { backgroundColor: COLOR.background, height }]}>
         <View style={styles.centerOverlay}>
-          <Icon name="videocam-off" size={60} color="#666" />
+          <Ionicons name="videocam-off" size={60} color="#666" />
           <Text style={styles.errorText}>Invalid video</Text>
         </View>
-        <VideoInfo video={{ 
-          username: item.username || item.user, 
-          description: item.description,
-          userId: item.user_id || item.id
-        }} />
+
+        {/* Bottom Left User Info - Even for Error State */}
+        <View style={styles.bottomLeftContainer}>
+          <View style={styles.userInfoContainer}>
+            <TouchableOpacity onPress={handleUserPress} style={styles.usernameRow}>
+              <LinearGradient colors={['#ff6ec4', '#a855f7', '#3b82f6']} style={styles.profilePicture}>
+                <Text style={styles.profileInitials}>{getUserInitials()}</Text>
+              </LinearGradient>
+              <Text style={styles.username} numberOfLines={1}>@{getUserDisplayName()}</Text>
+            </TouchableOpacity>
+            <View style={styles.instrumentsRow}>
+              <Ionicons name="musical-notes" size={16} color="white" style={styles.musicIcon} />
+              <Text style={styles.instruments} numberOfLines={2}>{getInstrumentsText()}</Text>
+            </View>
+          </View>
+        </View>
       </View>
     );
   }
@@ -448,7 +473,7 @@ const VideoItem = memo(({ item, isVisible, height, shouldCache = false }) => {
         {showPlayIcon && (
           <View style={styles.centerOverlay}>
             <View style={styles.playIconBackground}>
-              <Icon
+              <Ionicons
                 name={userPaused ? 'play' : 'pause'}
                 size={50}
                 color="white"
@@ -474,20 +499,50 @@ const VideoItem = memo(({ item, isVisible, height, shouldCache = false }) => {
             stableVideoSourceRef.current = item.videoUrl;
             setHasError(false);
             setIsLoading(true);
-            setUserPaused(false); // Reset user pause state
+            setUserPaused(false);
             retryLoadVideo();
           }}>
-            <Icon name="refresh" size={20} color="white" />
+            <Ionicons name="refresh" size={20} color="white" />
             <Text style={styles.retryText}>Retry</Text>
           </TouchableOpacity>
         )}
 
-        {/* ENHANCED VIDEO INFO - Pass more user data for navigation */}
-        <VideoInfo video={{ 
-          username: item.username || item.user, 
-          description: item.description,
-          userId: item.user_id || item.id
-        }} />
+        {/* Bottom Left User Info - Instagram Style with Profile Picture */}
+        <View style={styles.bottomLeftContainer}>
+          {/* User Info Container - FIXED HEIGHT TO PREVENT JUMPING */}
+          <View style={styles.userInfoContainer}>
+            {/* Username Row with Profile Picture - Instagram Style */}
+            <TouchableOpacity onPress={handleUserPress} activeOpacity={0.7} style={styles.usernameRow}>
+              {/* Profile Picture with Gradient */}
+              <LinearGradient
+                colors={['#ff6ec4', '#a855f7', '#3b82f6']}
+                style={styles.profilePicture}
+              >
+                <Text style={styles.profileInitials}>
+                  {getUserInitials()}
+                </Text>
+              </LinearGradient>
+
+              {/* Username */}
+              <Text style={styles.username} numberOfLines={1}>
+                @{getUserDisplayName()}
+              </Text>
+            </TouchableOpacity>
+
+            {/* Instruments Row - FIXED HEIGHT TO PREVENT MOVEMENT */}
+            <View style={styles.instrumentsRow}>
+              <Ionicons
+                name="musical-notes"
+                size={16}
+                color="white"
+                style={styles.musicIcon}
+              />
+              <Text style={styles.instruments} numberOfLines={2}>
+                {getInstrumentsText()}
+              </Text>
+            </View>
+          </View>
+        </View>
       </View>
     </TouchableWithoutFeedback>
   );
@@ -547,6 +602,91 @@ const styles = StyleSheet.create({
     fontSize: 14,
     marginTop: 8,
   },
+
+  // BOTTOM LEFT USER INFO - MOVED HIGHER UP FOR BETTER POSITIONING
+  bottomLeftContainer: {
+    position: 'absolute',
+    bottom: 80, // MOVED UP from 0 to 80px - much higher positioning
+    left: 0,
+    right: 80, // Leave space for potential right side actions
+    height: 140, // Fixed height container - prevents any movement
+    zIndex: 5,
+  },
+  textGradient: {
+    position: 'absolute',
+    bottom: 0,
+    left: 0,
+    right: 0,
+    height: 140, // Same as container height
+  },
+  userInfoContainer: {
+    position: 'absolute',
+    bottom: 45, // MOVED UP from 25 to 45px - higher positioning within container
+    left: 20,   // Fixed distance from left - NEVER CHANGES
+    right: 20,  // Fixed distance from right edge
+    height: 90, // Fixed height - PREVENTS VERTICAL MOVEMENT
+    justifyContent: 'space-between', // Distribute content evenly
+  },
+
+  // USERNAME ROW WITH PROFILE PICTURE - Instagram Style
+  usernameRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    height: 40, // Fixed height - PREVENTS USERNAME FROM MOVING
+    marginBottom: 8, // Fixed spacing
+  },
+  profilePicture: {
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginRight: 12,
+    shadowColor: 'rgba(0, 0, 0, 0.3)',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 1,
+    shadowRadius: 4,
+  },
+  profileInitials: {
+    color: 'white',
+    fontWeight: 'bold',
+    fontSize: 14,
+  },
+  username: {
+    color: 'white',
+    fontSize: 18,
+    fontWeight: 'bold',
+    flex: 1,
+    textShadowColor: 'rgba(0, 0, 0, 0.75)',
+    textShadowOffset: { width: 1, height: 1 },
+    textShadowRadius: 3,
+  },
+
+  // INSTRUMENTS ROW - FIXED HEIGHT TO PREVENT JUMPING
+  instrumentsRow: {
+    flexDirection: 'row',
+    alignItems: 'flex-start', // Align to top of container
+    height: 42, // Fixed height - PREVENTS INSTRUMENTS FROM MOVING UP/DOWN
+    paddingTop: 2,
+  },
+  musicIcon: {
+    marginRight: 8,
+    marginTop: 2, // Slight adjustment for better alignment
+    textShadowColor: 'rgba(0, 0, 0, 0.75)',
+    textShadowOffset: { width: 1, height: 1 },
+    textShadowRadius: 3,
+  },
+  instruments: {
+    color: 'white',
+    fontSize: 14,
+    fontWeight: '500',
+    flex: 1,
+    lineHeight: 18, // Fixed line height - CONSISTENT TEXT SPACING
+    textShadowColor: 'rgba(0, 0, 0, 0.75)',
+    textShadowOffset: { width: 1, height: 1 },
+    textShadowRadius: 3,
+  },
 });
+
 
 export default VideoItem;
