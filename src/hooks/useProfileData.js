@@ -2,7 +2,7 @@
  * @module useProfileData
  * Custom hook for profile data loading with instant cache and background refresh
  * Handles all profile loading logic, caching, and state management
- *  Consistent instruments formatting to prevent object rendering errors
+ *  Consistent instruments/genres/videos formatting to prevent rendering errors
  *  Compatible with updated BackgroundDataService and cacheManager
  */
 
@@ -14,97 +14,141 @@ import { fetchUserProfile } from '../services/profileService';
 import { getProfileCache, cacheUserProfile, clearAllCaches } from '../utils/cacheManager';
 import {
     handleError,
-    createNetworkError,
-    createAuthError,
     ERROR_MESSAGES
 } from '../utils/errors';
+import { createLogger } from '../utils/Logger';
 
-/**
- *  Safe field formatter to prevent object rendering errors
- */
+const logger = createLogger('useProfileData');
+
+/* ------------------------ Small parsing/normalization helpers ------------------------ */
+
+/** Try JSON.parse if the value looks like JSON */
+const tryParseJSON = (value) => {
+    if (typeof value !== 'string') return value;
+    const v = value.trim();
+    if (!v) return value;
+    const first = v[0];
+    const last = v[v.length - 1];
+    if ((first === '{' && last === '}') || (first === '[' && last === ']')) {
+        try { return JSON.parse(v); } catch { return value; }
+    }
+    return value;
+};
+
+/** Parse a *simple* Postgres TEXT[] string like "{a,b,c}" into an array of strings */
+const parsePgArray = (value) => {
+    if (typeof value !== 'string') return value;
+    const v = value.trim();
+    if (!(v.startsWith('{') && v.endsWith('}'))) return value;
+
+    // Remove braces, then split by comma not inside quotes (simple case: URLs rarely contain commas)
+    const inner = v.slice(1, -1);
+    // Strip optional quotes around items and unescape common sequences
+    return inner
+        .split(',')
+        .map(item => item.trim())
+        .map(item => {
+            // remove wrapping quotes if present
+            if ((item.startsWith('"') && item.endsWith('"')) || (item.startsWith("'") && item.endsWith("'"))) {
+                item = item.slice(1, -1);
+            }
+            return item.replace(/\\"/g, '"').replace(/\\'/g, "'");
+        })
+        .filter(Boolean);
+};
+
+/** Ensure an array (handles JSON strings and PG array strings) */
+const ensureArray = (value) => {
+    if (Array.isArray(value)) return value;
+    const maybeJson = tryParseJSON(value);
+    if (Array.isArray(maybeJson)) return maybeJson;
+    const maybePg = parsePgArray(maybeJson);
+    if (Array.isArray(maybePg)) return maybePg;
+    return [];
+};
+
+/** Ensure a plain object (handles JSON string) */
+const ensureObject = (value) => {
+    if (value && typeof value === 'object' && !Array.isArray(value)) return value;
+    const maybeJson = tryParseJSON(value);
+    if (maybeJson && typeof maybeJson === 'object' && !Array.isArray(maybeJson)) return maybeJson;
+    return null;
+};
+
+/** Safe field formatter to prevent object rendering errors (fallback to default text) */
 const formatFieldSafely = (value, defaultValue = 'Not specified') => {
-    if (!value || value === null || value === undefined) return defaultValue;
+    if (value === null || value === undefined) return defaultValue;
 
-    // Handle objects like {Trumpet: true, "Lead Vocals": true}
-    if (typeof value === 'object' && !Array.isArray(value)) {
-        const keys = Object.keys(value);
+    // If JSON string -> parse first
+    const parsed = tryParseJSON(value);
+
+    if (typeof parsed === 'object' && !Array.isArray(parsed)) {
+        const keys = Object.keys(parsed);
         return keys.length > 0 ? keys.join(', ') : defaultValue;
     }
 
-    // Handle arrays
-    if (Array.isArray(value)) {
-        const filtered = value.filter(item => item && item !== null && item !== undefined);
+    if (Array.isArray(parsed)) {
+        const filtered = parsed.filter(item => item !== null && item !== undefined && item !== '');
         return filtered.length > 0 ? filtered.join(', ') : defaultValue;
     }
 
-    // Handle strings and other types
-    const stringValue = String(value).trim();
+    const stringValue = String(parsed).trim();
     return stringValue || defaultValue;
 };
 
-/**
- *  Normalize profile data to prevent rendering errors
- */
+/* ------------------------ Profile normalization ------------------------ */
+
 const normalizeProfileData = (profileData) => {
     if (!profileData) return null;
 
+    // Map common naming mismatches from backend
+    const addressOrLocation = profileData.location ?? profileData.address ?? null;
+
+    // Instruments may come as object, array, JSON string, or plain string
+    const asObject = ensureObject(profileData.instruments);
+    const asArray = ensureArray(profileData.instruments);
+
+    // Genres/videos may come as array, JSON array string, or PG TEXT[] string
+    const genresArray = ensureArray(profileData.genres);
+    const videosArray = ensureArray(profileData.videos);
+
+    // Build a friendly instruments string
+    const instrumentsString = (() => {
+        if (asObject) {
+            const keys = Object.keys(asObject);
+            return keys.length > 0 ? keys.join(', ') : 'Guitar, Acoustic Guitar';
+        }
+        if (asArray.length > 0) {
+            return asArray.join(', ');
+        }
+        // fallback to raw string (safe format)
+        return formatFieldSafely(profileData.instruments, 'Guitar, Acoustic Guitar');
+    })();
+
     return {
         ...profileData,
-        //  Ensure these fields are always safe for rendering
+        // display-safe primitives
         username: formatFieldSafely(profileData.username, 'Unknown'),
         bio: formatFieldSafely(profileData.bio, 'Music enthusiast looking to connect!'),
-        location: formatFieldSafely(profileData.location, 'Unknown'),
-        age: profileData.age && typeof profileData.age === 'number' ? profileData.age : null,
-        rating: profileData.rating && typeof profileData.rating === 'number' ? profileData.rating : null,
+        location: formatFieldSafely(addressOrLocation, 'Unknown'),
 
-        //  Normalize instruments - always safe string format
-        instruments: (() => {
-            const instruments = profileData.instruments;
-            if (!instruments) return 'Guitar, Acoustic Guitar';
-
-            if (typeof instruments === 'object' && !Array.isArray(instruments)) {
-                const keys = Object.keys(instruments);
-                return keys.length > 0 ? keys.join(', ') : 'Guitar, Acoustic Guitar';
-            }
-
-            if (Array.isArray(instruments)) {
-                const filtered = instruments.filter(i => i && i !== null && i !== undefined);
-                return filtered.length > 0 ? filtered.join(', ') : 'Guitar, Acoustic Guitar';
-            }
-
-            return String(instruments) || 'Guitar, Acoustic Guitar';
-        })(),
-
-        //  Normalize genres
-        genres: (() => {
-            const genres = profileData.genres;
-            if (!genres) return [];
-
-            if (typeof genres === 'object' && !Array.isArray(genres)) {
-                return Object.keys(genres);
-            }
-
-            if (Array.isArray(genres)) {
-                return genres.filter(g => g && g !== null && g !== undefined);
-            }
-
-            return [String(genres)];
-        })(),
-
-        //  Ensure videos is always an array
-        videos: Array.isArray(profileData.videos) ? profileData.videos : [],
-
-        //  Ensure numeric fields are safe
+        // numbers safe
+        age: typeof profileData.age === 'number' ? profileData.age : null,
+        rating: typeof profileData.rating === 'number' ? profileData.rating : null,
         followers: typeof profileData.followers === 'number' ? profileData.followers : 0,
         following: typeof profileData.following === 'number' ? profileData.following : 0,
         likes: typeof profileData.likes === 'number' ? profileData.likes : 0,
+
+        // final normalized collections
+        instruments: instrumentsString,      // string for easy rendering
+        instruments_raw: asObject || asArray, // keep raw form if the UI needs it
+        genres: genresArray,                 // stay array (chips UI, etc.)
+        videos: videosArray,                 // always array
     };
 };
 
-/**
- * Custom hook for profile data management
- * @returns {Object} Profile data, loading states, and handler functions
- */
+/* ------------------------------------ Hook ------------------------------------ */
+
 export const useProfileData = () => {
     const { user, signOut } = useAuth();
     const [profile, setProfile] = useState(null);
@@ -115,45 +159,28 @@ export const useProfileData = () => {
     const [loadSource, setLoadSource] = useState('');
     const [isBackgroundRefreshing, setIsBackgroundRefreshing] = useState(false);
 
-    // Track if we've loaded from cache to avoid duplicate loads
-    const hasLoadedFromCache = useRef(false);
     const backgroundRefreshTimeout = useRef(null);
     const mountedRef = useRef(true);
 
-    /**
-     * Handle logout with complete data cleanup
-     */
+    /* ----------------------------- Logout with cleanup ----------------------------- */
+
     const handleLogout = async () => {
         Alert.alert(
             'Sign Out',
             'Are you sure you want to sign out? This will clear all cached data from your device.',
             [
-                {
-                    text: 'Cancel',
-                    style: 'cancel',
-                },
-                {
-                    text: 'Sign Out',
-                    style: 'destructive',
-                    onPress: performLogout,
-                },
+                { text: 'Cancel', style: 'cancel' },
+                { text: 'Sign Out', style: 'destructive', onPress: performLogout },
             ]
         );
     };
 
-    /**
-     * Perform the actual logout with data cleanup
-     */
     const performLogout = async () => {
         setLoggingOut(true);
-
         try {
-            //  Enhanced error handling for cache clearing
-            try {
-                await clearAllCaches();
-            } catch (cacheError) {
+            // Best effort cache clear
+            try { await clearAllCaches(); } catch (cacheError) {
                 console.warn('⚠️ Cache clear failed during logout:', cacheError);
-                // Continue with logout even if cache clear fails
             }
 
             const result = await signOut();
@@ -165,8 +192,6 @@ export const useProfileData = () => {
                     setError(null);
                 }
             } else {
-                console.error('❌ useProfileData: Logout failed:', result.error);
-
                 if (mountedRef.current) {
                     Alert.alert(
                         'Logout Failed',
@@ -175,69 +200,54 @@ export const useProfileData = () => {
                     );
                 }
             }
-        } catch (error) {
-            console.error('❌ useProfileData: Error during logout:', error);
-
+        } catch (err) {
             if (mountedRef.current) {
                 Alert.alert(
                     'Logout Error',
-                    handleError(error, 'useProfileData/performLogout') || ERROR_MESSAGES.GENERAL.UNKNOWN_ERROR,
+                    handleError(err, 'useProfileData/performLogout') || ERROR_MESSAGES.GENERAL.UNKNOWN_ERROR,
                     [{ text: 'OK' }]
                 );
             }
         } finally {
-            if (mountedRef.current) {
-                setLoggingOut(false);
-            }
+            if (mountedRef.current) setLoggingOut(false);
         }
     };
 
-    /**
-     * INSTANT cache loading - shows profile immediately, refreshes in background
-     *  Normalize cached data before setting state and enhanced error handling
-     */
+    /* ------------------------------- Load strategies ------------------------------- */
+
+    // INSTANT cache → background refresh
     const loadProfileInstantly = async () => {
         try {
             const userEmail = user?.email || await getCurrentUserEmail();
             if (!userEmail) {
-                if (mountedRef.current) {
-                    setError(ERROR_MESSAGES.AUTH.USER_NOT_FOUND);
-                }
+                if (mountedRef.current) setError(ERROR_MESSAGES.AUTH.USER_NOT_FOUND);
                 return;
             }
 
-            // STEP 1: INSTANT CACHE DISPLAY (NO LOADING SCREEN!)
+            // STEP 1: INSTANT CACHE (no spinner)
             try {
                 const cachedProfile = await getProfileCache(userEmail);
-
                 if (cachedProfile && mountedRef.current) {
-                    //  Normalize cached data to prevent object rendering errors
-                    const normalizedProfile = normalizeProfileData(cachedProfile);
-                    setProfile(normalizedProfile);
+                    const normalized = normalizeProfileData(cachedProfile);
+                    setProfile(normalized);
                     setLoadSource('permanent_cache');
                     setError(null);
-                    hasLoadedFromCache.current = true;
 
-                    console.log('✅ Loaded normalized cached profile:', {
-                        username: normalizedProfile.username,
-                        instruments: normalizedProfile.instruments,
-                        instrumentsType: typeof normalizedProfile.instruments
+                    logger.info('✅ Loaded normalized cached profile', {
+                        username: normalized.username,
+                        videos: normalized.videos?.length || 0
                     });
 
-                    // STEP 2: SILENT BACKGROUND REFRESH (user doesn't see this)
+                    // STEP 2: SILENT BACKGROUND REFRESH
                     silentBackgroundRefresh(userEmail);
-
-                    return normalizedProfile;
+                    return normalized;
                 }
             } catch (cacheError) {
                 console.warn('⚠️ Cache loading failed:', cacheError);
-                // Continue with fresh load
             }
 
-            // STEP 3: NO CACHE - LOAD FRESH (first time only)
-            if (mountedRef.current) {
-                setLoading(true);
-            }
+            // STEP 3: NO CACHE → FRESH LOAD
+            if (mountedRef.current) setLoading(true);
             await loadFreshProfile(userEmail);
 
         } catch (err) {
@@ -249,10 +259,7 @@ export const useProfileData = () => {
         }
     };
 
-    /**
-     * SILENT background refresh - updates data without user knowing
-     *  Normalize fresh data before comparison and caching
-     */
+    // SILENT background refresh (no UI blocking)
     const silentBackgroundRefresh = async (userEmail) => {
         try {
             if (backgroundRefreshTimeout.current) {
@@ -265,178 +272,179 @@ export const useProfileData = () => {
                 setIsBackgroundRefreshing(true);
 
                 try {
-                    const freshProfile = await fetchUserProfile('email', userEmail);
+                    const fresh = await fetchUserProfile('email', userEmail);
+                    if (!mountedRef.current) return;
 
-                    if (freshProfile && mountedRef.current) {
-                        //  Normalize both profiles before comparison
-                        const normalizedFresh = normalizeProfileData(freshProfile);
-                        const normalizedCurrent = normalizeProfileData(profile);
+                    const normalizedFresh = normalizeProfileData(fresh);
+                    const normalizedCurrent = normalizeProfileData(profile);
 
-                        const currentProfileString = JSON.stringify(normalizedCurrent);
-                        const freshProfileString = JSON.stringify(normalizedFresh);
+                    const currentStr = JSON.stringify(normalizedCurrent);
+                    const freshStr = JSON.stringify(normalizedFresh);
 
-                        if (currentProfileString !== freshProfileString) {
-                            setProfile(normalizedFresh);
-                            setLoadSource('background_refresh');
+                    if (currentStr !== freshStr) {
+                        setProfile(normalizedFresh);
+                        setLoadSource('background_refresh');
+                        logger.info('🔄 Profile updated via background refresh');
+                    }
 
-                            console.log('🔄 Profile updated via background refresh');
-                        }
-
-                        //  Cache the normalized data with error handling
-                        try {
-                            await cacheUserProfile(normalizedFresh, userEmail);
-                        } catch (cacheError) {
-                            console.warn('⚠️ Background cache failed:', cacheError);
-                        }
+                    try {
+                        await cacheUserProfile(normalizedFresh, userEmail);
+                    } catch (cacheError) {
+                        console.warn('⚠️ Background cache failed:', cacheError);
                     }
                 } catch (refreshError) {
                     console.warn('⚠️ Background refresh failed:', refreshError);
-                    // Silent fail for background refresh
                 } finally {
-                    if (mountedRef.current) {
-                        setIsBackgroundRefreshing(false);
-                    }
+                    if (mountedRef.current) setIsBackgroundRefreshing(false);
                 }
             }, 100);
-
         } catch (error) {
             console.error('❌ Background refresh setup failed:', error);
-            if (mountedRef.current) {
-                setIsBackgroundRefreshing(false);
-            }
+            if (mountedRef.current) setIsBackgroundRefreshing(false);
         }
     };
 
-    /**
-     * Load fresh profile (only when no cache exists)
-     *  Normalize fresh data before setting state and enhanced error handling
-     */
+    // FRESH API load (also used by pull-to-refresh and after uploads)
     const loadFreshProfile = async (userEmail) => {
         try {
             setLoadSource('fresh_api');
-
             const profileData = await fetchUserProfile('email', userEmail);
 
             if (profileData && mountedRef.current) {
-                //  Normalize fresh data to prevent object rendering errors
-                const normalizedProfile = normalizeProfileData(profileData);
-                setProfile(normalizedProfile);
+                const normalized = normalizeProfileData(profileData);
+                setProfile(normalized);
 
-                console.log('✅ Loaded normalized fresh profile:', {
-                    username: normalizedProfile.username,
-                    instruments: normalizedProfile.instruments,
-                    instrumentsType: typeof normalizedProfile.instruments
+                logger.info('✅ Loaded normalized fresh profile', {
+                    username: normalized.username,
+                    videos: normalized.videos?.length || 0
                 });
 
-                //  Cache the normalized data with error handling
                 try {
-                    await cacheUserProfile(normalizedProfile, userEmail);
+                    await cacheUserProfile(normalized, userEmail);
                 } catch (cacheError) {
                     console.warn('⚠️ Fresh profile cache failed:', cacheError);
                 }
-            } else {
-                if (mountedRef.current) {
-                    setError(ERROR_MESSAGES.AUTH.USER_NOT_FOUND);
-                }
+            } else if (mountedRef.current) {
+                setError(ERROR_MESSAGES.AUTH.USER_NOT_FOUND);
             }
         } catch (err) {
             console.error('❌ useProfileData: Fresh profile loading failed:', err);
-            if (mountedRef.current) {
-                setError(handleError(err, 'useProfileData/loadFreshProfile'));
-            }
+            if (mountedRef.current) setError(handleError(err, 'useProfileData/loadFreshProfile'));
         } finally {
-            if (mountedRef.current) {
-                setLoading(false);
-            }
+            if (mountedRef.current) setLoading(false);
         }
     };
 
-    /**
-     * Handle pull-to-refresh (user-initiated refresh)
-     *  Normalize refreshed data and enhanced error handling
-     */
+    // Pull-to-refresh (user-initiated)
     const onRefresh = async () => {
         if (!mountedRef.current) return;
-
         setRefreshing(true);
-
         try {
             const userEmail = user?.email || await getCurrentUserEmail();
-            if (userEmail) {
-                await loadFreshProfile(userEmail);
-            } else {
-                if (mountedRef.current) {
-                    setError(ERROR_MESSAGES.AUTH.USER_NOT_FOUND);
-                }
-            }
-        } catch (error) {
-            console.error('❌ useProfileData: Pull-to-refresh failed:', error);
-            if (mountedRef.current) {
-                setError(handleError(error, 'useProfileData/onRefresh'));
-            }
+            if (userEmail) await loadFreshProfile(userEmail);
+            else if (mountedRef.current) setError(ERROR_MESSAGES.AUTH.USER_NOT_FOUND);
+        } catch (err) {
+            if (mountedRef.current) setError(handleError(err, 'useProfileData/onRefresh'));
         } finally {
-            if (mountedRef.current) {
-                setRefreshing(false);
-            }
+            if (mountedRef.current) setRefreshing(false);
         }
     };
 
-    /**
-     *  Format instruments for display - safe for all formats
-     */
+    /* ------------------------------ Instruments text ------------------------------ */
+
     const formatInstruments = () => {
         if (!profile?.instruments) return 'Guitar, Acoustic Guitar';
-
-        // Since we normalize data, instruments should always be a string now
-        // But keep safety checks for compatibility
         const instruments = profile.instruments;
-
         if (typeof instruments === 'object' && !Array.isArray(instruments)) {
-            //  Use Object.keys() instead of Object.values()
             const keys = Object.keys(instruments);
             return keys.length > 0 ? keys.join(', ') : 'Guitar, Acoustic Guitar';
         }
-
         if (Array.isArray(instruments)) {
-            const filtered = instruments.filter(i => i && i !== null && i !== undefined);
+            const filtered = instruments.filter(i => i !== null && i !== undefined && i !== '');
             return filtered.length > 0 ? filtered.join(', ') : 'Guitar, Acoustic Guitar';
         }
-
         return String(instruments) || 'Guitar, Acoustic Guitar';
     };
 
-    /**
-     * Initialize profile data on mount
-     *  Enhanced cleanup and mount checking
-     */
+    /* --------------------------------- Lifecycle --------------------------------- */
+
     useEffect(() => {
         mountedRef.current = true;
-
         loadProfileInstantly();
 
         return () => {
+            // mark unmounted
             mountedRef.current = false;
 
-            // CRITICAL: Clear all timers
+            // Clear timers only — DO NOT set state during unmount
             if (backgroundRefreshTimeout.current) {
                 clearTimeout(backgroundRefreshTimeout.current);
                 backgroundRefreshTimeout.current = null;
             }
-
-            // CRITICAL: Reset states to free memory
-            setProfile(null);
-            setLoading(false);
-            setError(null);
-            setRefreshing(false);
-            setIsBackgroundRefreshing(false);
-            hasLoadedFromCache.current = false;
-
-            console.log('✅ useProfileData cleanup complete');
         };
+        // eslint-disable-next-line react-hooks/exhaustive-deps
     }, []);
 
+    /**
+     * Auto-sync with AuthContext user data changes (e.g., after upload the
+     * Upload screen updates the user in context → reflect here immediately).
+     */
+    useEffect(() => {
+        if (!user || !mountedRef.current) return;
+
+        logger.debug('🔄 AuthContext user changed; checking profile sync', {
+            username: user.username,
+            contextVideosCount: Array.isArray(user.videos) ? user.videos.length : 0,
+            profileVideosCount: Array.isArray(profile?.videos) ? profile.videos.length : 0
+        });
+
+        if (Array.isArray(user.videos) && profile) {
+            const currentVideos = profile.videos || [];
+            const userVideos = user.videos;
+
+            if (JSON.stringify(currentVideos) !== JSON.stringify(userVideos)) {
+                logger.info('📹 Syncing profile.videos with context user.videos', {
+                    currentCount: currentVideos.length,
+                    newCount: userVideos.length
+                });
+
+                const updatedProfile = normalizeProfileData({
+                    ...profile,
+                    ...user,
+                    videos: userVideos
+                });
+
+                setProfile(updatedProfile);
+
+                if (user.email) {
+                    cacheUserProfile(updatedProfile, user.email).catch(cacheError => {
+                        logger.warn('⚠️ Failed to cache synced profile', { error: cacheError.message });
+                    });
+                }
+            }
+        }
+        // Only react to the specific fields we care about
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [user?.videos, user?.username]);
+
+    /* ---------------------- Public method for post-upload refresh ---------------------- */
+
+    /**
+     * Force a fresh server fetch (use this right after a successful upload+DB update).
+     * Example usage from VideoUploadScreen:
+     *   const { refreshFromServer } = useProfileData();
+     *   await refreshFromServer();
+     */
+    const refreshFromServer = async () => {
+        const userEmail = user?.email || await getCurrentUserEmail();
+        if (!userEmail) return;
+        await loadFreshProfile(userEmail);
+    };
+
+    /* ----------------------------------- Return ----------------------------------- */
+
     return {
-        // Profile data
+        // data
         profile,
         loading,
         error,
@@ -445,12 +453,13 @@ export const useProfileData = () => {
         loadSource,
         isBackgroundRefreshing,
 
-        // Handler functions
+        // actions
         handleLogout,
         onRefresh,
         loadProfileInstantly,
+        refreshFromServer,     // ← call this after video upload succeeds
 
-        // Utility functions
+        // utils
         formatInstruments,
     };
 };

@@ -5,6 +5,10 @@ import BackgroundDataService from '../services/BackgroundDataService';
 import NotificationService from '../services/NotificationService';
 import { saveUserEmail, clearUserEmail } from '../utils/userUtils';
 import { getUsernameForChat } from '../services/profileService';
+import { fetchUserProfile } from '../services/profileService';
+import { createLogger } from '../utils/Logger';
+
+const logger = createLogger('AuthContext');
 
 const AuthContext = createContext(null);
 
@@ -400,6 +404,48 @@ export const AuthProvider = ({ children }) => {
         lastLoadingEmail.current = lastEmail;
     };
 
+    // Refresh user profile data from the server
+    const refreshUserProfile = async () => {
+        try {
+            if (!user) {
+                logger.warn('⚠️ No user found for profile refresh');
+                return { success: false, error: 'No user found' };
+            }
+
+            logger.info('🔄 Refreshing user profile data');
+
+            // Fetch fresh profile data using username (most reliable identifier)
+            const profileResult = await fetchUserProfile('username', user.username);
+
+            if (profileResult && profileResult.success && profileResult.profile) {
+                logger.info('✅ Profile refreshed successfully', {
+                    username: profileResult.profile.username,
+                    videosCount: profileResult.profile.videos?.length || 0
+                });
+
+                // Update the user context with fresh profile data
+                const updatedUser = {
+                    ...user,
+                    ...profileResult.profile,
+                    // Preserve auth-specific fields
+                    id: user.id,
+                    hasCompletedOnboarding: user.hasCompletedOnboarding
+                };
+
+                setUser(updatedUser);
+                await AsyncStorage.setItem('userData', JSON.stringify(updatedUser));
+
+                return { success: true, profile: profileResult.profile };
+            } else {
+                logger.warn('⚠️ Profile refresh returned no data');
+                return { success: false, error: 'No profile data returned' };
+            }
+        } catch (error) {
+            logger.error('❌ Failed to refresh user profile', { error: error.message });
+            return { success: false, error: error.message };
+        }
+    };
+
     // Get background loading status
     const getBackgroundLoadingStatus = () => {
         return BackgroundDataService.getLoadingStatus();
@@ -432,6 +478,7 @@ export const AuthProvider = ({ children }) => {
                 resendConfirmationCode,
                 checkUserExistsInCognito,
                 completeOnboarding,
+                refreshUserProfile,
 
                 // Background loading methods
                 getBackgroundLoadingStatus,
@@ -444,3 +491,4 @@ export const AuthProvider = ({ children }) => {
 };
 
 export const useAuth = () => useContext(AuthContext);
+

@@ -15,6 +15,7 @@ import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
 import { useNavigation } from '@react-navigation/native';
 import { getUploadService } from '../../services/uploadFileService';
+import axios from 'axios';
 import { 
   processBatchVideos, 
   createVideoManager, 
@@ -33,7 +34,7 @@ const logger = createLogger('VideoUploadScreen');
 const VideoUploadScreen = () => {
   const navigation = useNavigation();
   const isDark = useColorScheme() === 'dark';
-  const { user } = useAuth();
+  const { user, refreshUserProfile } = useAuth();
   const uploadService = getUploadService(user);
   
   const [videos, setVideos] = useState([]);
@@ -44,6 +45,7 @@ const VideoUploadScreen = () => {
   const [currentUploadingIndex, setCurrentUploadingIndex] = useState(null);
   const [videoKeys, setVideoKeys] = useState(new Set());
   const [uploadProgress, setUploadProgress] = useState({});
+
 
   // Create video manager instance
   const videoManager = createVideoManager(videos, videoThumbnails, videoUrls, uploadStatuses);
@@ -156,26 +158,24 @@ const VideoUploadScreen = () => {
             ...prev,
             [progressData.videoIndex]: progressData.currentProgress
           }));
-          
-          logger.debug(`Upload progress: Video ${progressData.videoIndex + 1}/${progressData.totalVideos} - ${progressData.currentProgress}% (${progressData.stage})`);
-        },
+          },
         // Single video complete callback
-        (index, result) => {
-          const actualIndex = videos.findIndex(v => v === videosToUpload[index]);
-          
-          if (result.success) {
-            // Update arrays with successful upload
-            const newArrays = videoManager.updateVideo(actualIndex, {
-              videoData: result.videoObject,
-              url: result.videoUrl,
-              status: { uploading: false, uploaded: true, error: null }
-            });
+          (index, result) => {
+              const actualIndex = videos.findIndex(v => v === videosToUpload[index]);
+
+              if (result.success) {
+                  // ✅ FIXED - use correct field names
+                  const newArrays = videoManager.updateVideo(actualIndex, {
+                      videoData: result.originalData,  // ✅ FIXED
+                      url: result.url,                 // ✅ FIXED
+                      status: { uploading: false, uploaded: true, error: null }
+                  });
             
             setVideos(newArrays.videos);
             setVideoUrls(newArrays.urls);
             setUploadStatuses(newArrays.statuses);
-            
-            logger.info(`✅ Video ${index + 1} uploaded successfully: ${result.videoUrl}`);
+
+            logger.info(`✅ Video ${index + 1} uploaded successfully: ${result.url}`);
           } else {
             // Update status with error
             const newArrays = videoManager.updateVideo(actualIndex, {
@@ -193,6 +193,90 @@ const VideoUploadScreen = () => {
           maxRetries: 3
         }
       );
+
+// Save uploaded video URLs to user profile
+        if (uploadResult.stats.uploaded > 0) {
+            try {
+                const uploadedVideoUrls = uploadResult.uploadedUrls;
+                const username = user?.username || user?.email;
+
+                logger.info('🔍 Getting user profile to append new videos', {
+                    username,
+                    newVideosCount: uploadedVideoUrls.length,
+                    newVideoUrls: uploadedVideoUrls
+                });
+
+                // Step 1: Get user profile using load_profile Lambda
+                const profileResponse = await axios.get(`https://lynqhqnijd.execute-api.us-east-1.amazonaws.com/groovi/load_profile?field=username&value=${username}`);
+
+                logger.info('🔍 Profile loaded successfully', {
+                    status: profileResponse.status,
+                    hasData: !!profileResponse.data
+                });
+
+                if (profileResponse.status === 200 && profileResponse.data) {
+                    // Step 2: Get existing videos from profile
+                    const existingVideos = profileResponse.data.videos || [];
+
+                    // FIXED: Only append the NEW uploaded videos, not all videos
+                    const combinedVideos = [...existingVideos, ...uploadedVideoUrls];
+
+                    logger.info('🔄 Combining videos with existing profile', {
+                        existingCount: existingVideos.length,
+                        existingVideos: existingVideos,
+                        newCount: uploadedVideoUrls.length,
+                        newVideos: uploadedVideoUrls,
+                        totalCount: combinedVideos.length,
+                        finalCombinedVideos: combinedVideos
+                    });
+
+                    // Step 3: Update with combined videos using build_profile PUT
+                    const updateResponse = await axios.put('https://9u6y4sfrn2.execute-api.us-east-1.amazonaws.com/groovi/build_profile', {
+                        username: username,
+                        videos: combinedVideos
+                    });
+
+                    logger.info('✅ Videos successfully appended to user profile', {
+                        updateStatus: updateResponse.status,
+                        totalVideos: combinedVideos.length,
+                        sentVideos: combinedVideos
+                    });
+
+                    // NEW: Auto-refresh profile data after successful update
+                    logger.info('🔄 Triggering automatic profile refresh after video upload');
+                    try {
+                        const refreshResult = await refreshUserProfile();
+                        if (refreshResult.success) {
+                            logger.info('✅ Profile auto-refresh completed successfully', {
+                                videosCount: refreshResult.profile?.videos?.length || 0,
+                                refreshedVideos: refreshResult.profile?.videos
+                            });
+                        } else {
+                            logger.warn('⚠️ Profile auto-refresh failed but continuing', {
+                                error: refreshResult.error
+                            });
+                        }
+                    } catch (refreshError) {
+                        logger.error('❌ Profile auto-refresh error (non-blocking)', {
+                            error: refreshError.message
+                        });
+                        // Don't block the upload flow if refresh fails
+                    }
+                } else {
+                    logger.error('❌ User profile not found or invalid response', {
+                        status: profileResponse.status,
+                        username
+                    });
+                }
+            } catch (error) {
+                logger.error('❌ Failed to save videos to user profile', {
+                    error: error.message,
+                    status: error.response?.status,
+                    responseData: error.response?.data,
+                    username: user?.username || user?.email
+                });
+            }
+        }
 
       logger.info('🏁 Upload complete', uploadResult.stats);
 
@@ -686,3 +770,4 @@ const styles = StyleSheet.create({
 });
 
 export default VideoUploadScreen;
+

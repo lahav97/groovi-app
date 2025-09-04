@@ -530,7 +530,10 @@ const ProfileSetupScreen = () => {
             try {
                 const res = await axios.post(BUILD_PROFILE_API_URL, requestBody, {
                     timeout: 15000,
-                    headers: { 'Content-Type': 'application/json' }
+                    headers: { 'Content-Type': 'application/json' },
+                    validateStatus: function (status) {
+                        return status >= 200 && status < 300;
+                    }
                 });
 
                 logger.info('✅ Profile API response received', { status: res.status });
