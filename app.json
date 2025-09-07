@@ -4,14 +4,21 @@
     "slug": "groovi-app",
     "version": "1.0.0",
     "sdkVersion": "52.0.0",
-    "platforms": ["ios", "android", "web"],
+    "platforms": [
+      "ios",
+      "android",
+      "web"
+    ],
     "userInterfaceStyle": "automatic",
     "developmentClient": {
-      "silentLaunch": true
+      "silentLaunch": false
     },
     "android": {
       "package": "com.groovi.app",
-      "permissions": ["WRITE_EXTERNAL_STORAGE", "READ_EXTERNAL_STORAGE"],
+      "permissions": [
+        "WRITE_EXTERNAL_STORAGE",
+        "READ_EXTERNAL_STORAGE"
+      ],
       "newArchEnabled": false
     },
     "ios": {
@@ -21,15 +28,8 @@
     "plugins": [
       "expo-localization",
       "@config-plugins/ffmpeg-kit-react-native",
-      [
-        "expo-notifications",
-        {
-          "icon": "./assets/notification-icon.png",
-          "color": "#ffffff",
-          "sounds": ["./assets/notification-sound.wav"],
-          "mode": "production"
-        }
-      ]
+      "expo-notifications",
+      "expo-font"
     ],
     "scheme": "groovi",
     "extra": {

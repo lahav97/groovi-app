@@ -17,13 +17,13 @@ import { useIsFocused, useNavigation, useRoute } from '@react-navigation/native'
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useFilters } from '../../context/FiltersContext';
 import {
-    fetchInitialMusicians,
-    loadMusicianWithoutFilters,
-    fetchFilteredMusicians,
-    loadMoreFilteredMusicians,
-    resetVideoState,
-    forceResetHasMoreVideos
-} from '../../services/videoService';
+    loadMusiciansForCards as fetchInitialMusicians,
+    loadMoreMusicians as loadMusicianWithoutFilters,
+    loadMusiciansWithFilters as fetchFilteredMusicians,
+    loadMoreMusiciansWithFilters as loadMoreFilteredMusicians,
+    resetMusicianService as resetVideoState,
+    hasMoreMusicians as forceResetHasMoreVideos
+} from '../../services/loadMusicianService';
 import { getDiscoverCache, cacheFeedVideos } from '../../utils/cacheManager';
 import BackgroundDataService from '../../services/BackgroundDataService';
 import {
@@ -50,7 +50,100 @@ const DISCOVER_CONFIG = {
     PRELOAD_DISTANCE: 3,
     THROTTLE_MS: 500,
     ENABLE_CACHE_CLEANUP: false,
-    STABILITY_DELAY: 300,
+    STABILITY_DELAY: 50,
+};
+
+// Enhanced helper function to ensure profile pictures are loaded and verified
+const ensureProfilePicturesLoaded = async (musicians) => {
+    const loadProfilePicture = async (musician) => {
+        // Check both possible field names
+        const pic = musician.profile_picture || musician.profilePicture;
+
+        if (pic && typeof pic === 'string' && pic.startsWith('http')) {
+            return pic;
+        }
+
+        // Generate fallback immediately
+        const fallback = `https://i.pravatar.cc/150?img=${Math.floor(Math.random() * 70) + 1}`;
+        return fallback;
+    };
+
+    // Process all musicians
+    const profilePicturePromises = musicians.map(async (musician) => {
+        try {
+            const profilePicture = await loadProfilePicture(musician);
+            return {
+                ...musician,
+                profilePicture, // Standardize to camelCase
+                profile_picture: profilePicture // Keep both for compatibility
+            };
+        } catch (error) {
+            const fallback = `https://i.pravatar.cc/150?img=${Math.floor(Math.random() * 70) + 1}`;
+            return {
+                ...musician,
+                profilePicture: fallback,
+                profile_picture: fallback
+            };
+        }
+    });
+
+    return await Promise.all(profilePicturePromises);
+};
+
+// Helper function to transform musician data consistently
+const transformMusicianToVideoItem = (musician, index) => {
+    if (!musician || typeof musician !== 'object') {
+        return null;
+    }
+
+    // Ensure profile picture is always set
+    let profilePicture = musician.profilePicture || musician.profile_picture;
+
+    // If still no profile picture, generate a fallback
+    if (!profilePicture || !profilePicture.startsWith('http')) {
+        profilePicture = `https://i.pravatar.cc/150?img=${Math.floor(Math.random() * 70) + 1}`;
+    }
+
+    return {
+        id: `${musician.id || 'unknown'}-${Date.now()}-${index}`,
+        user_id: musician.id,
+        username: musician.username || 'Unknown',
+        user: musician.username || 'Unknown',
+        video_url: musician.videos?.[0] || musician.video_url,
+        videoUrl: musician.videos?.[0] || musician.video_url,
+        instruments: musician.instruments || [],
+        profilePicture: profilePicture,
+        likes: Math.floor(Math.random() * 1000) + 100,
+        comments: Math.floor(Math.random() * 100) + 10,
+    };
+};
+
+// Helper function to extract musicians array from API response
+const extractMusiciansArray = (response, context = 'API') => {
+    if (Array.isArray(response)) {
+        return response;
+    }
+
+    if (response && typeof response === 'object') {
+        // Try different possible array locations in response
+        if (Array.isArray(response.data)) {
+            return response.data;
+        } else if (Array.isArray(response.musicians)) {
+            return response.musicians;
+        } else if (Array.isArray(response.results)) {
+            return response.results;
+        } else {
+            console.error(`Cannot find array in ${context} response`);
+            return [];
+        }
+    }
+
+    if (!response) {
+        return [];
+    }
+
+    console.error(`Unexpected ${context} response type:`, typeof response);
+    return [];
 };
 
 const DiscoverScreen = () => {
@@ -96,12 +189,11 @@ const DiscoverScreen = () => {
         index,
     }), [videoHeight]);
 
-    // ENHANCED LOAD INITIAL with Filter Support - FIXED for compatibility
+    // ENHANCED LOAD INITIAL with Filter Support
     const loadInitialVideos = useCallback(async () => {
         if (isLoadingRef.current) return;
 
-        console.log('🚀 DiscoverScreen: Loading initial musician videos...');
-        console.log('🎯 Current filters:', filters);
+        console.log('🚀 Loading initial musician videos...');
 
         setIsInitialLoading(true);
         setError(null);
@@ -111,10 +203,9 @@ const DiscoverScreen = () => {
             // Quick cache check only for non-filtered results
             if (!filters.isActive) {
                 try {
-                    // FIXED: Removed call to non-existent getSeparatedSystemStatus method
                     const cachedVideos = await getDiscoverCache();
                     if (cachedVideos && cachedVideos.length > 0) {
-                        console.log(`⚡ Using ${cachedVideos.length} cached musician videos`);
+                        console.log(`⚡ Using ${cachedVideos.length} cached videos`);
 
                         InteractionManager.runAfterInteractions(() => {
                             if (mountedRef.current) {
@@ -129,7 +220,6 @@ const DiscoverScreen = () => {
                     }
                 } catch (cacheError) {
                     console.warn('⚠️ Cache check failed:', cacheError);
-                    // Continue with fresh load
                 }
             }
 
@@ -138,7 +228,6 @@ const DiscoverScreen = () => {
 
             let musicians;
             if (filters.isActive) {
-                console.log('🎯 Using filtered search with filters:', filters);
                 const transformedFilters = {
                     anywhere: filters.anywhere,
                     distance: filters.distance,
@@ -150,24 +239,21 @@ const DiscoverScreen = () => {
 
                 musicians = await fetchFilteredMusicians(currentUser, transformedFilters, DISCOVER_CONFIG.INITIAL_BATCH);
             } else {
-                console.log('🎵 Using standard search (no filters)');
                 musicians = await fetchInitialMusicians(currentUser, DISCOVER_CONFIG.INITIAL_BATCH);
             }
 
             if (!mountedRef.current) return;
 
-            if (musicians && musicians.length > 0) {
-                const transformedVideos = musicians.map((musician, index) => ({
-                    id: `${musician.id || 'unknown'}-${Date.now()}-${index}`,
-                    user_id: musician.id,
-                    username: musician.username,
-                    user: musician.username,
-                    video_url: musician.videos[0],
-                    videoUrl: musician.videos[0],
-                    instruments: musician.instruments,
-                    likes: Math.floor(Math.random() * 1000) + 100,
-                    comments: Math.floor(Math.random() * 100) + 10,
-                }));
+            // Extract musicians array from response
+            const musiciansArray = extractMusiciansArray(musicians, 'Initial');
+
+            if (musiciansArray && musiciansArray.length > 0) {
+                // Wait for profile pictures to be resolved before transforming
+                const musiciansWithProfilePics = await ensureProfilePicturesLoaded(musiciansArray);
+
+                const transformedVideos = musiciansWithProfilePics.map((musician, index) =>
+                    transformMusicianToVideoItem(musician, index)
+                ).filter(video => video !== null);
 
                 InteractionManager.runAfterInteractions(() => {
                     if (mountedRef.current) {
@@ -178,20 +264,19 @@ const DiscoverScreen = () => {
                         setIsInitialLoading(false);
                         isLoadingRef.current = false;
 
-                        // Only cache non-filtered results - FIXED: Added error handling
+                        // Only cache non-filtered results
                         if (!filters.isActive) {
                             setTimeout(() => {
                                 cacheFeedVideos(transformedVideos).catch(err => {
-                                    console.warn('⚠️ Failed to cache videos:', err);
+                                    console.warn('❌ Failed to cache videos:', err);
                                 });
                             }, 100);
                         }
                     }
                 });
 
-                console.log(`✅ Loaded ${transformedVideos.length} initial musician videos`);
+                console.log(`✅ Loaded ${transformedVideos.length} initial videos`);
             } else {
-                console.log('❌ No musicians received');
                 if (mountedRef.current) {
                     const errorMessage = filters.isActive
                         ? 'No musicians found matching your filters. Try adjusting your search criteria.'
@@ -212,7 +297,7 @@ const DiscoverScreen = () => {
         }
     }, [currentUser, filters]);
 
-    // ENHANCED LOAD MORE with Filter Support - FIXED for compatibility
+    // ENHANCED LOAD MORE with Filter Support
     const loadMoreVideos = useCallback(async () => {
         if (isLoadingRef.current || !mountedRef.current || isLoadingMore || !hasMoreVideos) {
             return;
@@ -222,9 +307,6 @@ const DiscoverScreen = () => {
         if (now - lastLoadTime.current < DISCOVER_CONFIG.THROTTLE_MS) {
             return;
         }
-
-        console.log(`📊 Loading more musicians. Current: ${musicianVideos.length}`);
-        console.log('🎯 Using filters:', filters.isActive ? filters : 'none');
 
         if (loadMoreTimeoutRef.current) {
             clearTimeout(loadMoreTimeoutRef.current);
@@ -238,7 +320,6 @@ const DiscoverScreen = () => {
             let moreMusicians;
 
             if (filters.isActive) {
-                console.log('🎯 Loading more with filters');
                 const transformedFilters = {
                     anywhere: filters.anywhere,
                     distance: filters.distance,
@@ -250,26 +331,23 @@ const DiscoverScreen = () => {
 
                 moreMusicians = await loadMoreFilteredMusicians(currentUser, transformedFilters, DISCOVER_CONFIG.LOAD_MORE_BATCH);
             } else {
-                console.log('🎵 Loading more without filters');
                 moreMusicians = await loadMusicianWithoutFilters(currentUser, DISCOVER_CONFIG.LOAD_MORE_BATCH);
             }
 
             if (!mountedRef.current) return;
 
-            if (moreMusicians && moreMusicians.length > 0) {
+            // Extract musicians array from response
+            const musiciansArray = extractMusiciansArray(moreMusicians, 'LoadMore');
+
+            if (musiciansArray && musiciansArray.length > 0) {
                 loadAttempts.current = 0;
 
-                const transformedVideos = moreMusicians.map((musician, index) => ({
-                    id: `${musician.id || 'unknown'}-${Date.now()}-${index}`,
-                    user_id: musician.id,
-                    username: musician.username,
-                    user: musician.username,
-                    video_url: musician.videos[0],
-                    videoUrl: musician.videos[0],
-                    instruments: musician.instruments,
-                    likes: Math.floor(Math.random() * 1000) + 100,
-                    comments: Math.floor(Math.random() * 100) + 10,
-                }));
+                // Wait for profile pictures to be resolved before transforming
+                const musiciansWithProfilePics = await ensureProfilePicturesLoaded(musiciansArray);
+
+                const transformedVideos = musiciansWithProfilePics.map((musician, index) =>
+                    transformMusicianToVideoItem(musician, index)
+                ).filter(video => video !== null);
 
                 setMusicianVideos(prevVideos => {
                     const updatedVideos = [...prevVideos, ...transformedVideos];
@@ -281,7 +359,6 @@ const DiscoverScreen = () => {
                         const safeRemoveCount = Math.max(0, currentIdx - 5);
 
                         if (safeRemoveCount > 5) {
-                            console.log('🧹 Safe background cleanup (non-disruptive)');
                             const cleanedVideos = updatedVideos.slice(safeRemoveCount);
 
                             InteractionManager.runAfterInteractions(() => {
@@ -294,7 +371,7 @@ const DiscoverScreen = () => {
                             if (!filters.isActive) {
                                 setTimeout(() => {
                                     cacheFeedVideos(cleanedVideos).catch(err => {
-                                        console.warn('⚠️ Failed to cache cleaned videos:', err);
+                                        console.warn('❌ Failed to cache cleaned videos:', err);
                                     });
                                 }, 100);
                             }
@@ -302,27 +379,27 @@ const DiscoverScreen = () => {
                         }
                     }
 
-                    // FIXED: Added error handling for caching
                     if (!filters.isActive) {
                         setTimeout(() => {
                             cacheFeedVideos(updatedVideos).catch(err => {
-                                console.warn('⚠️ Failed to cache updated videos:', err);
+                                console.warn('❌ Failed to cache updated videos:', err);
                             });
                         }, 100);
                     }
                     return updatedVideos;
                 });
 
-                console.log(`✅ Added ${transformedVideos.length} more musician videos`);
+                console.log(`➕ Added ${transformedVideos.length} more videos`);
             } else {
                 if (loadAttempts.current < 3) {
+                    loadAttempts.current++;
                     loadMoreTimeoutRef.current = setTimeout(() => {
                         if (mountedRef.current) {
                             loadMoreVideos();
                         }
                     }, 2000);
                 } else {
-                    console.log('🔚 No more musicians available');
+                    console.log('🏁 No more videos available');
                     setHasMoreVideos(false);
                 }
             }
@@ -330,6 +407,7 @@ const DiscoverScreen = () => {
             console.error('❌ Failed to load more musicians:', handleError(err, 'DiscoverScreen/loadMore'));
 
             if (loadAttempts.current < 3) {
+                loadAttempts.current++;
                 loadMoreTimeoutRef.current = setTimeout(() => {
                     if (mountedRef.current) {
                         loadMoreVideos();
@@ -353,6 +431,7 @@ const DiscoverScreen = () => {
 
         if (newIndex !== currentIndexRef.current && newIndex >= 0 && newIndex < musicianVideos.length) {
             currentIndexRef.current = newIndex;
+            setCurrentIndex(newIndex);
 
             if (stabilityTimeoutRef.current) {
                 clearTimeout(stabilityTimeoutRef.current);
@@ -360,8 +439,6 @@ const DiscoverScreen = () => {
 
             stabilityTimeoutRef.current = setTimeout(() => {
                 if (mountedRef.current) {
-                    setCurrentIndex(newIndex);
-
                     const remainingVideos = musicianVideos.length - newIndex - 1;
                     if (remainingVideos <= DISCOVER_CONFIG.LOAD_TRIGGER_DISTANCE &&
                         hasMoreVideos &&
@@ -406,29 +483,35 @@ const DiscoverScreen = () => {
         }
     }, [musicianVideos.length, hasMoreVideos, isLoadingMore, loadMoreVideos]);
 
-    // MEMOIZED RENDER ITEM for performance
-    const renderVideoItem = useCallback(({ item, index }) => (
-        <VideoItem
-            item={{
-                id: item.id,
-                user: item.username || item.user || 'Unknown',
-                description: Array.isArray(item.instruments) ?
-                    item.instruments.join(', ') :
-                    (item.instruments || 'Music Video'),
-                videoUrl: item.video_url || item.videoUrl,
-                likes: item.likes,
-                comments: item.comments,
-            }}
-            isVisible={index === currentIndex && isFocused}
-            height={videoHeight}
-            shouldCache={
-                index >= currentIndex - 1 &&
-                index <= currentIndex + DISCOVER_CONFIG.PRELOAD_DISTANCE
-            }
-        />
-    ), [currentIndex, isFocused, videoHeight]);
+    // MEMOIZED RENDER ITEM for performance - FIXED to include profile picture
+// Add this debug version to your renderVideoItem function in DiscoverScreen
+    const renderVideoItem = useCallback(({ item, index }) => {
+        return (
+            <VideoItem
+                item={{
+                    id: item.id,
+                    user: item.username || item.user || 'Unknown',
+                    username: item.username || item.user || 'Unknown',
+                    user_id: item.user_id,
+                    description: Array.isArray(item.instruments) ?
+                        item.instruments.join(', ') :
+                        (item.instruments || 'Music Video'),
+                    videoUrl: item.video_url || item.videoUrl,
+                    profilePicture: item.profilePicture, // DEBUG: Is this actually set?
+                    likes: item.likes,
+                    comments: item.comments,
+                }}
+                isVisible={index === currentIndex && isFocused}
+                height={videoHeight}
+                shouldCache={
+                    index >= currentIndex - 1 &&
+                    index <= currentIndex + DISCOVER_CONFIG.PRELOAD_DISTANCE
+                }
+            />
+        );
+    }, [currentIndex, isFocused, videoHeight]);
 
-    // OPTIMIZED RETRY HANDLER - FIXED for compatibility
+    // OPTIMIZED RETRY HANDLER
     const handleRetry = useCallback(() => {
         console.log('🔄 Retrying musicians load...');
         setError(null);
@@ -447,7 +530,6 @@ const DiscoverScreen = () => {
 
         InteractionManager.runAfterInteractions(() => {
             if (!filters.isActive) {
-                // FIXED: Use correct method signature
                 try {
                     BackgroundDataService.forceRefreshAll().catch(err => {
                         console.warn('⚠️ Background refresh failed:', err);
@@ -488,13 +570,13 @@ const DiscoverScreen = () => {
         return unsubscribe;
     }, [navigation, route.params, loadInitialVideos]);
 
-    // EFFECTS - FIXED with enhanced cleanup
+    // EFFECTS - Enhanced cleanup
     useEffect(() => {
         mountedRef.current = true;
         return () => {
             mountedRef.current = false;
 
-            // CRITICAL: Clear all timers
+            // Clear all timers
             if (stabilityTimeoutRef.current) {
                 clearTimeout(stabilityTimeoutRef.current);
                 stabilityTimeoutRef.current = null;
@@ -504,12 +586,12 @@ const DiscoverScreen = () => {
                 loadMoreTimeoutRef.current = null;
             }
 
-            // CRITICAL: Clear video data to free memory
+            // Clear video data to free memory
             setMusicianVideos([]);
             setCurrentIndex(0);
             currentIndexRef.current = 0;
 
-            // CRITICAL: Clear BackgroundDataService timers - FIXED
+            // Clear BackgroundDataService timers
             try {
                 BackgroundDataService.performQuickCleanup('discover_screen_unmount');
             } catch (error) {
@@ -587,7 +669,7 @@ const DiscoverScreen = () => {
                     bounces={false}
 
                     onScroll={onScroll}
-                    scrollEventThrottle={16}
+                    scrollEventThrottle={8}
 
                     onViewableItemsChanged={onViewableItemsChanged}
                     viewabilityConfig={viewabilityConfig}
@@ -615,7 +697,7 @@ const DiscoverScreen = () => {
                         ) : !hasMoreVideos && musicianVideos.length > 0 ? (
                             <View style={styles.endContainer}>
                                 <Text style={styles.endText}>
-                                    {filters.isActive ? "You've seen all filtered videos! 🎯" : "You've seen all videos! 🌍"}
+                                    {filters.isActive ? "You've seen all filtered videos! 🎯" : "You've seen all videos! 🌟"}
                                 </Text>
                             </View>
                         ) : null
@@ -722,3 +804,4 @@ const styles = StyleSheet.create({
 });
 
 export default DiscoverScreen;
+

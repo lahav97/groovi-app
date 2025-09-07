@@ -72,7 +72,6 @@ const AddressInput = ({
         const newAddress = result.address;
         setLocalAddress(newAddress);
         onAddressChange?.(newAddress);
-        Alert.alert('Location Detected', 'Your current address has been detected successfully!');
       } else {
         Alert.alert(
           'Location Error', 
@@ -121,9 +120,9 @@ const AddressInput = ({
     };
     
     // Update formatted address when components change
-    if (!isAutoMode) {
-      updatedAddress.formattedAddress = LocationService.formatAddressFromComponents(updatedAddress);
-    }
+      if (!isAutoMode && expandedView && field !== 'formattedAddress') {
+          updatedAddress.formattedAddress = LocationService.formatFullAddress(updatedAddress);
+      }
     
     setLocalAddress(updatedAddress);
     onAddressChange?.(updatedAddress);
@@ -293,7 +292,7 @@ const AddressInput = ({
             Preview:
           </Text>
           <Text style={[styles.previewText, { color: textColor }]}>
-            {LocationService.formatAddressFromComponents(localAddress) || 'Enter address details above'}
+              {LocationService.formatFullAddress(localAddress) || 'Enter address details above'}
           </Text>
         </View>
       )}

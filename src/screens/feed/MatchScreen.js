@@ -26,36 +26,29 @@ import { useNavigation, useIsFocused } from '@react-navigation/native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useAuth } from '../../context/AuthContext';
 import { useFilters } from '../../context/FiltersContext';
-
-import {
-    fetchInitialMusiciansForMatch,
-    loadMoreMusiciansForMatch,
-    resetVideoState,
-    forceResetHasMoreVideos,
-} from '../../services/videoService';
-
+import UserMatchingService from '../../services/UserMatchingService';
 import LocationService from '../../services/LocationService';
 import BottomNavigation from '../../components/navigationBar/BottomNavigation';
 import { LAYOUT, COLORS } from '../../styles/theme';
 import { handleError, ERROR_MESSAGES } from '../../utils/errors';
 
-// ----- Layout constants
+// Layout constants
 const { width, height } = Dimensions.get('window');
 const CARD_WIDTH = width - 32;
 const CARD_HEIGHT = height * 0.75;
 const VIDEO_HEIGHT = CARD_HEIGHT * 0.55;
 
-// ----- Deck config
-const DECK_SIZE = 4;
+// Deck configuration
+const DECK_SIZE = 3;
 const CARD_SCALE_OFFSET = 0.007;
 const CARD_Y_OFFSET = 6;
 const CARD_X_OFFSET = 7;
 
-// ----- Gesture
+// Gesture configuration
 const SWIPE_THRESHOLD = width * 0.2;
 const MIN_SWIPE_DELAY = 300;
 
-// ----- Batch sizes
+// Batch sizes
 const INITIAL_BATCH_SIZE = 5;
 const LOAD_MORE_BATCH_SIZE = 3;
 
@@ -76,7 +69,6 @@ const formatField = (value, fallback = 'Not specified') => {
 
 const formatInstruments = (instruments) => formatField(instruments, 'No instruments listed');
 
-// MAIN COMPONENT
 const MatchScreen = () => {
     const navigation = useNavigation();
     const insets = useSafeAreaInsets();
@@ -84,13 +76,12 @@ const MatchScreen = () => {
     const { user } = useAuth();
     const { filters } = useFilters();
 
-    // FIXED: Proper fallback for email
     const currentUserEmail = useMemo(() =>
             user?.email || user?.username || 'guest@groovi.app',
         [user?.email, user?.username]
     );
 
-    // State
+    // State management
     const [musicians, setMusicians] = useState([]);
     const [currentIndex, setCurrentIndex] = useState(0);
     const [currentVideoIndex, setCurrentVideoIndex] = useState(0);
@@ -101,17 +92,12 @@ const MatchScreen = () => {
     const [isSwipeInProgress, setIsSwipeInProgress] = useState(false);
     const [videoLoading, setVideoLoading] = useState(true);
 
-    // MATCH MODAL
+    // Match modal state
     const [showMatchModal, setShowMatchModal] = useState(false);
     const [matchedMusician, setMatchedMusician] = useState(null);
 
-    // Location and Filter state
-    const [showLocationModal, setShowLocationModal] = useState(false);
-    const [showFilterModal, setShowFilterModal] = useState(false);
+    // Location state
     const [locationOptions, setLocationOptions] = useState(null);
-    const [currentLocation, setCurrentLocation] = useState(null);
-    const [locationEnabled, setLocationEnabled] = useState(true);
-    const [searchRadius, setSearchRadius] = useState(50);
 
     // Refs
     const videoRef = useRef(null);
@@ -120,134 +106,154 @@ const MatchScreen = () => {
     const panGestureRef = useRef(null);
     const scrollViewRef = useRef(null);
 
-    // Animation values (top card only)
+    // Animation values
     const translateX = useSharedValue(0);
     const translateY = useSharedValue(0);
     const rotate = useSharedValue(0);
 
-    // Current musician (memoized for performance)
+    // Current musician data
     const currentMusician = useMemo(() =>
             musicians[currentIndex] || null,
         [musicians, currentIndex]
     );
 
-    // Better video count calculation
     const videoCount = useMemo(() => {
         if (!currentMusician?.videos || !Array.isArray(currentMusician.videos)) return 0;
         return currentMusician.videos.length;
     }, [currentMusician?.videos]);
 
-    // Init load
+    // Check if filters are active using the service
+    const hasActiveFilters = useMemo(() =>
+            UserMatchingService.detectActiveFilters(filters),
+        [filters]
+    );
+
+    /**
+     * Load initial musicians using appropriate service method based on filter state
+     */
     const loadInitialMusicians = useCallback(async () => {
         if (!mountedRef.current) return;
+
         setLoading(true);
         setError(null);
 
         try {
-            console.log('Loading initial musicians with filters...', {
-                hasFilters: !!filters,
-                hasLocation: !!locationOptions
+            console.log('Loading musicians with filter state:', {
+                hasActiveFilters,
+                filterKeys: Object.keys(filters || {}),
+                locationEnabled: !!locationOptions
             });
 
-            // Fetch with location and filters
-            const fresh = await fetchInitialMusiciansForMatch(
-                currentUserEmail,
-                INITIAL_BATCH_SIZE,
-                locationOptions,
-                filters
-            );
+            let musicians;
+
+            if (hasActiveFilters) {
+                musicians = await UserMatchingService.fetchFilteredMatches(
+                    currentUserEmail,
+                    filters,
+                    INITIAL_BATCH_SIZE
+                );
+                console.log(`Loaded ${musicians.length} filtered musicians`);
+            } else {
+                musicians = await UserMatchingService.fetchInitialMatches(
+                    currentUserEmail,
+                    INITIAL_BATCH_SIZE
+                );
+                console.log(`Loaded ${musicians.length} initial musicians`);
+            }
 
             if (!mountedRef.current) return;
-            if (!fresh || fresh.length === 0) {
-                setError(ERROR_MESSAGES.NETWORK.NO_MUSICIANS);
+
+            if (!musicians || musicians.length === 0) {
+                setError(hasActiveFilters
+                    ? 'No musicians match your current filters. Try adjusting them!'
+                    : ERROR_MESSAGES.NETWORK.NO_MUSICIANS
+                );
                 return;
             }
 
-            const transformed = fresh.map((m, i) => ({
-                ...m,
-                id: m.id || `mus-${i}-${Date.now()}`,
-                username: m.username || `user_${i}`,
-                videos: Array.isArray(m.videos) ? m.videos : [],
-                bio: m.bio,
-                location: m.location,
-                age: m.age,
-                rating: m.rating,
-                instruments: m.instruments,
-                genres: m.genres,
+            // Transform and prepare musician data
+            const transformedMusicians = musicians.map((musician, index) => ({
+                ...musician,
+                id: musician.id || `musician-${index}-${Date.now()}`,
+                username: musician.username || `user_${index}`,
+                videos: Array.isArray(musician.videos) ? musician.videos : [],
                 currentVideoIndex: 0,
-                cardPosition: i,
+                cardPosition: index,
                 loadedAt: Date.now(),
             }));
 
-            setMusicians(transformed);
+            setMusicians(transformedMusicians);
             setCurrentIndex(0);
             setCurrentVideoIndex(0);
-            console.log(`Loaded ${transformed.length} musicians with filtering`);
-        } catch (e) {
-            console.error('Error loading initial musicians:', e);
+
+        } catch (error) {
+            console.error('Failed to load musicians:', error);
             if (mountedRef.current) {
-                setError(handleError(e, 'MatchScreen/loadInitial') || ERROR_MESSAGES.NETWORK.LOAD_FAILED);
+                setError(handleError(error, 'MatchScreen.loadInitialMusicians'));
             }
         } finally {
             if (mountedRef.current) {
                 setLoading(false);
             }
         }
-    }, [currentUserEmail, locationOptions, filters]);
+    }, [currentUserEmail, hasActiveFilters, filters, locationOptions]);
 
+    /**
+     * Load additional musicians for pagination
+     */
     const loadAdditionalMusicians = useCallback(async () => {
         if (!mountedRef.current || isPreloading) return;
+
         setIsPreloading(true);
-        console.log('Preloading more musicians with filters...');
+        console.log('Loading additional musicians with current filter state');
 
         try {
-            const more = await loadMoreMusiciansForMatch(
+            const additionalMusicians = await UserMatchingService.loadAdditionalMatches(
                 currentUserEmail,
                 LOAD_MORE_BATCH_SIZE,
                 locationOptions,
-                filters
+                hasActiveFilters ? filters : null
             );
 
-            if (more && more.length && mountedRef.current) {
-                const append = more.map((m, idx) => ({
-                    ...m,
-                    id: m.id || `mus-more-${musicians.length + idx}-${Date.now()}`,
-                    username: m.username || `user_more_${idx}`,
-                    videos: Array.isArray(m.videos) ? m.videos : [],
-                    bio: m.bio,
-                    location: m.location,
-                    age: m.age,
-                    rating: m.rating,
-                    instruments: m.instruments,
-                    genres: m.genres,
+            if (additionalMusicians && additionalMusicians.length && mountedRef.current) {
+                const transformedAdditional = additionalMusicians.map((musician, idx) => ({
+                    ...musician,
+                    id: musician.id || `musician-additional-${musicians.length + idx}-${Date.now()}`,
+                    username: musician.username || `user_additional_${idx}`,
+                    videos: Array.isArray(musician.videos) ? musician.videos : [],
                     currentVideoIndex: 0,
                     cardPosition: musicians.length + idx,
                     loadedAt: Date.now(),
                 }));
-                setMusicians((prev) => [...prev, ...append]);
-                console.log(`Added ${append.length} more filtered musicians`);
+
+                setMusicians(prev => [...prev, ...transformedAdditional]);
+                console.log(`Added ${transformedAdditional.length} additional musicians`);
             } else {
-                console.log('No additional filtered musicians received');
+                console.log('No additional musicians available');
             }
-        } catch (e) {
-            console.error('Error preloading musicians:', e);
+        } catch (error) {
+            console.error('Failed to load additional musicians:', error);
         } finally {
             if (mountedRef.current) {
                 setIsPreloading(false);
             }
         }
-    }, [currentUserEmail, isPreloading, musicians.length, locationOptions, filters]);
+    }, [currentUserEmail, isPreloading, musicians.length, locationOptions, hasActiveFilters, filters]);
 
-    // Navigation helper
+    /**
+     * Handle moving to next musician with loading logic
+     */
     const moveToNextMusician = useCallback(() => {
         if (!mountedRef.current || isSwipeInProgress) return;
 
-        console.log('Moving to next musician...', { currentIndex, total: musicians.length });
+        console.log('Moving to next musician:', { currentIndex, total: musicians.length });
+
         if (currentIndex < musicians.length - 1) {
-            const nextIdx = currentIndex + 1;
-            setCurrentIndex(nextIdx);
+            const nextIndex = currentIndex + 1;
+            setCurrentIndex(nextIndex);
             setCurrentVideoIndex(0);
             setPaused(false);
+
             setTimeout(() => {
                 if (mountedRef.current) {
                     setIsSwipeInProgress(false);
@@ -256,31 +262,33 @@ const MatchScreen = () => {
             return;
         }
 
-        // Need to load more, then try advance
+        // Need to load more musicians
         setIsSwipeInProgress(true);
-        console.log('Loading more before next...');
+        console.log('Loading additional musicians before advancing');
+
         if (!isPreloading) {
             loadAdditionalMusicians()
                 .then(() => {
                     setTimeout(() => {
                         if (!mountedRef.current) return;
-                        setMusicians((current) => {
-                            if (current.length > currentIndex + 1) {
-                                const next = currentIndex + 1;
-                                setCurrentIndex(next);
+
+                        setMusicians(currentMusicians => {
+                            if (currentMusicians.length > currentIndex + 1) {
+                                const nextIndex = currentIndex + 1;
+                                setCurrentIndex(nextIndex);
                                 setCurrentVideoIndex(0);
                                 setPaused(false);
-                                console.log(`Advanced after load to index ${next}`);
+                                console.log(`Advanced to musician ${nextIndex}`);
                             } else {
                                 console.log('No more musicians available');
                                 setError('No more musicians available. Try adjusting your filters!');
                             }
-                            return current;
+                            return currentMusicians;
                         });
                     }, 200);
                 })
-                .catch((e) => {
-                    console.error('Load more failed:', e);
+                .catch(error => {
+                    console.error('Failed to load additional musicians:', error);
                     if (mountedRef.current) {
                         setError('Failed to load more musicians. Please try again.');
                     }
@@ -295,22 +303,27 @@ const MatchScreen = () => {
         }
     }, [currentIndex, isPreloading, isSwipeInProgress, musicians.length, loadAdditionalMusicians]);
 
-    // Swipe actions
+    // Swipe handlers
     const handleSwipeLeft = useCallback(() => {
         if (isSwipeInProgress || !mountedRef.current) return;
         console.log(`Swiped LEFT on @${currentMusician?.username} - pass`);
         setIsSwipeInProgress(true);
-        moveToNextMusician();
+
+        setTimeout(() => {
+            if (mountedRef.current) {
+                moveToNextMusician();
+            }
+        }, 400); // Give time for animation to complete
     }, [currentMusician?.username, isSwipeInProgress, moveToNextMusician]);
 
     const handleSwipeRight = useCallback(() => {
         if (isSwipeInProgress || !mountedRef.current) return;
-        console.log(`Swiped RIGHT on @${currentMusician?.username} - opening Jam popup`);
+        console.log(`Swiped RIGHT on @${currentMusician?.username} - like`);
         setIsSwipeInProgress(true);
         setMatchedMusician(currentMusician || null);
         setShowMatchModal(true);
 
-        // FIXED: Reset animations properly
+        // Reset animations
         translateX.value = withTiming(0, { duration: 120 });
         translateY.value = withTiming(0, { duration: 120 });
         rotate.value = withTiming(0, { duration: 120 });
@@ -325,7 +338,6 @@ const MatchScreen = () => {
 
     // Modal handlers
     const handleKeepBrowsing = useCallback(() => {
-        console.log('Keep Browsing');
         setShowMatchModal(false);
         setMatchedMusician(null);
         setTimeout(() => moveToNextMusician(), 120);
@@ -340,7 +352,7 @@ const MatchScreen = () => {
             return;
         }
 
-        console.log('Start Chatting', { theirUser, conversationId, currentUserEmail });
+        console.log('Starting chat with:', theirUser);
         setShowMatchModal(false);
 
         navigation.navigate('ChatScreen', {
@@ -353,41 +365,33 @@ const MatchScreen = () => {
     // Video controls
     const toggleVideoPlayback = useCallback(() => {
         if (!mountedRef.current) return;
-        console.log(paused ? 'PLAY video' : 'PAUSE video');
-        setPaused((p) => !p);
-    }, [paused]);
+        setPaused(prev => !prev);
+    }, []);
 
     const handleVideoNavigation = useCallback((direction) => {
-        const vids = currentMusician?.videos || [];
-        if (vids.length <= 1 || !mountedRef.current) return;
+        const videos = currentMusician?.videos || [];
+        if (videos.length <= 1 || !mountedRef.current) return;
 
-        setCurrentVideoIndex((prev) => {
+        setCurrentVideoIndex(prev => {
             if (direction === 'left') {
-                const next = prev > 0 ? prev - 1 : vids.length - 1;
-                console.log(`Video left: ${next + 1}/${vids.length}`);
-                return next;
+                return prev > 0 ? prev - 1 : videos.length - 1;
             } else {
-                const next = prev < vids.length - 1 ? prev + 1 : 0;
-                console.log(`Video right: ${next + 1}/${vids.length}`);
-                return next;
+                return prev < videos.length - 1 ? prev + 1 : 0;
             }
         });
     }, [currentMusician?.videos]);
 
-    // Gesture handler (top card) - ENHANCED FOR SCROLL PRIORITY
+    // Gesture handler
     const gestureHandler = useAnimatedGestureHandler({
         onStart: (event) => {
             'worklet';
-            // If gesture starts in profile area (bottom half), prefer scroll
             const isInProfileArea = event.y > VIDEO_HEIGHT;
             if (isInProfileArea && Math.abs(event.velocityX) < Math.abs(event.velocityY)) {
-                // Vertical movement in profile area - let scroll handle it
                 return;
             }
         },
         onActive: (event) => {
             'worklet';
-            // Only handle horizontal gestures for card swiping
             const isHorizontalGesture = Math.abs(event.translationX) > Math.abs(event.translationY);
 
             if (isHorizontalGesture) {
@@ -402,7 +406,6 @@ const MatchScreen = () => {
             const isLeft = event.translationX < -SWIPE_THRESHOLD;
 
             if (isRight) {
-                // RIGHT: snap back to center and open popup (no fling off-screen)
                 translateX.value = withTiming(0, { duration: 120 });
                 translateY.value = withTiming(0, { duration: 120 });
                 rotate.value = withTiming(0, { duration: 120 });
@@ -411,25 +414,18 @@ const MatchScreen = () => {
             }
 
             if (isLeft) {
-                // LEFT: keep original fling-out behavior
                 translateX.value = withSpring(-width * 1.8, { damping: 25, stiffness: 300 });
                 translateY.value = withSpring(event.translationY + 80, { damping: 25, stiffness: 300 });
                 runOnJS(handleSwipeLeft)();
                 return;
             }
 
-            // Not enough swipe — snap back
+            // Snap back
             translateX.value = withSpring(0, { damping: 20, stiffness: 400 });
             translateY.value = withSpring(0, { damping: 20, stiffness: 400 });
             rotate.value = withSpring(0, { damping: 20, stiffness: 400 });
         },
         onCancel: () => {
-            'worklet';
-            translateX.value = withSpring(0);
-            translateY.value = withSpring(0);
-            rotate.value = withSpring(0);
-        },
-        onFail: () => {
             'worklet';
             translateX.value = withSpring(0);
             translateY.value = withSpring(0);
@@ -445,7 +441,25 @@ const MatchScreen = () => {
         ],
     }));
 
-    // Render helpers
+    // Retry handler
+    const handleRetry = useCallback(() => {
+        if (!mountedRef.current) return;
+        console.log('Retrying musician load');
+
+        setError(null);
+        setMusicians([]);
+        setCurrentIndex(0);
+        setCurrentVideoIndex(0);
+        setIsPreloading(false);
+
+        setTimeout(() => {
+            if (mountedRef.current) {
+                loadInitialMusicians();
+            }
+        }, 100);
+    }, [loadInitialMusicians]);
+
+    // Render functions
     const renderStarRating = useCallback((rating) => {
         const num = parseFloat(rating || 0);
         if (num <= 0) return null;
@@ -474,12 +488,6 @@ const MatchScreen = () => {
                 </View>
             );
         }
-
-        console.log('Rendering profile:', {
-            username: musician.username,
-            location: musician.location,
-            instruments: musician.instruments,
-        });
 
         return (
             <View style={styles.profileSection} pointerEvents="auto">
@@ -525,6 +533,17 @@ const MatchScreen = () => {
                         </View>
                         <Text style={styles.infoText}>{formatInstruments(musician.instruments)}</Text>
                     </View>
+
+                    {/* Genres */}
+                    {musician.genres && (
+                        <View style={styles.infoCard}>
+                            <View style={styles.infoHeader}>
+                                <Icon name="disc" size={20} color={COLORS?.static?.background || '#ff6ec4'} />
+                                <Text style={styles.infoLabel}>Genres</Text>
+                            </View>
+                            <Text style={styles.infoText}>{formatField(musician.genres, 'No genres listed')}</Text>
+                        </View>
+                    )}
 
                     {/* Location */}
                     <View style={styles.infoCard}>
@@ -580,7 +599,6 @@ const MatchScreen = () => {
                             pointerEvents="none"
                         />
 
-                        {/* Loading indicator */}
                         {isActive && videoLoading && (
                             <View style={styles.videoLoadingContainer}>
                                 <ActivityIndicator size="large" color="#fff" />
@@ -594,6 +612,7 @@ const MatchScreen = () => {
                     </View>
                 )}
 
+                {/* Video navigation controls for multiple videos */}
                 {isActive && musician?.videos && musician.videos.length > 1 && (
                     <>
                         <TouchableOpacity style={styles.leftTapZone} onPress={() => handleVideoNavigation('left')}>
@@ -609,6 +628,7 @@ const MatchScreen = () => {
                     </>
                 )}
 
+                {/* Play/pause control */}
                 {isActive && (
                     <TouchableOpacity style={styles.centerTapZone} onPress={toggleVideoPlayback}>
                         {paused && (
@@ -619,6 +639,7 @@ const MatchScreen = () => {
                     </TouchableOpacity>
                 )}
 
+                {/* Video counter */}
                 {isActive && musician?.videos && musician.videos.length > 1 && (
                     <View style={styles.videoCounter}>
                         <Text style={styles.videoCounterText}>{vIndex + 1}/{musician.videos.length}</Text>
@@ -705,130 +726,93 @@ const MatchScreen = () => {
         return visible;
     }, [currentIndex, musicians, renderCard]);
 
-    const handleRetry = useCallback(() => {
-        if (!mountedRef.current) return;
-        console.log('Retry: resetting services and reloading');
-        setError(null);
-        setMusicians([]);
-        setCurrentIndex(0);
-        setCurrentVideoIndex(0);
-        setIsPreloading(false);
-
-        try {
-            resetVideoState();
-            forceResetHasMoreVideos();
-            console.log('Video service state reset for retry');
-        } catch (e) {
-            console.warn('Reset error:', e);
-        }
-
-        setTimeout(() => {
-            if (mountedRef.current) {
-                loadInitialMusicians();
-            }
-        }, 100);
-    }, [loadInitialMusicians]);
-
     // Effects
+
+    // Initialize on mount
     useEffect(() => {
         mountedRef.current = true;
         loadInitialMusicians();
 
         return () => {
             mountedRef.current = false;
-
-            // cleanup timers
             if (preloadTimeoutRef.current) {
                 clearTimeout(preloadTimeoutRef.current);
-                preloadTimeoutRef.current = null;
             }
-
-            // reset services
-            try {
-                resetVideoState();
-                forceResetHasMoreVideos();
-                console.log('Video service state reset');
-            } catch (e) {
-                console.warn('Reset error:', e);
-            }
-
-            // unload video
             if (videoRef.current) {
                 try {
                     videoRef.current.pauseAsync?.();
                     videoRef.current.unloadAsync?.();
-                } catch (e) {
-                    console.warn('Video cleanup error:', e);
+                } catch (error) {
+                    console.warn('Video cleanup error:', error);
                 }
             }
         };
     }, [loadInitialMusicians]);
 
-    // Pause when screen not focused
+    // Reload when filters change
+    useEffect(() => {
+        if (filters && mountedRef.current) {
+            console.log('Filters changed, reloading musicians:', {
+                hasActiveFilters,
+                filterKeys: Object.keys(filters)
+            });
+
+            setMusicians([]);
+            setCurrentIndex(0);
+            setCurrentVideoIndex(0);
+
+            setTimeout(() => {
+                if (mountedRef.current) {
+                    loadInitialMusicians();
+                }
+            }, 100);
+        }
+    }, [filters, hasActiveFilters, loadInitialMusicians]);
+
+    // Pause video when screen not focused
     useEffect(() => {
         if (!isFocused && videoRef.current) {
             try {
                 videoRef.current.pauseAsync?.();
-            } catch (e) {
-                console.warn('Video pause error:', e);
+            } catch (error) {
+                console.warn('Video pause error:', error);
             }
         }
     }, [isFocused]);
 
-    // Reset animations when top card changes
+    // Reset animations when card changes
     useEffect(() => {
         translateX.value = withTiming(0, { duration: 100 });
         translateY.value = withTiming(0, { duration: 100 });
         rotate.value = withTiming(0, { duration: 100 });
     }, [currentIndex, translateX, translateY, rotate]);
 
-    // Auto-preload next chunk when near the end
+    // Auto-preload logic
     useEffect(() => {
         if (preloadTimeoutRef.current) clearTimeout(preloadTimeoutRef.current);
+
         preloadTimeoutRef.current = setTimeout(() => {
             if (!mountedRef.current) return;
+
             const remaining = musicians.length - currentIndex;
             if (remaining <= 4 && !isPreloading && musicians.length > 0) {
-                console.log('Triggering preload (remaining <= 4)');
+                console.log('Auto-preloading additional musicians');
                 loadAdditionalMusicians();
             }
         }, 300);
 
         return () => {
-            if (preloadTimeoutRef.current) clearTimeout(preloadTimeoutRef.current);
+            if (preloadTimeoutRef.current) {
+                clearTimeout(preloadTimeoutRef.current);
+            }
         };
     }, [currentIndex, musicians.length, isPreloading, loadAdditionalMusicians]);
-
-    // Location update handler
-    const handleLocationUpdate = useCallback(async (locationData) => {
-        console.log('📍 Location updated:', locationData);
-
-        setLocationEnabled(locationData.enabled);
-        setSearchRadius(locationData.distance);
-        setCurrentLocation(locationData.currentLocation);
-        setLocationOptions(locationData.locationOptions);
-
-        // Reload musicians with new location settings
-        setMusicians([]);
-        setCurrentIndex(0);
-        setTimeout(() => {
-            loadInitialMusicians();
-        }, 100);
-    }, [loadInitialMusicians]);
-
-    // Filter modal handler
-    const handleShowFilters = useCallback(() => {
-        // Navigate to filter screen
-        navigation.navigate('FilterScreen');
-    }, [navigation]);
 
     // Initialize location on mount
     useEffect(() => {
         const initializeLocation = async () => {
             try {
                 const preferences = await LocationService.getLocationPreferences();
-                setLocationEnabled(preferences.locationEnabled);
-                setSearchRadius(preferences.maxDistance);
 
                 if (preferences.locationEnabled) {
                     const locationResult = await LocationService.getLocationForMatching();
@@ -840,8 +824,7 @@ const MatchScreen = () => {
                             unit: preferences.unit || 'km'
                         };
                         setLocationOptions(options);
-                        setCurrentLocation(locationResult.location);
-                        console.log('📍 Location initialized for matching');
+                        console.log('Location initialized for matching');
                     }
                 }
             } catch (error) {
@@ -852,26 +835,21 @@ const MatchScreen = () => {
         initializeLocation();
     }, []);
 
-    // Reload when filters change
-    useEffect(() => {
-        if (filters && Object.keys(filters).length > 0) {
-            console.log('🔄 Filters changed, reloading musicians...');
-            setMusicians([]);
-            setCurrentIndex(0);
-            setTimeout(() => {
-                loadInitialMusicians();
-            }, 100);
-        }
-    }, [filters, loadInitialMusicians]);
-
-    // Render states
+    // Render loading state
     if (loading) {
         return (
             <View style={styles.loadingContainer}>
                 <View style={styles.loadingCard}>
                     <ActivityIndicator size="large" color="#ff6ec4" />
-                    <Text style={styles.loadingText}>Loading musicians...</Text>
-                    <Text style={styles.loadingSubtext}>Preparing {INITIAL_BATCH_SIZE} profiles for instant browsing</Text>
+                    <Text style={styles.loadingText}>
+                        {hasActiveFilters ? 'Applying filters...' : 'Loading musicians...'}
+                    </Text>
+                    <Text style={styles.loadingSubtext}>
+                        {hasActiveFilters
+                            ? 'Finding musicians that match your preferences'
+                            : `Preparing ${INITIAL_BATCH_SIZE} profiles for instant browsing`
+                        }
+                    </Text>
                 </View>
                 <View style={[styles.bottomNavContainer, { height: LAYOUT.navHeight, bottom: insets.bottom }]}>
                     <BottomNavigation />
@@ -880,6 +858,7 @@ const MatchScreen = () => {
         );
     }
 
+    // Render error state
     if (error) {
         return (
             <View style={styles.errorContainer}>
@@ -904,12 +883,18 @@ const MatchScreen = () => {
         );
     }
 
+    // Render empty state
     if (!musicians || musicians.length === 0) {
         return (
             <View style={styles.errorContainer}>
                 <View style={styles.errorCard}>
                     <Icon name="search" size={60} color="#ccc" />
-                    <Text style={styles.errorText}>{ERROR_MESSAGES.NETWORK.NO_MUSICIANS}</Text>
+                    <Text style={styles.errorText}>
+                        {hasActiveFilters
+                            ? 'No musicians match your filters. Try adjusting them!'
+                            : ERROR_MESSAGES.NETWORK.NO_MUSICIANS
+                        }
+                    </Text>
                     <TouchableOpacity style={styles.retryButton} onPress={handleRetry}>
                         <LinearGradient
                             colors={COLORS?.primaryGradient || ['#ff6ec4', '#ffc93c', '#1c92d2']}
@@ -928,30 +913,21 @@ const MatchScreen = () => {
         );
     }
 
-    if (!currentMusician) {
-        return (
-            <View style={styles.errorContainer}>
-                <View style={styles.loadingCard}>
-                    <ActivityIndicator size="large" color="#ff6ec4" />
-                    <Text style={styles.loadingText}>Loading musician data...</Text>
-                </View>
-                <View style={[styles.bottomNavContainer, { height: LAYOUT.navHeight, bottom: insets.bottom }]}>
-                    <BottomNavigation />
-                </View>
-            </View>
-        );
-    }
-
+    // Render main interface
     return (
         <>
             <View style={styles.container}>
-                {/* Filter Icon */}
+                {/* Filter Button with visual indicator */}
                 <TouchableOpacity
                     style={[styles.filterButton, { top: insets.top + 10 }]}
-                    onPress={() => navigation.navigate('FilterScreen')}
+                    onPress={() => navigation.navigate('Filter')}
                 >
-                    <View style={styles.filterIconContainer}>
-                        <Icon name="filter" size={24} color="#333" />
+                    <View style={[
+                        styles.filterIconContainer,
+                        hasActiveFilters && styles.filterIconContainerActive
+                    ]}>
+                        <Icon name="filter" size={24} color={hasActiveFilters ? "#fff" : "#333"} />
+                        {hasActiveFilters && <View style={styles.filterIndicator} />}
                     </View>
                 </TouchableOpacity>
 
@@ -967,7 +943,7 @@ const MatchScreen = () => {
                 </View>
             </View>
 
-            {/* It's a Jam! Modal */}
+            {/* Match Modal */}
             {showMatchModal && (
                 <View style={styles.matchOverlay}>
                     <View style={styles.matchCard}>
@@ -999,14 +975,13 @@ const MatchScreen = () => {
     );
 };
 
-// StyleSheet moved outside component for better performance
-// Only showing the style changes needed - update your MatchScreen.js styles object
-
 const styles = StyleSheet.create({
     container: {
         flex: 1,
         backgroundColor: '#f8f9fa',
     },
+
+    // Filter button
     filterButton: {
         position: 'absolute',
         left: 20,
@@ -1026,11 +1001,26 @@ const styles = StyleSheet.create({
         shadowRadius: 4,
         elevation: 5,
     },
-    // FIXED: Properly centered cards accounting for top/bottom elements
+    filterIconContainerActive: {
+        backgroundColor: '#ff6ec4',
+    },
+    filterIndicator: {
+        position: 'absolute',
+        top: 4,
+        right: 4,
+        width: 8,
+        height: 8,
+        borderRadius: 4,
+        backgroundColor: '#ffc93c',
+        borderWidth: 1,
+        borderColor: '#fff',
+    },
+
+    // Card deck
     cardDeckContainer: {
         position: 'absolute',
-        top: 95, // Account for filter button and safe area
-        bottom: LAYOUT.navHeight, // Account for bottom nav
+        top: 95,
+        bottom: LAYOUT.navHeight,
         left: 0,
         right: 0,
         justifyContent: 'center',
@@ -1051,8 +1041,6 @@ const styles = StyleSheet.create({
         overflow: 'hidden',
     },
 
-    // ... rest of your existing styles remain the same
-
     // Video container
     videoContainer: {
         height: VIDEO_HEIGHT,
@@ -1062,7 +1050,10 @@ const styles = StyleSheet.create({
         borderTopRightRadius: 38,
         overflow: 'hidden'
     },
-    video: { width: '100%', height: '100%' },
+    video: {
+        width: '100%',
+        height: '100%'
+    },
     videoLoadingContainer: {
         position: 'absolute',
         top: 0,
@@ -1094,7 +1085,7 @@ const styles = StyleSheet.create({
         fontWeight: '500'
     },
 
-    // Tap zones
+    // Video tap zones
     leftTapZone: {
         position: 'absolute',
         left: 0,
@@ -1174,7 +1165,7 @@ const styles = StyleSheet.create({
     profileScrollView: {
         flex: 1,
         paddingHorizontal: 24,
-        maxHeight: CARD_HEIGHT - VIDEO_HEIGHT - 60, // Leave space for swipe instructions
+        maxHeight: CARD_HEIGHT - VIDEO_HEIGHT - 60,
     },
     profileContent: {
         paddingTop: 20,
@@ -1192,8 +1183,12 @@ const styles = StyleSheet.create({
         color: '#999',
         fontWeight: '500'
     },
-    scrollPadding: { height: 80 },
-    profileHeader: { marginBottom: 20 },
+    scrollPadding: {
+        height: 80
+    },
+    profileHeader: {
+        marginBottom: 20
+    },
     usernameRow: {
         flexDirection: 'row',
         alignItems: 'center',
@@ -1365,7 +1360,7 @@ const styles = StyleSheet.create({
         zIndex: 10
     },
 
-    // Match Modal Styles
+    // Match Modal
     matchOverlay: {
         position: 'absolute',
         top: 0,

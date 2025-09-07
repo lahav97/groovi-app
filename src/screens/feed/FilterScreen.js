@@ -6,7 +6,6 @@ import {
     ScrollView,
     TouchableOpacity,
     TextInput,
-    Switch,
     Animated,
     useColorScheme
 } from 'react-native';
@@ -14,8 +13,8 @@ import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useNavigation } from '@react-navigation/native';
 import { COLORS } from '../../styles/theme';
-import Slider from '@react-native-community/slider';
 import { useFilters } from '../../context/FiltersContext';
+import { ISRAEL_CITIES } from '../../constants/israeliCities';
 import {
     createValidationError,
     handleError
@@ -31,9 +30,18 @@ const INSTRUMENTS = {
 
 const SKILL_LEVELS = ['Beginner', 'Intermediate', 'Pro'];
 const GENRES = ['Rock', 'Jazz', 'Pop', 'Classical', 'Hip Hop', 'Electronic', 'R&B'];
-const GENDERS = ['Any', 'Male', 'Female', 'Other'];
+const GENDERS = ['Male', 'Female', 'Non-binary', 'Other'];
 
-// Modern selectable chip component
+const AGE_PRESETS = [
+    { label: '18-25', min: 18, max: 25 },
+    { label: '26-30', min: 26, max: 30 },
+    { label: '31-35', min: 31, max: 35 },
+    { label: '36-40', min: 36, max: 40 },
+    { label: '41-50', min: 41, max: 50 },
+    { label: '50+', min: 50, max: 65 },
+];
+
+// Modern selectable chip component with app colors
 const SelectableChip = ({ label, selected, onSelect, style = {} }) => (
     <TouchableOpacity
         style={[
@@ -55,7 +63,7 @@ const SelectableChip = ({ label, selected, onSelect, style = {} }) => (
     </TouchableOpacity>
 );
 
-// Filter Card Component
+// Filter Card Component with app colors
 const FilterCard = ({ title, icon, children, style = {} }) => {
     const isDark = useColorScheme() === 'dark';
     const cardColor = isDark ? '#2c2c2e' : '#fff';
@@ -64,7 +72,7 @@ const FilterCard = ({ title, icon, children, style = {} }) => {
     return (
         <View style={[styles.card, { backgroundColor: cardColor }, style]}>
             <View style={styles.cardHeader}>
-                <Ionicons name={icon} size={24} color={COLORS.static.primaryGradient[0]} />
+                <Ionicons name={icon} size={24} color={COLORS.static.background} />
                 <Text style={[styles.cardTitle, { color: textColor }]}>{title}</Text>
             </View>
             {children}
@@ -72,21 +80,26 @@ const FilterCard = ({ title, icon, children, style = {} }) => {
     );
 };
 
-const DiscoverFiltersScreen = () => {
+const FiltersScreen = () => {
     const isDark = useColorScheme() === 'dark';
-    const backgroundColor = isDark ? '#1c1c1e' : '#f5f5f7';
+    const backgroundColor = isDark ? '#1c1c1e' : '#f8f9fa';
     const textColor = isDark ? '#fff' : '#000';
     const navigation = useNavigation();
     const { filters, updateFilters, resetFilters: resetGlobalFilters } = useFilters();
 
     // Initialize local state from global filters
-    const [distance, setDistance] = useState(filters.distance);
-    const [anywhere, setAnywhere] = useState(filters.anywhere);
-    const [selectedInstruments, setSelectedInstruments] = useState(filters.selectedInstruments);
-    const [selectedSkill, setSelectedSkill] = useState(filters.selectedSkill);
-    const [selectedGenres, setSelectedGenres] = useState(filters.selectedGenres);
+    const [selectedCities, setSelectedCities] = useState(filters.selectedCities || []);
+    const [selectedInstruments, setSelectedInstruments] = useState(filters.selectedInstruments || {});
+    const [selectedGenres, setSelectedGenres] = useState(filters.selectedGenres || []);
+    const [selectedGenders, setSelectedGenders] = useState(filters.selectedGenders || []);
     const [customGenre, setCustomGenre] = useState('');
-    const [selectedGender, setSelectedGender] = useState(filters.selectedGender);
+    const [minAge, setMinAge] = useState(filters.minAge || 18);
+    const [maxAge, setMaxAge] = useState(filters.maxAge || 65);
+    const [showCustomAge, setShowCustomAge] = useState(false);
+
+    // City selection state
+    const [showCityDropdown, setShowCityDropdown] = useState(false);
+    const [citySearchTerm, setCitySearchTerm] = useState('');
 
     // Track if filters have been modified from their initial state
     const [filtersModified, setFiltersModified] = useState(false);
@@ -94,21 +107,21 @@ const DiscoverFiltersScreen = () => {
     // Check if any filter has been modified from default values
     useEffect(() => {
         const isModified =
-            distance !== 10 ||
-            anywhere !== false ||
-            selectedInstruments.length > 0 ||
-            selectedSkill.length > 0 ||
+            selectedCities.length > 0 ||
+            Object.keys(selectedInstruments).length > 0 ||
             selectedGenres.length > 0 ||
-            selectedGender !== 'Any';
+            selectedGenders.length > 0 ||
+            minAge !== 18 ||
+            maxAge !== 65;
 
         setFiltersModified(isModified);
     }, [
-        distance,
-        anywhere,
+        selectedCities,
         selectedInstruments,
-        selectedSkill,
         selectedGenres,
-        selectedGender
+        selectedGenders,
+        minAge,
+        maxAge
     ]);
 
     // Toggle function for multi-select arrays
@@ -116,15 +129,57 @@ const DiscoverFiltersScreen = () => {
         setArr(arr.includes(value) ? arr.filter(v => v !== value) : [...arr, value]);
     };
 
+    // City selection functions
+    const filteredCities = ISRAEL_CITIES.filter(city =>
+        city.toLowerCase().includes(citySearchTerm.toLowerCase())
+    );
+
+    const toggleCity = (city) => {
+        if (selectedCities.includes(city)) {
+            setSelectedCities(selectedCities.filter(c => c !== city));
+        } else {
+            setSelectedCities([...selectedCities, city]);
+        }
+    };
+
+    const clearAllCities = () => {
+        setSelectedCities([]);
+        setCitySearchTerm('');
+    };
+
+    // Instrument selection functions
+    const toggleInstrument = (instrument) => {
+        if (selectedInstruments[instrument]) {
+            const updated = { ...selectedInstruments };
+            delete updated[instrument];
+            setSelectedInstruments(updated);
+        } else {
+            setSelectedInstruments({
+                ...selectedInstruments,
+                [instrument]: 'any'
+            });
+        }
+    };
+
+    const setSkillLevel = (instrument, skillLevel) => {
+        setSelectedInstruments({
+            ...selectedInstruments,
+            [instrument]: skillLevel
+        });
+    };
+
     // Reset all filters to default values
     const resetFilters = () => {
-        setDistance(10);
-        setAnywhere(false);
-        setSelectedInstruments([]);
-        setSelectedSkill([]);
+        setSelectedCities([]);
+        setSelectedInstruments({});
         setSelectedGenres([]);
+        setSelectedGenders([]);
         setCustomGenre('');
-        setSelectedGender('Any');
+        setMinAge(18);
+        setMaxAge(65);
+        setShowCustomAge(false);
+        setShowCityDropdown(false);
+        setCitySearchTerm('');
 
         // Reset global filters context
         resetGlobalFilters();
@@ -133,12 +188,12 @@ const DiscoverFiltersScreen = () => {
     // Apply filters and navigate back to Discover with refresh
     const applyFilters = () => {
         const filterData = {
-            distance,
-            anywhere,
+            selectedCities,
             selectedInstruments,
-            selectedSkill,
             selectedGenres,
-            selectedGender
+            selectedGenders,
+            minAge,
+            maxAge
         };
 
         console.log('🎯 Applying filters:', filterData);
@@ -204,76 +259,275 @@ const DiscoverFiltersScreen = () => {
             >
                 {/* Location filtering section */}
                 <FilterCard title="Location" icon="location-outline">
-                    {/* Distance range toggle */}
-                    <View style={styles.row}>
-                        <Text style={[styles.rowLabel, { color: textColor }]}>
-                            {anywhere ? 'Show musicians anywhere' : 'Limit by distance'}
+                    <TouchableOpacity
+                        style={[styles.citySelectHeader, { backgroundColor: isDark ? '#3c3c3e' : '#F5F0FB' }]}
+                        onPress={() => setShowCityDropdown(!showCityDropdown)}
+                    >
+                        <Text style={[styles.citySelectText, { color: isDark ? '#fff' : '#333' }]}>
+                            {selectedCities.length === 0
+                                ? 'Select cities (optional)'
+                                : `${selectedCities.length} cities selected`}
                         </Text>
-                        <Switch
-                            value={anywhere}
-                            onValueChange={setAnywhere}
-                            trackColor={{ false: '#D1D1D6', true: '#E1C4FF' }}
-                            thumbColor={anywhere ? COLORS.static.primaryGradient[0] : '#f4f3f4'}
+                        <Ionicons
+                            name={showCityDropdown ? "chevron-up" : "chevron-down"}
+                            size={20}
+                            color={isDark ? '#fff' : '#333'}
                         />
-                    </View>
+                    </TouchableOpacity>
 
-                    {/* Distance slider - only shown when not searching anywhere */}
-                    {!anywhere && (
-                        <View style={styles.sliderContainer}>
-                            <Text style={[styles.sliderTitle, { color: textColor }]}>Distance Range</Text>
-                            <Slider
-                                style={{ width: '100%', height: 40 }}
-                                minimumValue={1}
-                                maximumValue={150}
-                                step={1}
-                                value={distance}
-                                onValueChange={setDistance}
-                                onSlidingComplete={setDistance}
-                                minimumTrackTintColor={COLORS.static.primaryGradient[0]}
-                                maximumTrackTintColor={isDark ? "#555" : "#EEEEEE"}
-                                thumbTintColor={COLORS.static.primaryGradient[0]}
+                    {showCityDropdown && (
+                        <View style={[styles.cityDropdown, { backgroundColor: isDark ? '#3c3c3e' : '#F5F0FB' }]}>
+                            <TextInput
+                                style={[styles.citySearchInput, {
+                                    color: isDark ? '#fff' : '#333',
+                                    backgroundColor: isDark ? '#2c2c2e' : '#fff'
+                                }]}
+                                placeholder="Search cities..."
+                                placeholderTextColor="#9E9E9E"
+                                value={citySearchTerm}
+                                onChangeText={setCitySearchTerm}
                             />
-                            <View style={styles.sliderLabels}>
-                                <Text style={[styles.sliderLabel, { color: isDark ? '#aaa' : '#888' }]}>1 km</Text>
-                                <Text style={[styles.sliderValue, { color: COLORS.static.primaryGradient[0] }]}>
-                                    {distance} km radius
-                                </Text>
-                                <Text style={[styles.sliderLabel, { color: isDark ? '#aaa' : '#888' }]}>150 km</Text>
+
+                            {selectedCities.length > 0 && (
+                                <TouchableOpacity style={styles.clearAllBtn} onPress={clearAllCities}>
+                                    <Text style={styles.clearAllText}>Clear All</Text>
+                                </TouchableOpacity>
+                            )}
+
+                            <ScrollView style={styles.cityList} nestedScrollEnabled>
+                                {filteredCities.map(city => (
+                                    <TouchableOpacity
+                                        key={city}
+                                        style={[styles.cityItem, selectedCities.includes(city) && styles.cityItemSelected]}
+                                        onPress={() => toggleCity(city)}
+                                    >
+                                        <Text style={[
+                                            styles.cityItemText,
+                                            { color: isDark ? '#fff' : '#333' },
+                                            selectedCities.includes(city) && styles.cityItemTextSelected
+                                        ]}>
+                                            {city}
+                                        </Text>
+                                        {selectedCities.includes(city) && (
+                                            <Ionicons name="checkmark" size={16} color={COLORS.static.background} />
+                                        )}
+                                    </TouchableOpacity>
+                                ))}
+                            </ScrollView>
+                        </View>
+                    )}
+
+                    {selectedCities.length > 0 && (
+                        <View style={styles.selectedContainer}>
+                            <Text style={[styles.selectedTitle, { color: isDark ? '#fff' : '#333' }]}>Selected Cities:</Text>
+                            <View style={styles.selectedChips}>
+                                {selectedCities.map(city => (
+                                    <View key={city} style={styles.selectedChip}>
+                                        <Text style={styles.selectedChipText}>{city}</Text>
+                                        <TouchableOpacity
+                                            onPress={() => toggleCity(city)}
+                                            hitSlop={{ top: 10, right: 10, bottom: 10, left: 10 }}
+                                        >
+                                            <Ionicons name="close-circle" size={16} color={COLORS.static.background} />
+                                        </TouchableOpacity>
+                                    </View>
+                                ))}
                             </View>
                         </View>
                     )}
                 </FilterCard>
 
-                {/* Instruments filtering section */}
-                <FilterCard title="Instruments" icon="musical-notes-outline">
+                {/* Gender filtering section */}
+                <FilterCard title="Gender" icon="people-outline">
+                    <View style={styles.chipGrid}>
+                        {GENDERS.map(gender => (
+                            <SelectableChip
+                                key={gender}
+                                label={gender}
+                                selected={selectedGenders.includes(gender)}
+                                onSelect={() => toggleMulti(selectedGenders, setSelectedGenders, gender)}
+                            />
+                        ))}
+                    </View>
+
+                    {selectedGenders.length > 0 && (
+                        <View style={styles.selectedContainer}>
+                            <Text style={[styles.selectedTitle, { color: isDark ? '#fff' : '#333' }]}>Selected:</Text>
+                            <View style={styles.selectedChips}>
+                                {selectedGenders.map(gender => (
+                                    <View key={gender} style={styles.selectedChip}>
+                                        <Text style={styles.selectedChipText}>{gender}</Text>
+                                        <TouchableOpacity
+                                            onPress={() => setSelectedGenders(selectedGenders.filter(g => g !== gender))}
+                                            hitSlop={{ top: 10, right: 10, bottom: 10, left: 10 }}
+                                        >
+                                            <Ionicons name="close-circle" size={16} color={COLORS.static.background} />
+                                        </TouchableOpacity>
+                                    </View>
+                                ))}
+                            </View>
+                        </View>
+                    )}
+                </FilterCard>
+
+                {/* Instruments with skill levels filtering section */}
+                <FilterCard title="Instruments & Skill Level" icon="musical-notes-outline">
                     {Object.entries(INSTRUMENTS).map(([category, instruments]) => (
                         <View key={category}>
                             <Text style={[styles.categoryLabel, { color: textColor }]}>{category}</Text>
-                            <View style={styles.chipGrid}>
-                                {instruments.map(instrument => (
-                                    <SelectableChip
-                                        key={instrument}
-                                        label={instrument}
-                                        selected={selectedInstruments.includes(instrument)}
-                                        onSelect={() => toggleMulti(selectedInstruments, setSelectedInstruments, instrument)}
-                                    />
-                                ))}
+                            <View style={styles.instrumentContainer}>
+                                {instruments.map(instrument => {
+                                    const isSelected = selectedInstruments[instrument];
+                                    const currentSkill = selectedInstruments[instrument] || 'any';
+
+                                    return (
+                                        <View key={instrument} style={styles.instrumentSkillGroup}>
+                                            <SelectableChip
+                                                label={instrument}
+                                                selected={isSelected}
+                                                onSelect={() => toggleInstrument(instrument)}
+                                                style={styles.instrumentChip}
+                                            />
+
+                                            {isSelected && (
+                                                <View style={styles.skillLevelContainer}>
+                                                    <Text style={[styles.skillLabel, { color: textColor }]}>Level:</Text>
+                                                    <View style={styles.skillChips}>
+                                                        <SelectableChip
+                                                            label="Any"
+                                                            selected={currentSkill === 'any'}
+                                                            onSelect={() => setSkillLevel(instrument, 'any')}
+                                                            style={styles.skillChip}
+                                                        />
+                                                        {SKILL_LEVELS.map(level => (
+                                                            <SelectableChip
+                                                                key={level}
+                                                                label={level}
+                                                                selected={currentSkill === level}
+                                                                onSelect={() => setSkillLevel(instrument, level)}
+                                                                style={styles.skillChip}
+                                                            />
+                                                        ))}
+                                                    </View>
+                                                </View>
+                                            )}
+                                        </View>
+                                    );
+                                })}
                             </View>
                         </View>
                     ))}
                 </FilterCard>
 
-                {/* Skill level filtering section */}
-                <FilterCard title="Skill Level" icon="star-outline">
-                    <View style={styles.chipGrid}>
-                        {SKILL_LEVELS.map(level => (
-                            <SelectableChip
-                                key={level}
-                                label={level}
-                                selected={selectedSkill.includes(level)}
-                                onSelect={() => toggleMulti(selectedSkill, setSelectedSkill, level)}
+                {/* Age range filtering section */}
+                <FilterCard title="Age Range" icon="person-outline">
+                    <View style={styles.agePresetsContainer}>
+                        {AGE_PRESETS.map(preset => {
+                            const isSelected = minAge === preset.min && maxAge === preset.max;
+                            return (
+                                <TouchableOpacity
+                                    key={preset.label}
+                                    style={[
+                                        styles.agePresetChip,
+                                        isSelected && styles.agePresetChipSelected
+                                    ]}
+                                    onPress={() => {
+                                        if (isSelected) {
+                                            // If already selected, deselect by setting to "Any Age" default
+                                            setMinAge(18);
+                                            setMaxAge(65);
+                                        } else {
+                                            // If not selected, apply this preset
+                                            setMinAge(preset.min);
+                                            setMaxAge(preset.max);
+                                        }
+                                        setShowCustomAge(false);
+                                    }}
+                                    activeOpacity={0.7}
+                                >
+                                    <Text style={[
+                                        styles.agePresetText,
+                                        isSelected && styles.agePresetTextSelected
+                                    ]}>
+                                        {preset.label}
+                                    </Text>
+                                    {isSelected && (
+                                        <View style={styles.ageCheckmark}>
+                                            <Ionicons name="checkmark" size={12} color="#fff" />
+                                        </View>
+                                    )}
+                                </TouchableOpacity>
+                            );
+                        })}
+
+                        <TouchableOpacity
+                            style={[
+                                styles.agePresetChip,
+                                styles.customAgeChip,
+                                showCustomAge && styles.agePresetChipSelected
+                            ]}
+                            onPress={() => setShowCustomAge(!showCustomAge)}
+                            activeOpacity={0.7}
+                        >
+                            <Text style={[
+                                styles.agePresetText,
+                                showCustomAge && styles.agePresetTextSelected
+                            ]}>
+                                Custom
+                            </Text>
+                            <Ionicons
+                                name={showCustomAge ? "chevron-up" : "settings-outline"}
+                                size={14}
+                                color={showCustomAge ? "#fff" : "#666"}
+                                style={{ marginLeft: 6 }}
                             />
-                        ))}
+                        </TouchableOpacity>
+                    </View>
+
+                    {showCustomAge && (
+                        <View style={styles.customAgeContainer}>
+                            <View style={styles.customAgeInputs}>
+                                <View style={styles.ageInputContainer}>
+                                    <Text style={[styles.ageLabel, { color: textColor }]}>Min</Text>
+                                    <TextInput
+                                        style={[styles.ageInput, {
+                                            color: textColor,
+                                            backgroundColor: isDark ? '#3c3c3e' : '#F5F0FB'
+                                        }]}
+                                        value={minAge.toString()}
+                                        onChangeText={(text) => {
+                                            const age = parseInt(text) || 18;
+                                            if (age >= 18 && age <= 100) setMinAge(age);
+                                        }}
+                                        keyboardType="numeric"
+                                        maxLength={2}
+                                    />
+                                </View>
+                                <Text style={[styles.ageRangeText, { color: textColor }]}>to</Text>
+                                <View style={styles.ageInputContainer}>
+                                    <Text style={[styles.ageLabel, { color: textColor }]}>Max</Text>
+                                    <TextInput
+                                        style={[styles.ageInput, {
+                                            color: textColor,
+                                            backgroundColor: isDark ? '#3c3c3e' : '#F5F0FB'
+                                        }]}
+                                        value={maxAge.toString()}
+                                        onChangeText={(text) => {
+                                            const age = parseInt(text) || 65;
+                                            if (age >= 18 && age <= 100) setMaxAge(age);
+                                        }}
+                                        keyboardType="numeric"
+                                        maxLength={2}
+                                    />
+                                </View>
+                            </View>
+                        </View>
+                    )}
+
+                    <View style={styles.ageDisplayContainer}>
+                        <Text style={[styles.ageDisplay, { color: isDark ? '#aaa' : '#888' }]}>
+                            Selected range: {minAge} - {maxAge} years
+                        </Text>
                     </View>
                 </FilterCard>
 
@@ -292,7 +546,7 @@ const DiscoverFiltersScreen = () => {
 
                     {/* Custom genre input */}
                     <TextInput
-                        style={[styles.input, { color: textColor, backgroundColor: isDark ? '#3c3c3e' : '#F5F5F5' }]}
+                        style={[styles.input, { color: textColor, backgroundColor: isDark ? '#3c3c3e' : '#F5F0FB' }]}
                         placeholder="Add custom genre..."
                         placeholderTextColor="#9E9E9E"
                         value={customGenre}
@@ -312,28 +566,13 @@ const DiscoverFiltersScreen = () => {
                                             onPress={() => setSelectedGenres(selectedGenres.filter(g => g !== genre))}
                                             hitSlop={{ top: 10, right: 10, bottom: 10, left: 10 }}
                                         >
-                                            <Ionicons name="close-circle" size={16} color={COLORS.static.primaryGradient[0]} />
+                                            <Ionicons name="close-circle" size={16} color={COLORS.static.background} />
                                         </TouchableOpacity>
                                     </View>
                                 ))}
                             </View>
                         </View>
                     )}
-                </FilterCard>
-
-                {/* Additional filters section */}
-                <FilterCard title="Additional Filters" icon="options-outline">
-                    <Text style={[styles.categoryLabel, { color: textColor }]}>Gender Preference</Text>
-                    <View style={styles.chipGrid}>
-                        {GENDERS.map(gender => (
-                            <SelectableChip
-                                key={gender}
-                                label={gender}
-                                selected={selectedGender === gender}
-                                onSelect={() => setSelectedGender(gender)}
-                            />
-                        ))}
-                    </View>
                 </FilterCard>
 
                 {/* Action buttons - Reset and Apply */}
@@ -406,158 +645,162 @@ const styles = StyleSheet.create({
         paddingBottom: 100
     },
     card: {
-        borderRadius: 16,
-        padding: 20,
-        marginBottom: 16,
-        shadowColor: "#000",
-        shadowOffset: { width: 0, height: 2 },
-        shadowOpacity: 0.1,
-        shadowRadius: 4,
-        elevation: 3,
+        borderRadius: 20,
+        padding: 24,
+        marginBottom: 20,
+        shadowColor: COLORS.static.primaryGradient[0],
+        shadowOffset: { width: 0, height: 4 },
+        shadowOpacity: 0.15,
+        shadowRadius: 8,
+        elevation: 6,
+        borderWidth: 1,
+        borderColor: `${COLORS.static.background}20`,
     },
     cardHeader: {
         flexDirection: 'row',
         alignItems: 'center',
-        marginBottom: 16,
+        marginBottom: 20,
     },
     cardTitle: {
         fontSize: 20,
-        fontWeight: '600',
+        fontWeight: '700',
         marginLeft: 12,
-    },
-    row: {
-        flexDirection: 'row',
-        alignItems: 'center',
-        justifyContent: 'space-between',
-        marginVertical: 8
-    },
-    rowLabel: {
-        fontSize: 16,
-        fontWeight: '500',
-    },
-    sliderContainer: {
-        marginVertical: 16
-    },
-    sliderLabels: {
-        flexDirection: 'row',
-        justifyContent: 'space-between',
-        alignItems: 'center',
-        marginTop: 8
-    },
-    sliderLabel: {
-        fontSize: 12,
-        fontWeight: '500',
-    },
-    sliderValue: {
-        fontSize: 16,
-        fontWeight: '600',
     },
     categoryLabel: {
         fontSize: 16,
-        fontWeight: '600',
-        marginBottom: 12,
-        marginTop: 8,
+        fontWeight: '700',
+        marginBottom: 16,
+        marginTop: 12,
+        color: COLORS.button.primary,
     },
     chipGrid: {
         flexDirection: 'row',
         flexWrap: 'wrap',
-        marginBottom: 12,
+        marginBottom: 16,
+        gap: 8,
     },
     chip: {
-        paddingVertical: 10,
-        paddingHorizontal: 16,
-        borderRadius: 25,
-        backgroundColor: '#F0F0F0',
+        paddingVertical: 12,
+        paddingHorizontal: 18,
+        borderRadius: 30,
+        backgroundColor: COLORS.button.tertiary,
         marginRight: 8,
         marginBottom: 8,
         flexDirection: 'row',
         alignItems: 'center',
-        borderWidth: 1,
-        borderColor: 'transparent'
+        borderWidth: 2,
+        borderColor: 'transparent',
+        shadowColor: COLORS.static.primaryGradient[0],
+        shadowOffset: { width: 0, height: 2 },
+        shadowOpacity: 0.1,
+        shadowRadius: 4,
+        elevation: 2,
     },
     chipSelected: {
-        backgroundColor: '#E1C4FF',
-        borderColor: COLORS.static.primaryGradient[0],
+        backgroundColor: COLORS.button.primary,
+        borderColor: COLORS.static.primaryGradient[1],
+        shadowOpacity: 0.3,
+        elevation: 4,
     },
     chipText: {
-        color: '#555',
+        color: COLORS.button.textSecondary,
         fontSize: 14,
-        fontWeight: '500',
+        fontWeight: '600',
     },
     chipTextSelected: {
-        color: COLORS.static.primaryGradient[0],
-        fontWeight: '600'
+        color: '#fff',
+        fontWeight: '700'
     },
     checkmarkContainer: {
-        backgroundColor: COLORS.static.primaryGradient[0],
-        borderRadius: 10,
-        width: 16,
-        height: 16,
+        backgroundColor: COLORS.static.primaryGradient[1],
+        borderRadius: 12,
+        width: 18,
+        height: 18,
         justifyContent: 'center',
         alignItems: 'center',
-        marginLeft: 6
+        marginLeft: 8,
+        shadowColor: COLORS.static.primaryGradient[1],
+        shadowOffset: { width: 0, height: 2 },
+        shadowOpacity: 0.3,
+        shadowRadius: 4,
+        elevation: 3,
     },
     input: {
-        borderRadius: 12,
-        padding: 14,
+        borderRadius: 16,
+        padding: 16,
         fontSize: 15,
-        borderWidth: 1,
-        borderColor: '#EBEBEB',
-        marginTop: 12,
-    },
-    divider: {
-        height: 1,
-        backgroundColor: '#EBEBEB',
-        marginVertical: 16
+        borderWidth: 2,
+        borderColor: `${COLORS.button.primary}40`,
+        marginTop: 16,
+        fontWeight: '500',
     },
     selectedContainer: {
-        marginTop: 16
+        marginTop: 20,
+        padding: 16,
+        backgroundColor: `${COLORS.button.primary}10`,
+        borderRadius: 16,
+        borderWidth: 1,
+        borderColor: `${COLORS.button.primary}30`,
     },
     selectedTitle: {
         fontSize: 14,
-        fontWeight: '600',
-        marginBottom: 8
+        fontWeight: '700',
+        marginBottom: 12,
+        color: COLORS.button.primary,
     },
     selectedChips: {
         flexDirection: 'row',
-        flexWrap: 'wrap'
+        flexWrap: 'wrap',
+        gap: 8,
     },
     selectedChip: {
         flexDirection: 'row',
         alignItems: 'center',
-        backgroundColor: '#E1C4FF',
-        paddingVertical: 6,
-        paddingHorizontal: 12,
-        borderRadius: 20,
+        backgroundColor: COLORS.button.primary,
+        paddingVertical: 8,
+        paddingHorizontal: 14,
+        borderRadius: 25,
         marginRight: 8,
         marginBottom: 8,
-        borderWidth: 1,
-        borderColor: COLORS.static.primaryGradient[0],
+        borderWidth: 2,
+        borderColor: COLORS.static.primaryGradient[1],
+        shadowColor: COLORS.button.primary,
+        shadowOffset: { width: 0, height: 2 },
+        shadowOpacity: 0.3,
+        shadowRadius: 4,
+        elevation: 3,
     },
     selectedChipText: {
         fontSize: 14,
-        color: COLORS.static.primaryGradient[0],
-        marginRight: 6,
-        fontWeight: '500'
+        color: '#fff',
+        marginRight: 8,
+        fontWeight: '600'
     },
     buttonRow: {
         flexDirection: 'row',
         justifyContent: 'space-between',
-        marginTop: 24,
-        marginBottom: 40
+        marginTop: 32,
+        marginBottom: 40,
+        gap: 16,
     },
     resetBtn: {
         flex: 1,
-        backgroundColor: '#EEEEEE',
-        padding: 16,
+        backgroundColor: COLORS.button.tertiary,
+        padding: 18,
         borderRadius: 30,
-        marginRight: 12,
         alignItems: 'center',
-        justifyContent: 'center'
+        justifyContent: 'center',
+        borderWidth: 2,
+        borderColor: `${COLORS.button.primary}40`,
+        shadowColor: COLORS.button.primary,
+        shadowOffset: { width: 0, height: 4 },
+        shadowOpacity: 0.1,
+        shadowRadius: 8,
+        elevation: 4,
     },
     resetBtnText: {
-        color: '#666',
-        fontWeight: '600',
+        color: COLORS.button.primary,
+        fontWeight: '700',
         fontSize: 16
     },
     applyBtnContainer: {
@@ -566,9 +809,14 @@ const styles = StyleSheet.create({
     applyBtn: {
         borderRadius: 30,
         overflow: 'hidden',
+        shadowColor: COLORS.static.primaryGradient[0],
+        shadowOffset: { width: 0, height: 6 },
+        shadowOpacity: 0.4,
+        shadowRadius: 12,
+        elevation: 8,
     },
     gradientBtn: {
-        padding: 16,
+        padding: 18,
         flexDirection: 'row',
         alignItems: 'center',
         justifyContent: 'center',
@@ -581,7 +829,203 @@ const styles = StyleSheet.create({
     },
     applyBtnIcon: {
         marginLeft: 8
-    }
+    },
+
+    // City selection styles
+    citySelectHeader: {
+        flexDirection: 'row',
+        justifyContent: 'space-between',
+        alignItems: 'center',
+        padding: 18,
+        borderRadius: 16,
+        borderWidth: 2,
+        borderColor: `${COLORS.button.primary}30`,
+        marginVertical: 8
+    },
+    citySelectText: {
+        fontSize: 16,
+        fontWeight: '600',
+    },
+    cityDropdown: {
+        borderRadius: 16,
+        marginTop: 12,
+        maxHeight: 300,
+        borderWidth: 2,
+        borderColor: `${COLORS.button.primary}30`,
+        overflow: 'hidden',
+    },
+    citySearchInput: {
+        padding: 16,
+        borderBottomWidth: 1,
+        borderBottomColor: `${COLORS.button.primary}30`,
+        fontSize: 16,
+        fontWeight: '500',
+    },
+    clearAllBtn: {
+        padding: 16,
+        alignItems: 'center',
+        borderBottomWidth: 1,
+        borderBottomColor: `${COLORS.button.primary}30`,
+    },
+    clearAllText: {
+        color: COLORS.static.background,
+        fontWeight: '700',
+        fontSize: 14,
+    },
+    cityList: {
+        maxHeight: 200,
+    },
+    cityItem: {
+        flexDirection: 'row',
+        justifyContent: 'space-between',
+        alignItems: 'center',
+        padding: 16,
+        borderBottomWidth: 1,
+        borderBottomColor: `${COLORS.button.primary}20`,
+    },
+    cityItemSelected: {
+        backgroundColor: `${COLORS.button.primary}20`,
+    },
+    cityItemText: {
+        fontSize: 15,
+        fontWeight: '600',
+    },
+    cityItemTextSelected: {
+        color: COLORS.button.primary,
+        fontWeight: '700',
+    },
+
+    // Instrument & skill selection styles
+    instrumentContainer: {
+        marginBottom: 20,
+    },
+    instrumentSkillGroup: {
+        marginBottom: 20,
+    },
+    instrumentChip: {
+        marginBottom: 12,
+    },
+    skillLevelContainer: {
+        marginLeft: 20,
+        marginTop: 12,
+        padding: 16,
+        backgroundColor: `${COLORS.static.primaryGradient[1]}15`,
+        borderRadius: 16,
+        borderLeftWidth: 4,
+        borderLeftColor: COLORS.static.primaryGradient[1],
+    },
+    skillLabel: {
+        fontSize: 14,
+        fontWeight: '700',
+        marginBottom: 12,
+        color: COLORS.static.primaryGradient[1],
+    },
+    skillChips: {
+        flexDirection: 'row',
+        flexWrap: 'wrap',
+        gap: 8,
+    },
+    skillChip: {
+        marginRight: 8,
+        marginBottom: 8,
+    },
+
+    // Age range styles with preset chips
+    agePresetsContainer: {
+        flexDirection: 'row',
+        flexWrap: 'wrap',
+        gap: 10,
+        marginVertical: 16,
+    },
+    agePresetChip: {
+        paddingVertical: 12,
+        paddingHorizontal: 16,
+        borderRadius: 25,
+        backgroundColor: COLORS.button.tertiary,
+        borderWidth: 2,
+        borderColor: `${COLORS.button.primary}30`,
+        flexDirection: 'row',
+        alignItems: 'center',
+        shadowColor: COLORS.button.primary,
+        shadowOffset: { width: 0, height: 2 },
+        shadowOpacity: 0.1,
+        shadowRadius: 4,
+        elevation: 2,
+        minWidth: 70,
+        justifyContent: 'center',
+    },
+    agePresetChipSelected: {
+        backgroundColor: COLORS.button.primary,
+        borderColor: COLORS.static.primaryGradient[1],
+        shadowOpacity: 0.3,
+        elevation: 4,
+    },
+    agePresetText: {
+        fontSize: 14,
+        fontWeight: '600',
+        color: COLORS.button.textSecondary,
+    },
+    agePresetTextSelected: {
+        color: '#fff',
+        fontWeight: '700',
+    },
+    ageCheckmark: {
+        backgroundColor: COLORS.static.primaryGradient[1],
+        borderRadius: 10,
+        width: 16,
+        height: 16,
+        justifyContent: 'center',
+        alignItems: 'center',
+        marginLeft: 6,
+    },
+    customAgeContainer: {
+        marginTop: 16,
+        padding: 16,
+        backgroundColor: `${COLORS.static.primaryGradient[1]}10`,
+        borderRadius: 16,
+        borderWidth: 1,
+        borderColor: `${COLORS.static.primaryGradient[1]}30`,
+    },
+    customAgeInputs: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        justifyContent: 'space-between',
+    },
+    ageInputContainer: {
+        alignItems: 'center',
+        flex: 1,
+    },
+    ageLabel: {
+        fontSize: 14,
+        fontWeight: '700',
+        marginBottom: 12,
+        color: COLORS.button.primary,
+    },
+    ageInput: {
+        borderRadius: 12,
+        padding: 16,
+        borderWidth: 2,
+        borderColor: `${COLORS.button.primary}30`,
+        fontSize: 16,
+        textAlign: 'center',
+        minWidth: 70,
+        fontWeight: '700',
+    },
+    ageRangeText: {
+        fontSize: 18,
+        fontWeight: '700',
+        marginHorizontal: 20,
+        color: COLORS.static.primaryGradient[1],
+    },
+    ageDisplayContainer: {
+        marginTop: 12,
+        alignItems: 'center',
+    },
+    ageDisplay: {
+        fontSize: 14,
+        fontWeight: '600',
+        textAlign: 'center',
+    },
 });
 
-export default DiscoverFiltersScreen;
+export default FiltersScreen;

@@ -80,11 +80,11 @@ export default function App() {
         <GestureHandlerRootView style={styles.container}>
             <SafeAreaProvider>
                 <SignupFlowProvider>
-                    <AuthProvider>
-                        <FiltersProvider>
+                    <FiltersProvider>
+                        <AuthProvider>
                             <AppNavigator />
-                        </FiltersProvider>
-                    </AuthProvider>
+                        </AuthProvider>
+                    </FiltersProvider>
                 </SignupFlowProvider>
             </SafeAreaProvider>
         </GestureHandlerRootView>

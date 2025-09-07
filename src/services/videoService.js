@@ -395,16 +395,18 @@ export const fetchMusicians = async (type = 'initial', username = null, filterCr
 /**
  * @param {number} offset - The starting index for fetching videos
  * @param {number} limit - How many videos to fetch
+ * @param {string} currentUser - Current user to exclude from results
  * @returns {Promise<Array>} - Array of unique video objects
  */
-export const fetchVideos = async (offset = 0, limit = 5) => {
+export const fetchVideos = async (offset = 0, limit = 5, currentUser = 'default_user') => {
     try {
         if (offset === 0) {
             fetchedVideoIds.clear();
             logger.debug('Reset video state tracking');
         }
 
-        const musicians = await fetchInitialMusicians('default_user');
+        // Pass the actual currentUser to exclude them from results
+        const musicians = await fetchInitialMusicians(currentUser);
 
         const videos = musicians.map(musician => ({
             id: musician.id,

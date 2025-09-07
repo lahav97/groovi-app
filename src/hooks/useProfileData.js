@@ -1,17 +1,10 @@
-/**
- * @module useProfileData
- * Custom hook for profile data loading with instant cache and background refresh
- * Handles all profile loading logic, caching, and state management
- *  Consistent instruments/genres/videos formatting to prevent rendering errors
- *  Compatible with updated BackgroundDataService and cacheManager
- */
-
 import { useState, useRef, useEffect } from 'react';
 import { Alert } from 'react-native';
 import { useAuth } from '../context/AuthContext';
 import { getCurrentUserEmail } from '../utils/userUtils';
 import { fetchUserProfile } from '../services/profileService';
-import { getProfileCache, cacheUserProfile, clearAllCaches } from '../utils/cacheManager';
+import { getProfileCache, cacheUserProfile } from '../utils/cacheManager';
+import AppMemoryManager from '../utils/AppMemoryManager';
 import {
     handleError,
     ERROR_MESSAGES
@@ -20,9 +13,9 @@ import { createLogger } from '../utils/Logger';
 
 const logger = createLogger('useProfileData');
 
-/* ------------------------ Small parsing/normalization helpers ------------------------ */
-
-/** Try JSON.parse if the value looks like JSON */
+/**
+ * Try JSON.parse if the value looks like JSON
+ */
 const tryParseJSON = (value) => {
     if (typeof value !== 'string') return value;
     const v = value.trim();
@@ -35,20 +28,19 @@ const tryParseJSON = (value) => {
     return value;
 };
 
-/** Parse a *simple* Postgres TEXT[] string like "{a,b,c}" into an array of strings */
+/**
+ * Parse a simple Postgres TEXT[] string like "{a,b,c}" into an array of strings
+ */
 const parsePgArray = (value) => {
     if (typeof value !== 'string') return value;
     const v = value.trim();
     if (!(v.startsWith('{') && v.endsWith('}'))) return value;
 
-    // Remove braces, then split by comma not inside quotes (simple case: URLs rarely contain commas)
     const inner = v.slice(1, -1);
-    // Strip optional quotes around items and unescape common sequences
     return inner
         .split(',')
         .map(item => item.trim())
         .map(item => {
-            // remove wrapping quotes if present
             if ((item.startsWith('"') && item.endsWith('"')) || (item.startsWith("'") && item.endsWith("'"))) {
                 item = item.slice(1, -1);
             }
@@ -57,7 +49,9 @@ const parsePgArray = (value) => {
         .filter(Boolean);
 };
 
-/** Ensure an array (handles JSON strings and PG array strings) */
+/**
+ * Ensure an array (handles JSON strings and PG array strings)
+ */
 const ensureArray = (value) => {
     if (Array.isArray(value)) return value;
     const maybeJson = tryParseJSON(value);
@@ -67,7 +61,9 @@ const ensureArray = (value) => {
     return [];
 };
 
-/** Ensure a plain object (handles JSON string) */
+/**
+ * Ensure a plain object (handles JSON string)
+ */
 const ensureObject = (value) => {
     if (value && typeof value === 'object' && !Array.isArray(value)) return value;
     const maybeJson = tryParseJSON(value);
@@ -75,11 +71,12 @@ const ensureObject = (value) => {
     return null;
 };
 
-/** Safe field formatter to prevent object rendering errors (fallback to default text) */
+/**
+ * Safe field formatter to prevent object rendering errors
+ */
 const formatFieldSafely = (value, defaultValue = 'Not specified') => {
     if (value === null || value === undefined) return defaultValue;
 
-    // If JSON string -> parse first
     const parsed = tryParseJSON(value);
 
     if (typeof parsed === 'object' && !Array.isArray(parsed)) {
@@ -96,23 +93,20 @@ const formatFieldSafely = (value, defaultValue = 'Not specified') => {
     return stringValue || defaultValue;
 };
 
-/* ------------------------ Profile normalization ------------------------ */
-
+/**
+ * Profile normalization with safe rendering
+ */
 const normalizeProfileData = (profileData) => {
     if (!profileData) return null;
 
-    // Map common naming mismatches from backend
     const addressOrLocation = profileData.location ?? profileData.address ?? null;
 
-    // Instruments may come as object, array, JSON string, or plain string
     const asObject = ensureObject(profileData.instruments);
     const asArray = ensureArray(profileData.instruments);
 
-    // Genres/videos may come as array, JSON array string, or PG TEXT[] string
     const genresArray = ensureArray(profileData.genres);
     const videosArray = ensureArray(profileData.videos);
 
-    // Build a friendly instruments string
     const instrumentsString = (() => {
         if (asObject) {
             const keys = Object.keys(asObject);
@@ -121,33 +115,29 @@ const normalizeProfileData = (profileData) => {
         if (asArray.length > 0) {
             return asArray.join(', ');
         }
-        // fallback to raw string (safe format)
         return formatFieldSafely(profileData.instruments, 'Guitar, Acoustic Guitar');
     })();
 
     return {
         ...profileData,
-        // display-safe primitives
         username: formatFieldSafely(profileData.username, 'Unknown'),
         bio: formatFieldSafely(profileData.bio, 'Music enthusiast looking to connect!'),
         location: formatFieldSafely(addressOrLocation, 'Unknown'),
 
-        // numbers safe
         age: typeof profileData.age === 'number' ? profileData.age : null,
         rating: typeof profileData.rating === 'number' ? profileData.rating : null,
         followers: typeof profileData.followers === 'number' ? profileData.followers : 0,
         following: typeof profileData.following === 'number' ? profileData.following : 0,
         likes: typeof profileData.likes === 'number' ? profileData.likes : 0,
 
-        // final normalized collections
-        instruments: instrumentsString,      // string for easy rendering
-        instruments_raw: asObject || asArray, // keep raw form if the UI needs it
-        genres: genresArray,                 // stay array (chips UI, etc.)
-        videos: videosArray,                 // always array
+        profile_picture: profileData.profile_picture || profileData.profilePicture || 'https://i.pravatar.cc/150?img=1',
+
+        instruments: instrumentsString,
+        instruments_raw: asObject || asArray,
+        genres: genresArray,
+        videos: videosArray,
     };
 };
-
-/* ------------------------------------ Hook ------------------------------------ */
 
 export const useProfileData = () => {
     const { user, signOut } = useAuth();
@@ -162,8 +152,9 @@ export const useProfileData = () => {
     const backgroundRefreshTimeout = useRef(null);
     const mountedRef = useRef(true);
 
-    /* ----------------------------- Logout with cleanup ----------------------------- */
-
+    /**
+     * Logout with coordinated cleanup through single gate
+     */
     const handleLogout = async () => {
         Alert.alert(
             'Sign Out',
@@ -178,10 +169,9 @@ export const useProfileData = () => {
     const performLogout = async () => {
         setLoggingOut(true);
         try {
-            // Best effort cache clear
-            try { await clearAllCaches(); } catch (cacheError) {
-                console.warn('⚠️ Cache clear failed during logout:', cacheError);
-            }
+            // Request emergency cleanup through single gate instead of direct cache clearing
+            logger.info('🚪 Requesting cleanup before logout');
+            AppMemoryManager.forceCleanup('user_logout');
 
             const result = await signOut();
 
@@ -191,6 +181,7 @@ export const useProfileData = () => {
                     setLoading(false);
                     setError(null);
                 }
+                logger.info('✅ Logout completed successfully');
             } else {
                 if (mountedRef.current) {
                     Alert.alert(
@@ -201,6 +192,7 @@ export const useProfileData = () => {
                 }
             }
         } catch (err) {
+            logger.error('❌ Logout error', { error: err.message });
             if (mountedRef.current) {
                 Alert.alert(
                     'Logout Error',
@@ -213,9 +205,9 @@ export const useProfileData = () => {
         }
     };
 
-    /* ------------------------------- Load strategies ------------------------------- */
-
-    // INSTANT cache → background refresh
+    /**
+     * Instant cache load with background refresh
+     */
     const loadProfileInstantly = async () => {
         try {
             const userEmail = user?.email || await getCurrentUserEmail();
@@ -224,7 +216,7 @@ export const useProfileData = () => {
                 return;
             }
 
-            // STEP 1: INSTANT CACHE (no spinner)
+            // Step 1: Instant cache load
             try {
                 const cachedProfile = await getProfileCache(userEmail);
                 if (cachedProfile && mountedRef.current) {
@@ -238,20 +230,20 @@ export const useProfileData = () => {
                         videos: normalized.videos?.length || 0
                     });
 
-                    // STEP 2: SILENT BACKGROUND REFRESH
+                    // Step 2: Silent background refresh
                     silentBackgroundRefresh(userEmail);
                     return normalized;
                 }
             } catch (cacheError) {
-                console.warn('⚠️ Cache loading failed:', cacheError);
+                logger.warn('⚠️ Cache loading failed', { error: cacheError.message });
             }
 
-            // STEP 3: NO CACHE → FRESH LOAD
+            // Step 3: Fresh load if no cache
             if (mountedRef.current) setLoading(true);
             await loadFreshProfile(userEmail);
 
         } catch (err) {
-            console.error('❌ useProfileData: Error in instant loading:', err);
+            logger.error('❌ Error in instant loading', { error: err.message });
             if (mountedRef.current) {
                 setError(handleError(err, 'useProfileData/loadProfileInstantly'));
                 setLoading(false);
@@ -259,7 +251,9 @@ export const useProfileData = () => {
         }
     };
 
-    // SILENT background refresh (no UI blocking)
+    /**
+     * Silent background refresh
+     */
     const silentBackgroundRefresh = async (userEmail) => {
         try {
             if (backgroundRefreshTimeout.current) {
@@ -290,21 +284,23 @@ export const useProfileData = () => {
                     try {
                         await cacheUserProfile(normalizedFresh, userEmail);
                     } catch (cacheError) {
-                        console.warn('⚠️ Background cache failed:', cacheError);
+                        logger.warn('⚠️ Background cache failed', { error: cacheError.message });
                     }
                 } catch (refreshError) {
-                    console.warn('⚠️ Background refresh failed:', refreshError);
+                    logger.warn('⚠️ Background refresh failed', { error: refreshError.message });
                 } finally {
                     if (mountedRef.current) setIsBackgroundRefreshing(false);
                 }
             }, 100);
         } catch (error) {
-            console.error('❌ Background refresh setup failed:', error);
+            logger.error('❌ Background refresh setup failed', { error: error.message });
             if (mountedRef.current) setIsBackgroundRefreshing(false);
         }
     };
 
-    // FRESH API load (also used by pull-to-refresh and after uploads)
+    /**
+     * Fresh API load
+     */
     const loadFreshProfile = async (userEmail) => {
         try {
             setLoadSource('fresh_api');
@@ -322,20 +318,22 @@ export const useProfileData = () => {
                 try {
                     await cacheUserProfile(normalized, userEmail);
                 } catch (cacheError) {
-                    console.warn('⚠️ Fresh profile cache failed:', cacheError);
+                    logger.warn('⚠️ Fresh profile cache failed', { error: cacheError.message });
                 }
             } else if (mountedRef.current) {
                 setError(ERROR_MESSAGES.AUTH.USER_NOT_FOUND);
             }
         } catch (err) {
-            console.error('❌ useProfileData: Fresh profile loading failed:', err);
+            logger.error('❌ Fresh profile loading failed', { error: err.message });
             if (mountedRef.current) setError(handleError(err, 'useProfileData/loadFreshProfile'));
         } finally {
             if (mountedRef.current) setLoading(false);
         }
     };
 
-    // Pull-to-refresh (user-initiated)
+    /**
+     * Pull-to-refresh
+     */
     const onRefresh = async () => {
         if (!mountedRef.current) return;
         setRefreshing(true);
@@ -350,8 +348,9 @@ export const useProfileData = () => {
         }
     };
 
-    /* ------------------------------ Instruments text ------------------------------ */
-
+    /**
+     * Format instruments for display
+     */
     const formatInstruments = () => {
         if (!profile?.instruments) return 'Guitar, Acoustic Guitar';
         const instruments = profile.instruments;
@@ -366,28 +365,25 @@ export const useProfileData = () => {
         return String(instruments) || 'Guitar, Acoustic Guitar';
     };
 
-    /* --------------------------------- Lifecycle --------------------------------- */
-
+    /**
+     * Component lifecycle
+     */
     useEffect(() => {
         mountedRef.current = true;
         loadProfileInstantly();
 
         return () => {
-            // mark unmounted
             mountedRef.current = false;
 
-            // Clear timers only — DO NOT set state during unmount
             if (backgroundRefreshTimeout.current) {
                 clearTimeout(backgroundRefreshTimeout.current);
                 backgroundRefreshTimeout.current = null;
             }
         };
-        // eslint-disable-next-line react-hooks/exhaustive-deps
     }, []);
 
     /**
-     * Auto-sync with AuthContext user data changes (e.g., after upload the
-     * Upload screen updates the user in context → reflect here immediately).
+     * Auto-sync with AuthContext user data changes
      */
     useEffect(() => {
         if (!user || !mountedRef.current) return;
@@ -403,7 +399,7 @@ export const useProfileData = () => {
             const userVideos = user.videos;
 
             if (JSON.stringify(currentVideos) !== JSON.stringify(userVideos)) {
-                logger.info('📹 Syncing profile.videos with context user.videos', {
+                logger.info('🔹 Syncing profile.videos with context user.videos', {
                     currentCount: currentVideos.length,
                     newCount: userVideos.length
                 });
@@ -423,17 +419,10 @@ export const useProfileData = () => {
                 }
             }
         }
-        // Only react to the specific fields we care about
-        // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [user?.videos, user?.username]);
 
-    /* ---------------------- Public method for post-upload refresh ---------------------- */
-
     /**
-     * Force a fresh server fetch (use this right after a successful upload+DB update).
-     * Example usage from VideoUploadScreen:
-     *   const { refreshFromServer } = useProfileData();
-     *   await refreshFromServer();
+     * Force server refresh after video upload
      */
     const refreshFromServer = async () => {
         const userEmail = user?.email || await getCurrentUserEmail();
@@ -441,10 +430,8 @@ export const useProfileData = () => {
         await loadFreshProfile(userEmail);
     };
 
-    /* ----------------------------------- Return ----------------------------------- */
-
     return {
-        // data
+        // Data
         profile,
         loading,
         error,
@@ -453,13 +440,13 @@ export const useProfileData = () => {
         loadSource,
         isBackgroundRefreshing,
 
-        // actions
+        // Actions
         handleLogout,
         onRefresh,
         loadProfileInstantly,
-        refreshFromServer,     // ← call this after video upload succeeds
+        refreshFromServer,
 
-        // utils
+        // Utils
         formatInstruments,
     };
 };

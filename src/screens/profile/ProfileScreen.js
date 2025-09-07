@@ -1,11 +1,9 @@
 /**
- * @module ProfileScreen
- * LIGHTNING-FAST profile screen - Clean, modular, and maintainable
- * Uses custom hooks and components for better organization
- * Now with Hebrew font support using Rubik
+ * FIXED ProfileScreen - Clean loading without skeleton conflicts
+ * Checks cache first, shows clean loading only when needed
  */
 
-import React from 'react';
+import React, { useState, useEffect } from 'react';
 import {
     View,
     Text,
@@ -20,28 +18,32 @@ import {
 import { Ionicons } from '@expo/vector-icons';
 import { useNavigation } from '@react-navigation/native';
 import BottomNavigation from '../../components/navigationBar/BottomNavigation';
-import { COLORS, SIZES, LAYOUT, FONTS, TEXT_UTILS } from '../../styles/theme';
+import { COLORS, SIZES, LAYOUT, FONTS } from '../../styles/theme';
 import { useProfileData } from '../../hooks/useProfileData';
 import { useVideoCache } from '../../hooks/useVideoCache';
 import ProfileVideoSwiper from '../../components/profile/ProfileVideoSwiper';
 import ProfileInfo from '../../components/profile/ProfileInfo';
 import { handleError } from '../../utils/errors';
+import BackgroundDataService from '../../services/BackgroundDataService';
+import { getProfileCache } from '../../utils/cacheManager';
+import { useAuth } from '../../context/AuthContext';
 
-/**
- * @function ProfileScreen
- * @description Clean, modular ProfileScreen with separated concerns and Hebrew support
- * @returns {JSX.Element}
- */
 const ProfileScreen = () => {
     const navigation = useNavigation();
     const colorScheme = useColorScheme();
     const theme = colorScheme === 'dark' ? COLORS.dark : COLORS.light;
+    const { user } = useAuth();
 
-    // Profile data management
+    // Smart loading state management
+    const [smartLoading, setSmartLoading] = useState(true);
+    const [cachedProfile, setCachedProfile] = useState(null);
+    const [useHookFallback, setUseHookFallback] = useState(false);
+
+    // Profile data management (only used as fallback)
     const {
-        profile,
-        loading,
-        error,
+        profile: hookProfile,
+        loading: hookLoading,
+        error: hookError,
         refreshing,
         loggingOut,
         isBackgroundRefreshing,
@@ -50,6 +52,11 @@ const ProfileScreen = () => {
         loadProfileInstantly,
         formatInstruments,
     } = useProfileData();
+
+    // Determine which profile data to use
+    const profile = cachedProfile || hookProfile;
+    const loading = useHookFallback ? hookLoading : smartLoading;
+    const error = useHookFallback ? hookError : null;
 
     // Video caching and management
     const {
@@ -65,15 +72,78 @@ const ProfileScreen = () => {
         clearVideoCache,
     } = useVideoCache(profile?.videos);
 
+    // Smart profile loading on mount
+    useEffect(() => {
+        const loadProfileSmart = async () => {
+            try {
+                // Check if BackgroundDataService already has profile
+                const serviceStatus = BackgroundDataService.getSeparatedSystemStatus();
+
+                if (serviceStatus.profile.loaded) {
+                    // Profile already loaded by BackgroundDataService
+                    const cached = await getProfileCache(user?.email);
+                    if (cached) {
+                        setCachedProfile(cached);
+                        setSmartLoading(false);
+                        console.log('Profile loaded instantly from cache');
+                        return;
+                    }
+                }
+
+                // Check direct cache
+                const directCache = await getProfileCache(user?.email);
+                if (directCache) {
+                    setCachedProfile(directCache);
+                    setSmartLoading(false);
+                    console.log('Profile loaded from direct cache');
+                    return;
+                }
+
+                // No cache available, fall back to hook loading
+                console.log('No cached profile, using hook fallback');
+                setUseHookFallback(true);
+                setSmartLoading(false);
+
+            } catch (error) {
+                console.error('Smart profile loading failed:', error);
+                setUseHookFallback(true);
+                setSmartLoading(false);
+            }
+        };
+
+        if (user?.email) {
+            loadProfileSmart();
+        }
+    }, [user?.email]);
+
     // Clear video cache on logout
-    React.useEffect(() => {
+    useEffect(() => {
         if (loggingOut) {
             clearVideoCache();
         }
     }, [loggingOut, clearVideoCache]);
 
+    // Handle refresh - clear cache and reload
+    const handleRefresh = async () => {
+        setCachedProfile(null);
+        setSmartLoading(true);
+        setUseHookFallback(false);
+
+        // Trigger background service refresh
+        await BackgroundDataService.forceRefreshProfileOnly();
+
+        // Reload smart
+        const cached = await getProfileCache(user?.email);
+        if (cached) {
+            setCachedProfile(cached);
+        } else {
+            setUseHookFallback(true);
+        }
+        setSmartLoading(false);
+    };
+
     // ============================================================================
-    // RENDER LOADING STATE
+    // RENDER LOADING STATE (Clean, no skeleton)
     // ============================================================================
     if (loading && !profile) {
         return (
@@ -99,8 +169,10 @@ const ProfileScreen = () => {
             <SafeAreaView style={[styles.container, { backgroundColor: theme.background }]}>
                 <View style={styles.errorContainer}>
                     <Text style={[styles.errorText, { color: theme.text }]}>Failed to load profile</Text>
-                    <Text style={[styles.errorSubtext, { color: theme.textSecondary }]}>{handleError(error, 'ProfileScreen')}</Text>
-                    <TouchableOpacity style={styles.retryButton} onPress={loadProfileInstantly}>
+                    <Text style={[styles.errorSubtext, { color: theme.textSecondary }]}>
+                        {handleError(error, 'ProfileScreen')}
+                    </Text>
+                    <TouchableOpacity style={styles.retryButton} onPress={handleRefresh}>
                         <Text style={styles.retryButtonText}>Try Again</Text>
                     </TouchableOpacity>
                 </View>
@@ -112,7 +184,7 @@ const ProfileScreen = () => {
     }
 
     // ============================================================================
-    // MAIN PROFILE UI
+    // MAIN PROFILE UI (No skeleton, clean transition)
     // ============================================================================
     return (
         <SafeAreaView style={[styles.container, { backgroundColor: theme.background }]}>
@@ -139,24 +211,26 @@ const ProfileScreen = () => {
                 refreshControl={
                     <RefreshControl
                         refreshing={refreshing}
-                        onRefresh={onRefresh}
+                        onRefresh={useHookFallback ? onRefresh : handleRefresh}
                         tintColor={theme.text}
                         colors={['#ff6ec4']}
                     />
                 }
             >
                 {/* Video Swiper Component */}
-                <ProfileVideoSwiper
-                    videoObjects={videoObjects}
-                    onIndexChanged={onIndexChanged}
-                    togglePause={togglePause}
-                    shouldVideoPlay={shouldVideoPlay}
-                    handleVideoLoadStart={handleVideoLoadStart}
-                    handleVideoReadyForDisplay={handleVideoReadyForDisplay}
-                    handleVideoLoadError={handleVideoLoadError}
-                    setVideoRef={setVideoRef}
-                    videoStates={videoStates}
-                />
+                {profile?.videos && profile.videos.length > 0 && (
+                    <ProfileVideoSwiper
+                        videoObjects={videoObjects}
+                        onIndexChanged={onIndexChanged}
+                        togglePause={togglePause}
+                        shouldVideoPlay={shouldVideoPlay}
+                        handleVideoLoadStart={handleVideoLoadStart}
+                        handleVideoReadyForDisplay={handleVideoReadyForDisplay}
+                        handleVideoLoadError={handleVideoLoadError}
+                        setVideoRef={setVideoRef}
+                        videoStates={videoStates}
+                    />
+                )}
 
                 {/* Profile Information Component */}
                 <ProfileInfo
@@ -176,7 +250,7 @@ const ProfileScreen = () => {
 };
 
 // ============================================================================
-// STYLES WITH RUBIK FONT SUPPORT
+// STYLES (unchanged)
 // ============================================================================
 const styles = StyleSheet.create({
     container: {

@@ -41,11 +41,12 @@ import {
 } from '../../utils/errors';
 import { createLogger } from '../../utils/Logger';
 import NotificationService from '../../services/NotificationService';
+import { useLocationManager } from '../../hooks/useLocationManager';
+import LocationService from '../../services/LocationService';
 
 const BUILD_PROFILE_API_URL = 'https://9u6y4sfrn2.execute-api.us-east-1.amazonaws.com/groovi/build_profile';
 const predefinedGenres = ['Pop', 'Rock', 'Metal', 'Jazz', 'Hip Hop', 'Classical', 'Electronic', 'R&B'];
 
-// Initialize logger for profile setup operations
 const logger = createLogger('ProfileSetup');
 
 /**
@@ -59,6 +60,9 @@ const ProfileSetupScreen = () => {
     const builder = useSignupBuilder();
     const { user, completeOnboarding } = useAuth();
     const uploadService = getUploadService(user);
+
+    // Smart location management
+    const { currentLocation, locationLoading, forceLocationUpdate } = useLocationManager();
 
     // Address state with comprehensive location data structure
     const [address, setAddress] = useState({
@@ -124,11 +128,44 @@ const ProfileSetupScreen = () => {
     }, []);
 
     /**
+     * Update address state when smart location manager provides location
+     */
+    useEffect(() => {
+        if (currentLocation) {
+            setAddress(prevAddress => ({
+                ...prevAddress,
+                ...currentLocation,
+                // Preserve any manually entered data
+                street: prevAddress.street || currentLocation.street || '',
+                streetNumber: prevAddress.streetNumber || currentLocation.streetNumber || '',
+                city: prevAddress.city || currentLocation.city || '',
+                region: prevAddress.region || currentLocation.region || '',
+                country: prevAddress.country || currentLocation.country || '',
+                postalCode: prevAddress.postalCode || currentLocation.postalCode || '',
+                formattedAddress: prevAddress.formattedAddress || currentLocation.formattedAddress || '',
+            }));
+        }
+    }, [currentLocation]);
+
+    /**
      * Handle address updates from the AddressInput component
      * @param {Object} newAddress - Updated address object
      */
     const handleAddressChange = (newAddress) => {
         setAddress(newAddress);
+    };
+
+    /**
+     * Handle manual location refresh
+     */
+    const handleRefreshLocation = async () => {
+        try {
+            await forceLocationUpdate();
+            logger.info('Location manually refreshed');
+        } catch (error) {
+            logger.error('Failed to refresh location', { error: error.message });
+            Alert.alert('Location Error', 'Failed to refresh location. Please try again.');
+        }
     };
 
     /**
@@ -156,15 +193,15 @@ const ProfileSetupScreen = () => {
 
                 if (uploadResult.success) {
                     setProfilePictureUri(uploadResult.imageUrl);
-                    logger.info('✅ Profile picture uploaded successfully');
+                    logger.info('Profile picture uploaded successfully');
                 } else {
                     Alert.alert('Upload Error', handleError(uploadResult.error, 'ProfileSetupScreen/pickProfilePicture'));
                     setProfilePictureUri(selectedAsset.uri);
-                    logger.error('❌ Profile picture upload failed', { error: uploadResult.error });
+                    logger.error('Profile picture upload failed', { error: uploadResult.error });
                 }
             }
         } catch (error) {
-            logger.error('❌ Error picking profile picture', { error: error.message });
+            logger.error('Error picking profile picture', { error: error.message });
             Alert.alert('Error', handleError(error, 'ProfileSetupScreen/pickProfilePicture'));
         }
     };
@@ -214,7 +251,7 @@ const ProfileSetupScreen = () => {
             await processSelectedVideos(videosToProcess);
 
         } catch (err) {
-            logger.error('❌ Failed to pick videos', { error: err.message });
+            logger.error('Failed to pick videos', { error: err.message });
             setVideoError(handleError(err, 'ProfileSetupScreen/pickVideos') || 'Could not access videos.');
         }
     };
@@ -270,7 +307,7 @@ const ProfileSetupScreen = () => {
                 setVideoError(handleError(batchResult.error, 'ProfileSetupScreen/pickVideos') || 'Failed to process videos');
             }
         } catch (error) {
-            logger.error('❌ Failed to process selected videos', { error: error.message });
+            logger.error('Failed to process selected videos', { error: error.message });
             setVideoError(handleError(error, 'ProfileSetupScreen/processSelectedVideos') || 'Failed to process videos.');
         }
     };
@@ -331,7 +368,7 @@ const ProfileSetupScreen = () => {
                     });
                 }
 
-                logger.info(`✅ Video ${index + 1} uploaded successfully`);
+                logger.info(`Video ${index + 1} uploaded successfully`);
                 setVideoError('');
             } else {
                 setUploadStatuses(prev => {
@@ -341,10 +378,10 @@ const ProfileSetupScreen = () => {
                 });
 
                 setVideoError(`Failed to upload ${videoData.fileName}: ${uploadResult.error}`);
-                logger.error(`❌ Video ${index + 1} upload failed`, { error: uploadResult.error });
+                logger.error(`Video ${index + 1} upload failed`, { error: uploadResult.error });
             }
         } catch (error) {
-            logger.error(`❌ Failed to upload video ${index + 1}`, { error: error.message });
+            logger.error(`Failed to upload video ${index + 1}`, { error: error.message });
 
             setUploadStatuses(prev => {
                 const newStatuses = [...prev];
@@ -419,7 +456,7 @@ const ProfileSetupScreen = () => {
                             });
 
                         } catch (error) {
-                            logger.error('❌ Error deleting video', { error: error.message });
+                            logger.error('Error deleting video', { error: error.message });
                             Alert.alert('Error', 'Failed to delete video. Please try again.');
                         }
                     },
@@ -483,12 +520,12 @@ const ProfileSetupScreen = () => {
         }
 
         if (isUploading) {
-            logger.warn('⚠️ Profile setup already in progress, ignoring duplicate request');
+            logger.warn('Profile setup already in progress, ignoring duplicate request');
             return;
         }
 
         setIsUploading(true);
-        logger.info('🚀 Starting profile completion');
+        logger.info('Starting profile completion');
 
         try {
             const finalLocation = address.formattedAddress ||
@@ -522,7 +559,7 @@ const ProfileSetupScreen = () => {
                 requestBody.link = completeUser.link;
             }
 
-            logger.info('📤 Sending profile data to API');
+            logger.info('Sending profile data to API');
 
             let lambdaSuccess = false;
             let lambdaError = null;
@@ -536,23 +573,37 @@ const ProfileSetupScreen = () => {
                     }
                 });
 
-                logger.info('✅ Profile API response received', { status: res.status });
+                logger.info('Profile API response received', { status: res.status });
                 lambdaSuccess = true;
 
             } catch (apiError) {
                 lambdaError = apiError;
-                logger.error('❌ Profile API call failed', {
+                logger.error('Profile API call failed', {
                     error: apiError.response?.data || apiError.message,
                     isTimeout: apiError.code === 'ECONNABORTED'
                 });
             }
 
-            logger.info('🎯 Completing onboarding process');
+            // Update user location on backend for matching
+            if (address.latitude && address.longitude && user?.username) {
+                try {
+                    const locationUpdateResult = await LocationService.updateLocationOnBackend(address, user.username);
+                    if (locationUpdateResult.success) {
+                        logger.info('User location updated on backend for matching');
+                    } else {
+                        logger.warn('Failed to update location on backend', { error: locationUpdateResult.error });
+                    }
+                } catch (locationError) {
+                    logger.error('Location update error during profile setup', { error: locationError.message });
+                }
+            }
+
+            logger.info('Completing onboarding process');
 
             const onboardingResult = await completeOnboarding();
 
             if (!onboardingResult.success) {
-                logger.error('❌ Onboarding completion failed', { error: onboardingResult.error });
+                logger.error('Onboarding completion failed', { error: onboardingResult.error });
                 Alert.alert(
                     'Setup Error',
                     'Failed to complete onboarding. Please try again.',
@@ -560,7 +611,7 @@ const ProfileSetupScreen = () => {
                 );
                 return;
             } else {
-                logger.info('✅ Onboarding marked complete');
+                logger.info('Onboarding marked complete');
             }
 
             // Initialize push notifications after successful profile setup
@@ -568,12 +619,12 @@ const ProfileSetupScreen = () => {
                 const username = completeUser.username;
                 if (username) {
                     await NotificationService.initialize(username);
-                    logger.info('✅ Push notifications initialized for user', { username });
+                    logger.info('Push notifications initialized for user', { username });
                 } else {
-                    logger.warn('⚠️ No username available for notification initialization');
+                    logger.warn('No username available for notification initialization');
                 }
             } catch (notificationError) {
-                logger.error('❌ Failed to initialize push notifications', { error: notificationError.message });
+                logger.error('Failed to initialize push notifications', { error: notificationError.message });
                 // Don't block the flow if notifications fail
             }
 
@@ -600,10 +651,10 @@ const ProfileSetupScreen = () => {
                 );
             }
 
-            logger.info('🎉 Profile setup completed successfully');
+            logger.info('Profile setup completed successfully');
 
         } catch (error) {
-            logger.error('❌ Profile setup failed', { error: error.message });
+            logger.error('Profile setup failed', { error: error.message });
 
             Alert.alert(
                 'Setup Error',
@@ -616,7 +667,7 @@ const ProfileSetupScreen = () => {
                             try {
                                 const result = await completeOnboarding();
                                 if (result.success) {
-                                    logger.info('✅ Onboarding completed via skip option');
+                                    logger.info('Onboarding completed via skip option');
                                     Alert.alert(
                                         'Setup Complete',
                                         'You can complete your profile setup later from your profile page.',
@@ -624,7 +675,7 @@ const ProfileSetupScreen = () => {
                                     );
                                 }
                             } catch (skipError) {
-                                logger.error('❌ Skip onboarding failed', { error: skipError.message });
+                                logger.error('Skip onboarding failed', { error: skipError.message });
                             }
                         }
                     }
@@ -853,12 +904,35 @@ const ProfileSetupScreen = () => {
                         <Text style={{ color: 'red', fontSize: 13, marginTop: 4 }}>{videoError}</Text>
                     )}
 
-                    {/* Location Section */}
-                    <AddressInput
-                        address={address}
-                        onAddressChange={handleAddressChange}
-                        autoDetectInitial={true}
-                    />
+                    {/* Location Section with Smart Management */}
+                    <View style={styles.locationSection}>
+                        <View style={styles.locationHeader}>
+                            <Text style={[styles.sectionTitle, { color: isDark ? '#fff' : '#000', marginTop: 0, marginBottom: 0 }]}>
+                                Location
+                            </Text>
+                            {!locationLoading && (
+                                <TouchableOpacity
+                                    style={styles.refreshLocationBtn}
+                                    onPress={handleRefreshLocation}
+                                >
+                                    <Ionicons name="refresh" size={20} color="#2196F3" />
+                                    <Text style={styles.refreshLocationText}>Refresh</Text>
+                                </TouchableOpacity>
+                            )}
+                            {locationLoading && (
+                                <View style={styles.locationLoadingContainer}>
+                                    <ActivityIndicator size="small" color="#2196F3" />
+                                    <Text style={styles.locationLoadingText}>Updating...</Text>
+                                </View>
+                            )}
+                        </View>
+
+                        <AddressInput
+                            address={address}
+                            onAddressChange={handleAddressChange}
+                            autoDetectInitial={false} // Don't auto-detect since useLocationManager handles it
+                        />
+                    </View>
 
                     {/* Genre Selection */}
                     <Text style={[styles.sectionTitle, { color: isDark ? '#fff' : '#000' }]}>
@@ -1004,6 +1078,39 @@ const styles = StyleSheet.create({
         height: '100%',
         backgroundColor: COLORS.static?.primaryGradient?.[0] || '#ff6ec4',
         borderRadius: 3,
+    },
+    locationSection: {
+        marginVertical: 8,
+    },
+    locationHeader: {
+        flexDirection: 'row',
+        justifyContent: 'space-between',
+        alignItems: 'center',
+        marginBottom: 8,
+    },
+    refreshLocationBtn: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        paddingHorizontal: 8,
+        paddingVertical: 4,
+        borderRadius: 12,
+        backgroundColor: 'rgba(33, 150, 243, 0.1)',
+    },
+    refreshLocationText: {
+        marginLeft: 4,
+        fontSize: 12,
+        color: '#2196F3',
+        fontWeight: '500',
+    },
+    locationLoadingContainer: {
+        flexDirection: 'row',
+        alignItems: 'center',
+    },
+    locationLoadingText: {
+        marginLeft: 6,
+        fontSize: 12,
+        color: '#2196F3',
+        fontWeight: '500',
     },
     genreContainer: {
         flexDirection: 'row',

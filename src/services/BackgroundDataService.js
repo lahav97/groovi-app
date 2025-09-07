@@ -1,9 +1,3 @@
-/**
- * @module BackgroundDataService
- * Enterprise-grade background data service with memory leak prevention
- * FIXED: Restored proper error handling from original version
- */
-
 import { fetchVideos, resetVideoState } from './videoService';
 import { fetchUserProfile } from './profileService';
 import { createLogger } from '../utils/Logger';
@@ -13,8 +7,7 @@ import {
     getFeedCache,
     cacheFeedVideos,
     getProfileCache,
-    cacheUserProfile,
-    forceMemoryCleanup
+    cacheUserProfile
 } from '../utils/cacheManager';
 
 const logger = createLogger('BackgroundDataService');
@@ -31,7 +24,7 @@ class BackgroundDataService {
         this.maxConcurrentRequests = 2;
         this.requestDelay = 500;
 
-        // Video decoder tracking - Critical for memory leak prevention
+        // Video decoder tracking for cleanup coordination
         this.activeVideoDecoders = new Set();
         this.videoDecoderCleanupCallbacks = new Set();
 
@@ -55,7 +48,7 @@ class BackgroundDataService {
             }
         };
 
-        logger.info('BackgroundDataService initialized', {
+        logger.info('🚀 BackgroundDataService initialized', {
             maxConcurrentRequests: this.maxConcurrentRequests,
             stages: Object.keys(this.stages)
         });
@@ -69,7 +62,7 @@ class BackgroundDataService {
         if (cleanupCallback) {
             this.videoDecoderCleanupCallbacks.add(cleanupCallback);
         }
-        logger.debug(`Registered video decoder: ${decoderId}`, {
+        logger.debug(`🔹 Registered video decoder: ${decoderId}`, {
             total: this.activeVideoDecoders.size,
             hasCleanupCallback: !!cleanupCallback
         });
@@ -80,27 +73,32 @@ class BackgroundDataService {
      */
     unregisterVideoDecoder(decoderId) {
         this.activeVideoDecoders.delete(decoderId);
-        logger.debug(`Unregistered video decoder: ${decoderId}`, {
+        logger.debug(`🔹 Unregistered video decoder: ${decoderId}`, {
             remaining: this.activeVideoDecoders.size
         });
     }
 
     /**
-     * Emergency video decoder cleanup - prevents memory leaks
+     * Execute video decoder cleanup callbacks only
+     * Cache operations are handled by AppMemoryManager
      */
-    async emergencyVideoCleanup(reason = 'unknown') {
-        logger.warn(`Emergency video cleanup: ${reason}`, {
+    async cleanupVideoDecoders(reason = 'unknown') {
+        if (this.videoDecoderCleanupCallbacks.size === 0 && this.activeVideoDecoders.size === 0) {
+            return;
+        }
+
+        logger.info(`🎬 Cleaning up video decoders: ${reason}`, {
             activeDecoders: this.activeVideoDecoders.size,
             cleanupCallbacks: this.videoDecoderCleanupCallbacks.size
         });
 
         try {
-            // Execute all cleanup callbacks
+            // Execute video cleanup callbacks
             const cleanupPromises = Array.from(this.videoDecoderCleanupCallbacks).map((callback, index) => {
                 try {
                     return Promise.resolve(callback());
                 } catch (error) {
-                    logger.warn(`Video cleanup callback error at index ${index}`, {
+                    logger.warn(`⚠️ Video cleanup callback error at index ${index}`, {
                         error: error.message
                     });
                     return Promise.resolve();
@@ -109,35 +107,17 @@ class BackgroundDataService {
 
             await Promise.allSettled(cleanupPromises);
 
-            // Clear all tracking
+            // Clear tracking
             this.activeVideoDecoders.clear();
             this.videoDecoderCleanupCallbacks.clear();
 
-            // FIXED: Safe force memory cleanup
-            try {
-                if (typeof forceMemoryCleanup === 'function') {
-                    forceMemoryCleanup(reason);
-                }
-            } catch (cleanupError) {
-                logger.warn('Memory cleanup failed', { error: cleanupError.message });
-            }
-
-            // Cancel all requests that might be loading videos
-            this.cancelAllRequests();
-
-            // Force garbage collection
-            if (global.gc) {
-                global.gc();
-                logger.debug('Forced GC after video cleanup');
-            }
-
-            logger.info('Emergency video cleanup completed', {
+            logger.info('✅ Video decoder cleanup completed', {
                 reason,
                 callbacksProcessed: cleanupPromises.length
             });
 
         } catch (error) {
-            logger.error('Emergency video cleanup failed', {
+            logger.error('❌ Video decoder cleanup failed', {
                 reason,
                 error: error.message
             });
@@ -145,10 +125,15 @@ class BackgroundDataService {
     }
 
     /**
-     * Cancel all active requests with video cleanup
+     * Cancel all active requests with clean state management
+     * No longer triggers cache operations directly
      */
     cancelAllRequests() {
-        logger.info('Cancelling all active requests for safe navigation', {
+        if (this.activeRequests.size === 0 && this.abortControllers.size === 0) {
+            return;
+        }
+
+        logger.info('🛑 Cancelling all active requests', {
             activeRequests: this.activeRequests.size,
             abortControllers: this.abortControllers.size
         });
@@ -162,25 +147,23 @@ class BackgroundDataService {
                 cancelledCount++;
             } catch (err) {
                 failedCount++;
-                logger.warn(`Failed to abort request: ${id}`, { error: err.message });
+                logger.warn(`⚠️ Failed to abort request: ${id}`, { error: err.message });
             }
         });
 
         this.abortControllers.clear();
         this.activeRequests.clear();
 
-        // Trigger video cleanup if needed
-        if (this.activeVideoDecoders.size > 0) {
-            logger.info('Triggering video cleanup due to request cancellation', {
-                activeDecoders: this.activeVideoDecoders.size
-            });
-            setTimeout(() => this.emergencyVideoCleanup('request_cancellation'), 100);
-        }
-
-        logger.info('Request cancellation completed', {
+        logger.info('✅ Request cancellation completed', {
             cancelledCount,
             failedCount
         });
+
+        // Schedule video decoder cleanup if needed
+        if (this.activeVideoDecoders.size > 0) {
+            logger.debug('🎬 Scheduling video decoder cleanup after request cancellation');
+            setTimeout(() => this.cleanupVideoDecoders('request_cancellation'), 100);
+        }
     }
 
     /**
@@ -191,7 +174,7 @@ class BackgroundDataService {
 
         // Check concurrent request limits
         if (this.activeRequests.size >= this.maxConcurrentRequests) {
-            logger.info(`Request rejected due to concurrent limit: ${id}`, {
+            logger.info(`🚫 Request rejected due to concurrent limit: ${id}`, {
                 activeRequests: this.activeRequests.size,
                 maxConcurrent: this.maxConcurrentRequests
             });
@@ -202,7 +185,7 @@ class BackgroundDataService {
         this.abortControllers.set(id, abortController);
         this.activeRequests.add(id);
 
-        logger.debug(`Starting safe request: ${id}`, {
+        logger.debug(`📤 Starting safe request: ${id}`, {
             activeRequests: this.activeRequests.size
         });
 
@@ -215,18 +198,18 @@ class BackgroundDataService {
             const requestPromise = requestFunction(abortController.signal);
             const result = await Promise.race([requestPromise, timeoutPromise]);
 
-            logger.debug(`Safe request completed: ${id}`, {
+            logger.debug(`✅ Safe request completed: ${id}`, {
                 hasResult: !!result
             });
 
             return result;
         } catch (error) {
             if (error.name === 'AbortError') {
-                logger.info(`Request cancelled: ${id}`);
+                logger.info(`🛑 Request cancelled: ${id}`);
                 return null;
             }
 
-            logger.warn(`Safe request failed: ${id}`, {
+            logger.warn(`⚠️ Safe request failed: ${id}`, {
                 error: error.message,
                 errorType: error.name
             });
@@ -242,13 +225,12 @@ class BackgroundDataService {
      */
     async startParallelLoading(userData) {
         if (this.isLoading) {
-            logger.info('Loading already in progress, skipping duplicate request');
+            logger.info('⏳ Loading already in progress, skipping duplicate request');
             return;
         }
 
-        logger.info('Starting enhanced parallel loading (Discover + Profile)', {
-            userEmail: userData?.email,
-            systemsToLoad: ['feed', 'profile']
+        logger.info('🚀 Starting discover-first loading strategy', {
+            userEmail: userData?.email
         });
 
         this.isLoading = true;
@@ -256,57 +238,122 @@ class BackgroundDataService {
         this.loadingStage = this.stages.PARALLEL_LOADING;
 
         try {
-            const startTime = Date.now();
+            const memoryBefore = global.performance?.memory?.usedJSHeapSize;
+            if (memoryBefore) {
+                const memoryBeforeMB = Math.round(memoryBefore / 1024 / 1024);
+                logger.debug(`📊 Memory before loading: ${memoryBeforeMB}MB`);
+            }
 
-            // Load both systems simultaneously
-            const [feedResult, profileResult] = await Promise.allSettled([
-                this.loadFeedSystemSafe(),
-                this.loadProfileSystemSafe()
-            ]);
+            // Priority 1: Load discover videos first
+            logger.info('📱 Loading discover videos with priority');
+            const feedVideos = await this.loadFeedSystemSafe();
 
-            const loadTime = Date.now() - startTime;
-            logger.info('Parallel loading completed', {
-                totalTimeMs: loadTime,
-                feedSuccess: feedResult.status === 'fulfilled',
-                profileSuccess: profileResult.status === 'fulfilled'
-            });
+            if (feedVideos && feedVideos.length > 0) {
+                logger.info(`✅ Discover ready with ${feedVideos.length} videos`);
+            }
 
-            // Continue with background optimization
+            // Priority 2: Load profile in background
             setTimeout(() => {
-                this.startBackgroundOptimization();
-            }, 100);
+                logger.info('👤 Starting profile loading in background');
+                this.loadFullProfileInBackground(userData);
+            }, 500);
 
-            return {
-                feed: feedResult.status === 'fulfilled',
-                profile: profileResult.status === 'fulfilled',
-                loadTime
-            };
+            // Memory monitoring
+            const memoryAfter = global.performance?.memory?.usedJSHeapSize;
+            if (memoryBefore && memoryAfter) {
+                const memoryIncrease = (memoryAfter - memoryBefore) / 1024 / 1024;
+                const memoryAfterMB = Math.round(memoryAfter / 1024 / 1024);
+
+                logger.info(`📊 Memory impact analysis`, {
+                    before: `${Math.round(memoryBefore / 1024 / 1024)}MB`,
+                    after: `${memoryAfterMB}MB`,
+                    increase: `${memoryIncrease.toFixed(1)}MB`
+                });
+
+                // Only schedule video cleanup for very high memory increase
+                if (memoryIncrease > 150) {
+                    logger.warn('🚨 High memory increase detected, scheduling video cleanup', {
+                        memoryIncrease: `${memoryIncrease.toFixed(1)}MB`
+                    });
+                    setTimeout(() => this.cleanupVideoDecoders('high_memory_increase'), 2000);
+                }
+            }
+
+            this.loadingStage = this.stages.BACKGROUND_OPTIMIZATION;
 
         } catch (error) {
-            logger.error('Parallel loading failed', { error: error.message });
+            logger.error('❌ Discover-first loading encountered error', {
+                error: error.message
+            });
         } finally {
             this.isLoading = false;
+            logger.info('✅ Discover-first loading completed');
         }
     }
 
     /**
-     * FIXED: Load feed system with proper error handling like original
+     * Load profile basics first, then videos in background
+     */
+    async loadFullProfileInBackground(userData) {
+        try {
+            if (!userData?.email) return;
+
+            logger.info('👤 Loading full profile in background');
+
+            // Check cache first
+            const cachedProfile = await getProfileCache(userData.email);
+            if (cachedProfile) {
+                this.separatedSystems.profile.loaded = true;
+                this.separatedSystems.profile.videoCount = cachedProfile.videos ? cachedProfile.videos.length : 0;
+                this.separatedSystems.profile.lastUpdate = Date.now();
+                logger.info('💾 Profile already cached and ready');
+                return cachedProfile;
+            }
+
+            // Load full profile from API
+            const fullProfile = await this.makeSafeRequest(async () => {
+                return await fetchUserProfile('email', userData.email);
+            }, 'profile_full');
+
+            if (fullProfile) {
+                // Cache the full profile
+                await cacheUserProfile(fullProfile, userData.email);
+
+                this.separatedSystems.profile.loaded = true;
+                this.separatedSystems.profile.videoCount = fullProfile.videos ? fullProfile.videos.length : 0;
+                this.separatedSystems.profile.lastUpdate = Date.now();
+
+                logger.info(`✅ Full profile cached: ${this.separatedSystems.profile.videoCount} videos`);
+                return fullProfile;
+            }
+
+        } catch (error) {
+            logger.error('❌ Profile loading failed', { error: error.message });
+            this.separatedSystems.profile.error = error.message;
+        }
+    }
+
+    /**
+     * Safe feed system loading - Independent system
      */
     async loadFeedSystemSafe() {
         if (this.separatedSystems.feed.loaded) {
-            logger.info('Feed already loaded, skipping');
+            logger.debug('📱 Feed system already loaded, skipping');
             return;
         }
 
-        logger.info('Loading discover videos safely...');
+        logger.info('🎯 Loading discover videos with enhanced safety measures');
 
         try {
-            // FIXED: Safe cache access with try/catch like original
+            // Check cache first
             let cachedFeed = null;
             try {
                 cachedFeed = await getFeedCache();
             } catch (cacheError) {
-                logger.warn('Cache read failed, will load from API:', cacheError.message);
+                logger.warn('⚠️ Cache read failed, will load from API', {
+                    error: cacheError.message,
+                    fallbackStrategy: 'api_load'
+                });
             }
 
             if (cachedFeed && cachedFeed.length > 0) {
@@ -314,17 +361,18 @@ class BackgroundDataService {
                 this.separatedSystems.feed.videoCount = cachedFeed.length;
                 this.separatedSystems.feed.lastUpdate = Date.now();
                 this.separatedSystems.feed.error = null;
-                logger.info('Discover videos loaded from cache');
+
+                logger.info('✅ Discover videos loaded from cache', {
+                    videoCount: cachedFeed.length,
+                    source: 'cache'
+                });
                 return cachedFeed;
             }
 
-            // FIXED: Use original API signature
+            // Load from API with safe request
+            logger.info('📡 Loading discover videos from API');
             const feedVideos = await this.makeSafeRequest(async (signal) => {
-                // FIXED: Safe resetVideoState call
-                if (typeof resetVideoState === 'function') {
-                    resetVideoState();
-                }
-                // FIXED: Use original fetchVideos signature
+                resetVideoState();
                 return await fetchVideos(0, 5);
             }, 'feed_load');
 
@@ -336,83 +384,99 @@ class BackgroundDataService {
                 this.separatedSystems.feed.lastUpdate = Date.now();
                 this.separatedSystems.feed.error = null;
 
-                logger.info('Discover videos loaded from API');
+                logger.info('✅ Discover videos loaded from API', {
+                    videoCount: feedVideos.length,
+                    source: 'api'
+                });
                 return feedVideos;
             } else {
-                logger.info('No discover videos received');
+                logger.info('🔭 No discover videos received from API');
                 return [];
             }
         } catch (error) {
-            logger.error('Discover loading failed:', error);
+            logger.error('❌ Discover loading failed with error', {
+                error: error.message,
+                errorType: error.name
+            });
             this.separatedSystems.feed.error = error.message;
             return [];
         }
     }
 
     /**
-     * FIXED: Load profile system with proper error handling
+     * Safe profile system loading - Independent system with videos
      */
     async loadProfileSystemSafe() {
         if (this.separatedSystems.profile.loaded) {
-            logger.info('Profile already loaded, skipping');
+            logger.debug('👤 Profile system already loaded, skipping');
             return;
         }
 
-        logger.info('Loading profile with videos safely...');
+        logger.info('🔍 Checking for cached profile data');
 
         try {
             if (!this.userData?.email) {
-                logger.info('No user email for profile loading');
+                logger.info('📧 No user email available for profile loading');
                 return null;
             }
 
-            // FIXED: Safe cache access like original
-            let cachedProfile = null;
-            try {
-                cachedProfile = await getProfileCache(this.userData.email);
-            } catch (cacheError) {
-                logger.warn('Profile cache read failed:', cacheError.message);
-            }
+            // Check cache first
+            const cachedProfile = await getProfileCache(this.userData.email);
 
             if (cachedProfile) {
                 this.separatedSystems.profile.loaded = true;
                 this.separatedSystems.profile.videoCount = cachedProfile.videos ? cachedProfile.videos.length : 0;
                 this.separatedSystems.profile.lastUpdate = Date.now();
                 this.separatedSystems.profile.error = null;
-                logger.info('Profile loaded from cache with', this.separatedSystems.profile.videoCount, 'videos');
+
+                logger.info(`✅ Profile loaded from cache`, {
+                    email: this.userData.email,
+                    videoCount: this.separatedSystems.profile.videoCount,
+                    hasVideos: !!(cachedProfile.videos && cachedProfile.videos.length > 0)
+                });
                 return cachedProfile;
             }
 
-            // FIXED: Use original API signature for fetchUserProfile
-            const profileData = await this.makeSafeRequest(async (signal) => {
-                return await fetchUserProfile('email', this.userData.email);
-            }, 'profile_load');
+            // If no cache, trigger background loading
+            logger.info('⏳ No cached profile, triggering background load');
+            this.loadFullProfileInBackground(this.userData);
+            return null;
 
-            if (profileData) {
-                await cacheUserProfile(profileData, this.userData.email);
-
-                this.separatedSystems.profile.loaded = true;
-                this.separatedSystems.profile.videoCount = profileData.videos ? profileData.videos.length : 0;
-                this.separatedSystems.profile.lastUpdate = Date.now();
-                this.separatedSystems.profile.error = null;
-
-                logger.info('Profile loaded from API with', this.separatedSystems.profile.videoCount, 'videos');
-                return profileData;
-            } else {
-                logger.info('No profile data received');
-                return null;
-            }
         } catch (error) {
-            logger.error('Profile loading failed:', error);
+            logger.error('❌ Profile loading failed', {
+                email: this.userData?.email,
+                error: error.message
+            });
             this.separatedSystems.profile.error = error.message;
             return null;
         }
     }
 
     /**
-     * FIXED: Safe load more videos
+     * Legacy backwards compatibility
+     */
+    async startStagedLoading(userData) {
+        logger.debug('🔄 Legacy loading detected, upgrading to parallel loading');
+        return this.startParallelLoading(userData);
+    }
+
+    async stage1_LoadFeedOnly() {
+        return this.loadFeedSystemSafe();
+    }
+
+    async stage2_LoadProfileOnly() {
+        return this.loadProfileSystemSafe();
+    }
+
+    /**
+     * Safe load more videos
      */
     async loadMoreFeedVideos(currentVideoCount) {
+        logger.info('🔥 Loading more feed videos', {
+            currentVideoCount,
+            requestedCount: 3
+        });
+
         try {
             const moreFeedVideos = await this.makeSafeRequest(async (signal) => {
                 return await fetchVideos(currentVideoCount, 3);
@@ -424,178 +488,123 @@ class BackgroundDataService {
                 await cacheFeedVideos(combinedFeedVideos);
 
                 this.separatedSystems.feed.videoCount = combinedFeedVideos.length;
+
+                logger.info('✅ More feed videos loaded successfully', {
+                    newVideos: moreFeedVideos.length,
+                    totalVideos: combinedFeedVideos.length
+                });
+
                 return moreFeedVideos;
             } else {
+                logger.info('🔭 No additional feed videos available');
                 return [];
             }
         } catch (error) {
-            logger.error('Load more videos failed:', error);
+            logger.error('❌ Load more videos failed', {
+                currentVideoCount,
+                error: error.message
+            });
             return [];
         }
     }
 
     /**
-     * FIXED: Safe force refresh with proper cleanup
+     * Force refresh with video cleanup (no direct cache operations)
      */
     async forceRefreshFeedOnly() {
-        logger.info('BackgroundDataService: Safe feed refresh...');
+        logger.info('🔄 Safe feed refresh initiated');
 
         try {
-            // Cleanup videos before refresh
-            await this.emergencyVideoCleanup('feed_refresh');
+            // Clean up video decoders before refresh
+            await this.cleanupVideoDecoders('feed_refresh');
 
             this.separatedSystems.feed.loaded = false;
             this.separatedSystems.feed.error = null;
-
-            // FIXED: Safe resetVideoState call
-            if (typeof resetVideoState === 'function') {
-                resetVideoState();
-            }
-
+            resetVideoState();
             await this.loadFeedSystemSafe();
-            logger.info('Feed refresh completed');
+
+            logger.info('✅ Feed refresh completed successfully');
         } catch (error) {
-            logger.error('Feed refresh failed:', error);
+            logger.error('❌ Feed refresh failed', {
+                error: error.message
+            });
         }
     }
 
     async forceRefreshProfileOnly() {
+        logger.info('🔄 Safe profile refresh initiated');
+
         try {
-            await this.emergencyVideoCleanup('profile_refresh');
+            // Clean up video decoders before refresh
+            await this.cleanupVideoDecoders('profile_refresh');
 
             this.separatedSystems.profile.loaded = false;
             this.separatedSystems.profile.error = null;
             await this.loadProfileSystemSafe();
-            logger.info('Profile refresh completed');
+
+            logger.info('✅ Profile refresh completed successfully');
         } catch (error) {
-            logger.error('Profile refresh failed:', error);
+            logger.error('❌ Profile refresh failed', {
+                error: error.message
+            });
         }
     }
 
     async forceRefreshAll() {
-        try {
-            await this.emergencyVideoCleanup('force_refresh_all');
+        logger.info('🔄 Complete system refresh initiated');
 
+        try {
+            // Clean up video decoders before refresh
+            await this.cleanupVideoDecoders('force_refresh_all');
+
+            // Cancel ongoing requests
             this.cancelAllRequests();
 
+            // Reset both systems
             this.separatedSystems.feed.loaded = false;
             this.separatedSystems.profile.loaded = false;
 
+            // Use parallel loading for refresh
             await this.startParallelLoading(this.userData);
 
-            logger.info('All systems refresh completed');
+            logger.info('✅ Complete system refresh completed successfully');
         } catch (error) {
-            logger.error('Force refresh failed:', error);
+            logger.error('❌ Complete refresh failed', {
+                error: error.message
+            });
         }
     }
 
     /**
-     * Start background optimization tasks
+     * Legacy emergency video cleanup method - now routes to video decoder cleanup only
      */
-    async startBackgroundOptimization() {
-        if (this.loadingStage !== this.stages.PARALLEL_LOADING) return;
-
-        this.loadingStage = this.stages.BACKGROUND_OPTIMIZATION;
-        logger.info('Starting background optimization...');
-
-        try {
-            await Promise.allSettled([
-                this.optimizeVideoCache(),
-                this.cleanupOldData()
-            ]);
-
-            logger.info('Background optimization completed');
-        } catch (error) {
-            logger.warn('Background optimization failed', { error: error.message });
-        }
-    }
-
-    /**
-     * FIXED: Safe optimize video cache
-     */
-    async optimizeVideoCache() {
-        try {
-            logger.info('Optimizing video cache for memory efficiency...');
-
-            let cachedVideos = null;
-            try {
-                cachedVideos = await getFeedCache();
-            } catch (cacheError) {
-                logger.warn('Could not access cache for optimization:', cacheError.message);
-                return;
-            }
-
-            if (cachedVideos && cachedVideos.length > 50) {
-                const optimizedVideos = cachedVideos.slice(-30);
-                await cacheFeedVideos(optimizedVideos);
-                logger.info('Video cache optimized', {
-                    before: cachedVideos.length,
-                    after: optimizedVideos.length
-                });
-            }
-
-            // FIXED: Safe force memory cleanup
-            try {
-                if (typeof forceMemoryCleanup === 'function') {
-                    forceMemoryCleanup('video_cache_optimization');
-                }
-            } catch (cleanupError) {
-                logger.warn('Memory cleanup failed:', cleanupError.message);
-            }
-
-        } catch (error) {
-            logger.warn('Video cache optimization failed', { error: error.message });
-        }
-    }
-
-    /**
-     * FIXED: Safe cleanup old data
-     */
-    async cleanupOldData() {
-        try {
-            logger.info('Cleaning up old data...');
-
-            // FIXED: Safe resetVideoState call
-            if (typeof resetVideoState === 'function') {
-                resetVideoState();
-            }
-
-            // FIXED: Safe force memory cleanup
-            try {
-                if (typeof forceMemoryCleanup === 'function') {
-                    forceMemoryCleanup('old_data_cleanup');
-                }
-            } catch (cleanupError) {
-                logger.warn('Memory cleanup failed:', cleanupError.message);
-            }
-
-            if (global.gc) {
-                global.gc();
-                logger.debug('Forced garbage collection');
-            }
-
-            logger.info('Old data cleanup completed');
-        } catch (error) {
-            logger.warn('Old data cleanup failed', { error: error.message });
-        }
+    async emergencyVideoCleanup(reason = 'legacy') {
+        logger.info(`🎬 Legacy emergency video cleanup: ${reason}`);
+        await this.cleanupVideoDecoders(reason);
     }
 
     /**
      * Get video decoder stats for debugging
      */
     getVideoDecoderStats() {
-        return {
+        const stats = {
             activeDecoders: this.activeVideoDecoders.size,
             cleanupCallbacks: this.videoDecoderCleanupCallbacks.size,
-            activeRequests: this.activeRequests.size
+            activeRequests: this.activeRequests.size,
+            isLoading: this.isLoading,
+            currentStage: this.loadingStage
         };
+
+        logger.debug('📊 Video decoder statistics requested', stats);
+        return stats;
     }
 
     /**
      * Manual video cleanup trigger
      */
     async cleanupVideos(reason = 'manual') {
-        await this.emergencyVideoCleanup(reason);
+        logger.info(`🧹 Manual video cleanup triggered: ${reason}`);
+        await this.cleanupVideoDecoders(reason);
     }
 
     /**
@@ -644,8 +653,8 @@ class BackgroundDataService {
             isLoading: this.isLoading,
             currentStage: this.loadingStage,
             stageNames: {
-                1: 'Loading Discover + Profile',
-                2: 'Background Optimization'
+                1: '🚀 Loading Discover + Profile',
+                2: '⚡ Background Optimization'
             },
             systems: separatedStatus,
             totalFeedVideos: separatedStatus.feed.videoCount,
@@ -657,5 +666,4 @@ class BackgroundDataService {
     }
 }
 
-// Export singleton instance
 export default new BackgroundDataService();
