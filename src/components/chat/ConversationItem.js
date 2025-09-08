@@ -1,5 +1,5 @@
 import React from 'react';
-import { View, Text, StyleSheet, TouchableOpacity, useColorScheme } from 'react-native';
+import { View, Text, StyleSheet, TouchableOpacity, useColorScheme, Image } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useNavigation } from '@react-navigation/native';
 import { COLORS } from '../../styles/theme';
@@ -48,7 +48,7 @@ const formatChatTimestamp = (timestamp) => {
     });
 };
 
-const ConversationItem = ({ conversation }) => {
+const ConversationItem = ({ conversation, profilePicture, instruments, onPress }) => {
     const navigation = useNavigation();
     const colorScheme = useColorScheme();
     const theme = colorScheme === 'dark' ? COLORS.dark : COLORS.light;
@@ -57,33 +57,60 @@ const ConversationItem = ({ conversation }) => {
     const {
         id,
         name,
-        instruments,
         lastMessage,
         lastMessageTime,
         unreadCount,
     } = conversation;
 
+    // Debug logging
+    console.log('ConversationItem props:', {
+        name,
+        profilePicture: profilePicture ? 'Yes' : 'No',
+        instruments: instruments || [],
+        instrumentsLength: instruments ? instruments.length : 0
+    });
+
     const initials = getInitials(name);
-    const instrumentText = instruments.join(' • ');
+    // Use instruments from props instead of conversation object
+    const instrumentText = (instruments && instruments.length > 0) ? instruments.join(' • ') : '';
     const formattedTime = formatChatTimestamp(lastMessageTime);
+
+    // Render profile picture or default avatar
+    const renderAvatar = () => {
+        if (profilePicture) {
+            return (
+                <View style={styles.avatarContainer}>
+                    <Image
+                        source={{ uri: profilePicture }}
+                        style={styles.profileImage}
+                        onError={() => {
+                            // If image fails to load, fall back to initials
+                        }}
+                    />
+                </View>
+            );
+        } else {
+            // Default avatar with initials
+            return (
+                <LinearGradient
+                    colors={COLORS.static.primaryGradient}
+                    start={{ x: 1, y: 1 }}
+                    end={{ x: 0, y: 0 }}
+                    style={styles.avatar}
+                >
+                    <Text style={styles.avatarText}>{initials}</Text>
+                </LinearGradient>
+            );
+        }
+    };
 
     return (
         <TouchableOpacity
             style={styles.container}
-            onPress={() => navigation.navigate('ChatScreen', {
-                conversationId: id,
-                userName: name
-            })}
+            onPress={onPress}
         >
-            {/* Avatar with gradient */}
-            <LinearGradient
-                colors={COLORS.static.primaryGradient}
-                start={{ x: 1, y: 1 }}
-                end={{ x: 0, y: 0 }}
-                style={styles.avatar}
-            >
-                <Text style={styles.avatarText}>{initials}</Text>
-            </LinearGradient>
+            {/* Avatar with profile picture or gradient */}
+            {renderAvatar()}
 
             {/* Main content area */}
             <View style={styles.contentArea}>
@@ -139,6 +166,19 @@ const styles = StyleSheet.create({
         marginRight: 12,
         marginTop: 2,
     },
+    avatarContainer: {
+        width: 48,
+        height: 48,
+        borderRadius: 24,
+        overflow: 'hidden',
+        marginRight: 12,
+        marginTop: 2,
+    },
+    profileImage: {
+        width: '100%',
+        height: '100%',
+        borderRadius: 24,
+    },
     avatarText: {
         color: 'white',
         fontWeight: 'bold',
@@ -165,8 +205,9 @@ const styles = StyleSheet.create({
     },
     instruments: {
         fontSize: 13,
-        flex: 1,
+        fontWeight: '600',
         marginRight: 8,
+
     },
     instrumentsRow: {
         flexDirection: 'row',

@@ -43,6 +43,11 @@ const ChatListScreen = () => {
     const [isLoadingProfile, setIsLoadingProfile] = useState(true);
 
     // Add ref to track if we've received chat data
+    // Profile pictures and instruments state
+    const [profilePictures, setProfilePictures] = useState(new Map());
+    const [userInstruments, setUserInstruments] = useState(new Map());
+    const [loadingProfiles, setLoadingProfiles] = useState(new Set());
+
     const hasReceivedChatData = useRef(false);
 
     const updateConversationFromMessage = (messageData) => {
@@ -50,6 +55,9 @@ const ChatListScreen = () => {
 
         // Determine who the conversation is with
         const otherUser = (from === currentUsername) ? to : from;
+
+        // Fetch profile data for the other user
+        fetchUserProfileData(otherUser);
 
         setConversations(prevConversations => {
             // Find existing conversation
@@ -96,7 +104,7 @@ const ChatListScreen = () => {
                     readStatus: isReceived ? 'unread' : 'read'
                 };
 
-                logger.info('💬 New conversation created', { otherUser });
+                logger.info('ðŸ’¬ New conversation created', { otherUser });
 
                 // Add to top of the list
                 return [newConversation, ...prevConversations];
@@ -119,6 +127,104 @@ const ChatListScreen = () => {
         });
     };
 
+    // Add function to fetch user profile including profile picture and instruments
+    const fetchUserProfileData = async (username) => {
+        // Skip if already loading or already have the data
+        if (loadingProfiles.has(username) || (profilePictures.has(username) && userInstruments.has(username))) {
+            logger.info('🔄 Skipping profile fetch - already have data or loading', { username });
+            return;
+        }
+
+        logger.info('🔍 Starting profile fetch', { username });
+        setLoadingProfiles(prev => new Set([...prev, username]));
+
+        try {
+            const profileData = await ChatService.fetchUserProfile(username);
+            logger.info('📥 Raw profile data received', {
+                username,
+                profileData,
+                availableFields: profileData ? Object.keys(profileData) : []
+            });
+
+            if (profileData) {
+                // Check if this is an error response
+                if (profileData.message && profileData.message.includes('not found')) {
+                    logger.warn('⚠️ User not found in profile API', { username, message: profileData.message });
+                    setProfilePictures(prev => new Map([...prev, [username, null]]));
+                    setUserInstruments(prev => new Map([...prev, [username, []]]));
+                    return;
+                }
+
+                // Extract profile picture - check multiple possible field names
+                let profilePicture = null;
+                const pictureFields = ['profile_picture', 'profilePicture', 'profilePic', 'avatar', 'image'];
+
+                for (const field of pictureFields) {
+                    if (profileData[field]) {
+                        profilePicture = profileData[field];
+                        logger.info('🖼️ Found profile picture', { username, field, url: profilePicture.substring(0, 50) + '...' });
+                        break;
+                    }
+                }
+
+                // Extract instruments - check multiple possible field names and structures
+                let instruments = [];
+                const instrumentFields = ['instruments', 'instrument', 'musical_instruments'];
+
+                for (const field of instrumentFields) {
+                    if (profileData[field]) {
+                        // If it's an object, extract keys
+                        if (typeof profileData[field] === 'object' && !Array.isArray(profileData[field])) {
+                            instruments = Object.keys(profileData[field]);
+                        }
+                        // If it's an array, use it directly
+                        else if (Array.isArray(profileData[field])) {
+                            instruments = profileData[field];
+                        }
+                        // If it's a string, split by comma or semicolon
+                        else if (typeof profileData[field] === 'string') {
+                            instruments = profileData[field].split(/[,;]/).map(i => i.trim()).filter(i => i);
+                        }
+                        break;
+                    }
+                }
+
+                logger.info('🎯 Extracted profile data', {
+                    username,
+                    profilePicture: profilePicture ? `Found: ${profilePicture.substring(0, 50)}...` : 'No picture found',
+                    instruments,
+                    profileDataKeys: Object.keys(profileData),
+                    profilePictureField: pictureFields.find(field => profileData[field]) || 'none found'
+                });
+
+                // Update state
+                setProfilePictures(prev => new Map([...prev, [username, profilePicture]]));
+                setUserInstruments(prev => new Map([...prev, [username, instruments]]));
+
+                logger.info('✅ Profile data stored in state', {
+                    username,
+                    hasProfilePicture: !!profilePicture,
+                    instrumentCount: instruments.length
+                });
+            } else {
+                logger.warn('⚠️ No profile data returned from API', { username });
+                // Set null values to avoid repeated requests
+                setProfilePictures(prev => new Map([...prev, [username, null]]));
+                setUserInstruments(prev => new Map([...prev, [username, []]]));
+            }
+        } catch (error) {
+            logger.error('❌ Failed to fetch user profile data', { username, error: error.message });
+            setProfilePictures(prev => new Map([...prev, [username, null]]));
+            setUserInstruments(prev => new Map([...prev, [username, []]]));
+        } finally {
+            setLoadingProfiles(prev => {
+                const newSet = new Set(prev);
+                newSet.delete(username);
+                return newSet;
+            });
+        }
+    };
+
     // Fetch user profile data using the same approach as ProfileScreen
     useEffect(() => {
         const fetchUserProfileData = async () => {
@@ -132,7 +238,7 @@ const ChatListScreen = () => {
 
                 const userEmail = user?.email || await getCurrentUserEmail();
                 if (!userEmail) {
-                    logger.warn('❌ No user email found');
+                    logger.warn('âŒ No user email found');
                     setCurrentUsername(null);
                     setIsLoadingProfile(false);
                     return;
@@ -142,16 +248,16 @@ const ChatListScreen = () => {
 
                 if (profileResult && profileResult.profile && profileResult.profile.username) {
                     setCurrentUsername(profileResult.profile.username);
-                    logger.info('✅ Profile loaded for chat', { username: profileResult.profile.username });
+                    logger.info('Profile loaded for chat', { username: profileResult.profile.username });
                 } else if (profileResult && profileResult.username) {
                     setCurrentUsername(profileResult.username);
-                    logger.info('✅ Profile loaded for chat', { username: profileResult.username });
+                    logger.info('Profile loaded for chat', { username: profileResult.username });
                 } else {
-                    logger.warn('❌ No username found in profile data');
+                    logger.warn('No username found in profile data');
                     setCurrentUsername(null);
                 }
             } catch (error) {
-                logger.error('❌ Failed to load user profile', { error: error.message });
+                logger.error('Failed to load user profile', { error: error.message });
                 setCurrentUsername(null);
             } finally {
                 setIsLoadingProfile(false);
@@ -173,7 +279,7 @@ const ChatListScreen = () => {
             return;
         }
 
-        logger.info('🚀 Initializing chat connection', { username: currentUsername });
+        logger.info('ðŸš€ Initializing chat connection', { username: currentUsername });
 
         let chatListUnsubscribe = null;
         let connectionUnsubscribe = null;
@@ -185,7 +291,7 @@ const ChatListScreen = () => {
             if (message.type === 'message_received') {
                 // Ensure we have the current username before processing
                 if (!currentUsername) {
-                    logger.warn('⚠️ Current username not available, skipping message processing');
+                    logger.warn('âš ï¸ Current username not available, skipping message processing');
                     return;
                 }
 
@@ -198,7 +304,7 @@ const ChatListScreen = () => {
                 });
             } else if (message.type === 'message_sent') {
                 if (!currentUsername) {
-                    logger.warn('⚠️ Current username not available, skipping sent message processing');
+                    logger.warn('âš ï¸ Current username not available, skipping sent message processing');
                     return;
                 }
 
@@ -213,7 +319,7 @@ const ChatListScreen = () => {
             // Handle real-time messages without proper type (like web app receives)
             else if (message.from && message.message && !message.type) {
                 if (!currentUsername) {
-                    logger.warn('⚠️ Current username not available, skipping real-time message processing');
+                    logger.warn('âš ï¸ Current username not available, skipping real-time message processing');
                     return;
                 }
 
@@ -276,7 +382,7 @@ const ChatListScreen = () => {
                         });
                     });
                 } else {
-                    logger.warn('⚠️ Mark as read response received but no user specified', { message });
+                    logger.warn('â�� ï¸ Mark as read response received but no user specified', { message });
                 }
             }
             // Handle success responses that might contain mark as read confirmations
@@ -297,9 +403,23 @@ const ChatListScreen = () => {
                     readStatus: conv.readStatus || 'read'
                 }));
 
-                setConversations(transformedConversations);
+                // Always sort by timestamp - most recent first
+                const sortedConversations = transformedConversations.sort((a, b) => {
+                    const timeA = new Date(a.lastMessageTime).getTime();
+                    const timeB = new Date(b.lastMessageTime).getTime();
+                    return timeB - timeA; // Most recent first
+                });
+
+                setConversations(sortedConversations);
                 setIsLoadingChats(false);
                 hasReceivedChatData.current = true;
+
+                // Fetch profile data for all conversation participants
+                transformedConversations.forEach(conv => {
+                    if (conv.name && conv.name !== 'Unknown') {
+                        fetchUserProfileData(conv.name);
+                    }
+                });
             }
         });
 
@@ -313,13 +433,10 @@ const ChatListScreen = () => {
 
                 // Step 2: Set up chat list listener
                 chatListUnsubscribe = ChatService.onChatListUpdate((data) => {
-                    // Handle both 'chat_list' and 'conversations_list' message types
                     if ((data.type === 'chat_list' || data.type === 'conversations_list') && Array.isArray(data.conversations || data.data)) {
                         const conversationsArray = data.conversations || data.data;
 
-                        // Transform backend data to match your UI expectations
                         const transformedConversations = conversationsArray.map(conv => ({
-                            // Backend format → UI format
                             id: conv.SK || conv.id,
                             name: conv.SK ? conv.SK.replace('CONVO#', '') : conv.name,
                             lastMessage: conv.lastMessage || '',
@@ -329,14 +446,28 @@ const ChatListScreen = () => {
                             readStatus: conv.readStatus || 'read'
                         }));
 
-                        setConversations(transformedConversations);
+                        // Always sort by timestamp - most recent first
+                        const sortedConversations = transformedConversations.sort((a, b) => {
+                            const timeA = new Date(a.lastMessageTime).getTime();
+                            const timeB = new Date(b.lastMessageTime).getTime();
+                            return timeB - timeA; // Most recent first
+                        });
+
+                        setConversations(sortedConversations);
                         setIsLoadingChats(false);
                         hasReceivedChatData.current = true;
+
+                        // Fetch profile data for all conversation participants
+                        transformedConversations.forEach(conv => {
+                            if (conv.name && conv.name !== 'Unknown') {
+                                fetchUserProfileData(conv.name);
+                            }
+                        });
                     } else {
                         logger.warn('⚠️ Unexpected chat list data format', { type: data.type });
                         setIsLoadingChats(false);
                     }
-                });
+                });;
 
                 // Step 3: Set up connection state listener
                 connectionUnsubscribe = ChatService.onConnectionChange((connectionData) => {
@@ -369,7 +500,7 @@ const ChatListScreen = () => {
                 }, 5000);
 
             } catch (error) {
-                logger.error('❌ Failed to initialize chat', { error: error.message });
+                logger.error('âŒ Failed to initialize chat', { error: error.message });
                 setIsConnecting(false);
                 setConnectionError(error.message || 'Failed to connect to chat');
                 setIsLoadingChats(false);
@@ -428,12 +559,12 @@ const ChatListScreen = () => {
                 const success = ChatService.markMessagesAsRead(conversation.name);
 
                 if (!success) {
-                    logger.warn('⚠️ Failed to send mark as read request', { conversationName: conversation.name });
+                    logger.warn('âš ï¸ Failed to send mark as read request', { conversationName: conversation.name });
                     rollbackReadStatus(conversation.id, originalUnreadCount);
                 }
             }
         } catch (error) {
-            logger.error('❌ Error marking messages as read', { error: error.message, conversationName: conversation.name });
+            logger.error('âŒ Error marking messages as read', { error: error.message, conversationName: conversation.name });
             rollbackReadStatus(conversation.id, originalUnreadCount);
         }
 
@@ -453,9 +584,9 @@ const ChatListScreen = () => {
             setConnectionError('');
             await ChatService.connectUserToWebSocket(currentUsername);
             ChatService.loadChatList(currentUsername);
-            logger.info('✅ Chat connection retry successful');
+            logger.info('âœ… Chat connection retry successful');
         } catch (error) {
-            logger.error('❌ Chat connection retry failed', { error: error.message });
+            logger.error('âŒ Chat connection retry failed', { error: error.message });
             setConnectionError('Failed to connect. Tap to retry.');
             setIsConnecting(false);
         }
@@ -526,6 +657,8 @@ const ChatListScreen = () => {
     const renderConversationItem = ({ item }) => (
         <ConversationItem
             conversation={item}
+            profilePicture={profilePictures.get(item.name)}
+            instruments={userInstruments.get(item.name) || []}
             onPress={() => handleConversationPress(item)}
         />
     );

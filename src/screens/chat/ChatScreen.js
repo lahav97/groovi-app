@@ -11,7 +11,8 @@ import {
     Alert,
     SafeAreaView,
     Keyboard,
-    Dimensions
+    Dimensions,
+    Image
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useNavigation } from '@react-navigation/native';
@@ -44,12 +45,17 @@ const ChatScreen = () => {
     const [isSending, setIsSending] = useState(false);
     const [keyboardHeight, setKeyboardHeight] = useState(0);
 
-    // MESSAGES STATE - Replace mock with real data
+    // MESSAGES STATE
     const [messages, setMessages] = useState([]);
 
-    // ADD USERNAME STATE FOR PROPER MESSAGE IDENTIFICATION
+    // USERNAME STATE FOR MESSAGE IDENTIFICATION
     const [currentUsername, setCurrentUsername] = useState(null);
     const [isLoadingProfile, setIsLoadingProfile] = useState(true);
+
+    // PROFILE PICTURE AND INSTRUMENTS STATE
+    const [otherUserProfile, setOtherUserProfile] = useState(null);
+    const [otherUserInstruments, setOtherUserInstruments] = useState([]);
+    const [isLoadingOtherUserProfile, setIsLoadingOtherUserProfile] = useState(false);
 
     // REFS
     const flatListRef = useRef(null);
@@ -137,6 +143,89 @@ const ChatScreen = () => {
     }, [isSignedIn, currentUserEmail]);
 
     // ===================================
+    // FETCH OTHER USER PROFILE DATA
+    // ===================================
+
+    const fetchOtherUserProfile = async (username) => {
+        if (isLoadingOtherUserProfile || otherUserProfile) {
+            return; // Skip if already loading or have data
+        }
+
+        logger.info('🔍 Fetching other user profile', { username });
+        setIsLoadingOtherUserProfile(true);
+
+        try {
+            const profileData = await ChatService.fetchUserProfile(username);
+            logger.info('📥 Other user profile data received', {
+                username,
+                profileData,
+                availableFields: profileData ? Object.keys(profileData) : []
+            });
+
+            if (profileData) {
+                // Check if this is an error response
+                if (profileData.message && profileData.message.includes('not found')) {
+                    logger.warn('⚠️ Other user not found in profile API', { username });
+                    setOtherUserProfile(null);
+                    setOtherUserInstruments([]);
+                    return;
+                }
+
+                // Extract profile picture
+                let profilePicture = null;
+                const pictureFields = ['profile_picture', 'profilePicture', 'profilePic', 'avatar', 'image'];
+
+                for (const field of pictureFields) {
+                    if (profileData[field]) {
+                        profilePicture = profileData[field];
+                        break;
+                    }
+                }
+
+                // Extract instruments
+                let instruments = [];
+                const instrumentFields = ['instruments', 'instrument', 'musical_instruments'];
+
+                for (const field of instrumentFields) {
+                    if (profileData[field]) {
+                        if (typeof profileData[field] === 'object' && !Array.isArray(profileData[field])) {
+                            instruments = Object.keys(profileData[field]);
+                        } else if (Array.isArray(profileData[field])) {
+                            instruments = profileData[field];
+                        } else if (typeof profileData[field] === 'string') {
+                            instruments = profileData[field].split(/[,;]/).map(i => i.trim()).filter(i => i);
+                        }
+                        break;
+                    }
+                }
+
+                logger.info('✅ Other user profile data extracted', {
+                    username,
+                    hasProfilePicture: !!profilePicture,
+                    instrumentCount: instruments.length
+                });
+
+                setOtherUserProfile(profilePicture);
+                setOtherUserInstruments(instruments);
+            }
+        } catch (error) {
+            logger.error('❌ Failed to fetch other user profile', {
+                username,
+                error: error.message
+            });
+        } finally {
+            setIsLoadingOtherUserProfile(false);
+        }
+    };
+
+    // Fetch other user's profile when component loads
+    useEffect(() => {
+        if (userName && !otherUserProfile && !isLoadingOtherUserProfile) {
+            fetchOtherUserProfile(userName);
+        }
+    }, [userName, otherUserProfile, isLoadingOtherUserProfile]);
+
+    // ===================================
     // CHATSERVICE CONNECTION LOGIC
     // ===================================
 
@@ -220,7 +309,7 @@ const ChatScreen = () => {
                 messageListenerRef.current(); // Unsubscribe from messages
             }
         };
-    }, [currentUsername, userName, isSignedIn, isLoadingProfile]); // Add isLoadingProfile dependency
+    }, [currentUsername, userName, isSignedIn, isLoadingProfile]);
 
     // ===================================
     // MESSAGE HANDLING
@@ -403,7 +492,6 @@ const ChatScreen = () => {
             case 'success':
                 // Backend success response - this doesn't contain message content
                 logger.info('✅ Backend success response', { message: data.message });
-                // Don't do anything here - this is just a confirmation
                 break;
 
             case 'message_sent':
@@ -567,6 +655,36 @@ const ChatScreen = () => {
         />
     );
 
+    // Profile picture rendering function
+    const renderProfilePicture = () => {
+        if (otherUserProfile) {
+            return (
+                <View style={styles.profilePictureContainer}>
+                    <Image
+                        source={{ uri: otherUserProfile }}
+                        style={styles.profilePictureImage}
+                        onError={() => {
+                            logger.warn('⚠️ Profile picture failed to load, falling back to initials');
+                            setOtherUserProfile(null); // Fall back to initials
+                        }}
+                    />
+                </View>
+            );
+        } else {
+            // Default gradient with initials
+            return (
+                <LinearGradient
+                    colors={COLORS.static.primaryGradient}
+                    style={styles.profilePicture}
+                >
+                    <Text style={styles.profileInitials}>
+                        {userName ? userName.split(' ').map(part => part[0]).join('').toUpperCase() : 'U'}
+                    </Text>
+                </LinearGradient>
+            );
+        }
+    };
+
     // ===================================
     // MAIN RENDER
     // ===================================
@@ -587,19 +705,16 @@ const ChatScreen = () => {
                     </TouchableOpacity>
 
                     {/* Profile Picture */}
-                    <LinearGradient
-                        colors={COLORS.static.primaryGradient}
-                        style={styles.profilePicture}
-                    >
-                        <Text style={styles.profileInitials}>
-                            {userName ? userName.split(' ').map(part => part[0]).join('').toUpperCase() : 'U'}
-                        </Text>
-                    </LinearGradient>
+                    {renderProfilePicture()}
 
                     {/* User Info */}
                     <View style={styles.userInfoContainer}>
                         <Text style={styles.headerUserName}>{userName}</Text>
-                        {/* TODO: Add real user instruments from profile */}
+                        {otherUserInstruments.length > 0 && (
+                            <Text style={styles.headerInstruments}>
+                                {otherUserInstruments.join(' • ')}
+                            </Text>
+                        )}
                     </View>
                 </View>
             </View>
@@ -621,16 +736,16 @@ const ChatScreen = () => {
                             if (messages.length > 0 && !showScrollButton) {
                                 flatListRef.current?.scrollToEnd({ animated: true });
                             }
-                            }}
-                            onScroll={(event) => {
-                                const { contentOffset, contentSize, layoutMeasurement } = event.nativeEvent;
-                                const isAtBottom = contentOffset.y >= (contentSize.height - layoutMeasurement.height - 50);
-                                setShowScrollButton(!isAtBottom && messages.length > 0);
-                            }}
-                            scrollEventThrottle={100}
-                            showsVerticalScrollIndicator={false}
-                            contentContainerStyle={{ flexGrow: 1 }}
-                        />
+                        }}
+                        onScroll={(event) => {
+                            const { contentOffset, contentSize, layoutMeasurement } = event.nativeEvent;
+                            const isAtBottom = contentOffset.y >= (contentSize.height - layoutMeasurement.height - 50);
+                            setShowScrollButton(!isAtBottom && messages.length > 0);
+                        }}
+                        scrollEventThrottle={100}
+                        showsVerticalScrollIndicator={false}
+                        contentContainerStyle={{ flexGrow: 1 }}
+                    />
                 )}
             </View>
 
@@ -775,10 +890,18 @@ const styles = StyleSheet.create({
         marginTop: 16,
     },
 
-    // KEYBOARD AVOIDING VIEW
-    keyboardAvoidingContainer: {
-        flex: 1,
-        justifyContent: 'space-between',
+    // PROFILE PICTURE
+    profilePictureContainer: {
+        width: 35,
+        height: 35,
+        borderRadius: 17.5,
+        overflow: 'hidden',
+        marginRight: 12,
+    },
+    profilePictureImage: {
+        width: '100%',
+        height: '100%',
+        borderRadius: 17.5,
     },
 });
 

@@ -23,8 +23,7 @@ const CONNECTION_STATES = {
 };
 
 /**
- * ChatService Class
- * Handles all WebSocket communication and state management
+ * ChatService Class - Handles WebSocket communication and state management
  */
 class ChatService {
     constructor() {
@@ -86,11 +85,8 @@ class ChatService {
 
     /**
      * Connect to WebSocket server with username
-     * @param {string} username - User's username for connection
-     * @returns {Promise<void>} Resolves when connected successfully
      */
     async connectUserToWebSocket(username) {
-        // Validation
         if (!username || typeof username !== 'string' || !username.trim()) {
             const error = new Error('Invalid username provided');
             logger.error('❌ Connection failed: Invalid username', { username });
@@ -139,27 +135,13 @@ class ChatService {
 
     /**
      * Internal method to establish WebSocket connection
-     * @private
-     * @returns {Promise<void>}
      */
     async _establishWebSocketConnection() {
         return new Promise(async (resolve, reject) => {
             try {
-                // Construct WebSocket URL with username
                 let wsUrl = `${CONFIG.WEBSOCKET_URL}?username=${encodeURIComponent(this.username)}`;
 
-                logger.info('🔗 Connecting to WebSocket', {
-                    username: this.username,
-                    urlLength: wsUrl.length
-                });
-
-                // Log the final WebSocket URL structure (without exposing sensitive data)
-                const urlParts = wsUrl.split('?')[1]?.split('&') || [];
-                logger.info('🔗 WebSocket URL parameters', {
-                    paramCount: urlParts.length,
-                    hasUsername: urlParts.some(p => p.startsWith('username=')),
-                    baseUrl: CONFIG.WEBSOCKET_URL
-                });
+                logger.info('🔗 Connecting to WebSocket', { username: this.username });
 
                 // Create WebSocket instance
                 this.ws = new WebSocket(wsUrl);
@@ -199,8 +181,6 @@ class ChatService {
 
     /**
      * Disconnect from WebSocket with cleanup
-     * @param {boolean} intentional - Whether this is an intentional disconnect
-     * @returns {Promise<void>}
      */
     async disconnectFromWebSocket(intentional = true) {
         logger.info('🔌 Disconnecting from WebSocket', { intentional });
@@ -247,10 +227,6 @@ class ChatService {
     // WEBSOCKET EVENT HANDLERS
     // ===================================
 
-    /**
-     * Handle WebSocket connection open
-     * @private
-     */
     handleWebSocketOpen(event) {
         logger.info('🟢 WebSocket connection established');
 
@@ -270,10 +246,6 @@ class ChatService {
         });
     }
 
-    /**
-     * Handle WebSocket connection close
-     * @private
-     */
     handleWebSocketClose(event) {
         logger.info('🔴 WebSocket connection closed', {
             code: event.code,
@@ -300,21 +272,14 @@ class ChatService {
         }
     }
 
-    /**
-     * Handle WebSocket errors with better error classification and recovery
-     * @private
-     */
     handleWebSocketError(error) {
         const errorMessage = error.message || error.toString() || 'Unknown WebSocket error';
-
-        // Classify the error type
         const errorType = this.classifyWebSocketError(errorMessage);
 
-        logger.info('⚠️ WebSocket error classified', {
-            errorType,
-            originalMessage: errorMessage,
-            connectionState: this.connectionState,
-            reconnectAttempts: this.reconnectAttempts
+        logger.warn('⚠️ WebSocket error', {
+            category: errorType.category,
+            message: errorType.friendlyMessage,
+            shouldReconnect: errorType.shouldReconnect
         });
 
         // Update connection state based on error type
@@ -350,7 +315,6 @@ class ChatService {
         // Trigger reconnection for recoverable errors
         if (errorType.shouldReconnect && !this.isIntentionalDisconnect) {
             logger.info('🔄 Scheduling reconnection due to recoverable error');
-            // Small delay before reconnection to avoid rapid retries
             setTimeout(() => {
                 if (!this.isIntentionalDisconnect && this.connectionState === CONNECTION_STATES.RECONNECTING) {
                     this.handleReconnection();
@@ -361,9 +325,6 @@ class ChatService {
 
     /**
      * Classify WebSocket errors to determine appropriate handling
-     * @private
-     * @param {string} errorMessage - The error message to classify
-     * @returns {Object} Error classification with handling strategy
      */
     classifyWebSocketError(errorMessage) {
         const message = errorMessage.toLowerCase();
@@ -442,10 +403,6 @@ class ChatService {
         };
     }
 
-    /**
-     * Handle reconnection attempts with exponential backoff
-     * @private
-     */
     handleReconnection() {
         if (this.isIntentionalDisconnect || this.reconnectAttempts >= CONFIG.MAX_RECONNECT_ATTEMPTS) {
             logger.warn('🚫 Reconnection aborted', {
@@ -504,10 +461,6 @@ class ChatService {
         }, delay);
     }
 
-    /**
-     * Cancel ongoing reconnection attempts
-     * @private
-     */
     cancelReconnection() {
         if (this.reconnectTimeout) {
             clearTimeout(this.reconnectTimeout);
@@ -520,11 +473,6 @@ class ChatService {
     // MESSAGE PROCESSING
     // ===================================
 
-    /**
-     * Process incoming messages
-     * @private
-     * @param {object} data - Parsed message data
-     */
     processIncomingMessage(data) {
         const type = data?.type || 'unknown';
 
@@ -574,9 +522,8 @@ class ChatService {
 
             // Fallback: Check if it's a real-time message without proper type
             default:
-                // Check if this is a real-time message (like your web version receives)
+                // Check if this is a real-time message
                 if (data.from && data.message && !data.type) {
-                    // Transform to proper message_received format
                     const messageReceived = {
                         type: 'message_received',
                         from: data.from,
@@ -586,7 +533,7 @@ class ChatService {
                     };
                     this.notifyListeners(this.eventListeners.message, messageReceived);
                 }
-                // Also handle direct messages without type - key fix for real-time updates
+                // Handle direct messages without type
                 else if (data.from && data.message) {
                     this.notifyListeners(this.eventListeners.message, {
                         ...data,
@@ -596,13 +543,10 @@ class ChatService {
                 }
                 // Check if the message contains mark as read confirmation
                 else if (data.message && typeof data.message === 'string' && data.message.includes('marked as read')) {
-                    // Extract username from the message if available
                     let otherUser = data.otherUserName || data.otherUser;
 
-                    // Try to extract from conversationId if not directly available
                     if (!otherUser && data.conversationId && data.conversationId.includes('#')) {
                         const parts = data.conversationId.split('#');
-                        // Find the part that's not our username
                         otherUser = parts.find(part => part !== this.username);
                     }
 
@@ -623,7 +567,6 @@ class ChatService {
                             statusCode: data.statusCode
                         });
                     } else {
-                        // Regular success response
                         this.notifyListeners(this.eventListeners.message, data);
                     }
                 }
@@ -636,9 +579,6 @@ class ChatService {
 
     /**
      * Send a message to another user
-     * @param {string} to - Recipient username
-     * @param {string} message - Message text
-     * @returns {boolean} Success status
      */
     sendMessage(to, message) {
         if (!to || !message || typeof to !== 'string' || typeof message !== 'string') {
@@ -695,8 +635,6 @@ class ChatService {
 
     /**
      * Mark messages as read in a conversation
-     * @param {string} conversationWith - Username of the conversation partner
-     * @returns {boolean} Success status
      */
     markMessagesAsRead(conversationWith) {
         if (!conversationWith || typeof conversationWith !== 'string') {
@@ -750,9 +688,6 @@ class ChatService {
 
     /**
      * Send action to server with error handling
-     * @param {string} action - Action name
-     * @param {object} payload - Action payload
-     * @returns {boolean} Success status
      */
     sendAction(action, payload = {}) {
         if (!this.isConnected()) {
@@ -780,8 +715,6 @@ class ChatService {
 
     /**
      * Load chat list from backend
-     * @param {string} username - Username to load chats for
-     * @returns {boolean} Success status
      */
     loadChatList(username) {
         if (!username || typeof username !== 'string') {
@@ -811,9 +744,6 @@ class ChatService {
 
     /**
      * Load chat history between two users
-     * @param {string} user1 - First user
-     * @param {string} user2 - Second user
-     * @returns {boolean} Success status
      */
     loadChatHistory(user1, user2) {
         if (!user1 || !user2 || typeof user1 !== 'string' || typeof user2 !== 'string') {
@@ -842,13 +772,50 @@ class ChatService {
         return success;
     }
 
+    /**
+     * Fetch user profile info including profile picture and instruments
+     */
+    async fetchUserProfile(username) {
+        if (!username || typeof username !== 'string') {
+            logger.warn('⚠️ Invalid username for profile fetch', { username });
+            return null;
+        }
+
+        try {
+            const url = `https://lynqhqnijd.execute-api.us-east-1.amazonaws.com/groovi/load_profile?field=username&value=${encodeURIComponent(username)}`;
+
+            const response = await fetch(url, {
+                method: 'GET',
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+                timeout: 5000
+            });
+
+            if (!response.ok) {
+                logger.warn('⚠️ Profile fetch failed', { username, status: response.status });
+                return null;
+            }
+
+            const profileData = await response.json();
+            logger.info('✅ Profile fetched successfully', { username });
+            return profileData;
+
+        } catch (error) {
+            logger.error('❌ Failed to fetch user profile', {
+                username,
+                error: error.message
+            });
+            return null;
+        }
+    }
+
     // ===================================
     // STATE MANAGEMENT & UTILITIES
     // ===================================
 
     /**
      * Check if WebSocket is connected
-     * @returns {boolean} Connection status
      */
     isConnected() {
         return this.connectionState === CONNECTION_STATES.CONNECTED &&
@@ -857,7 +824,6 @@ class ChatService {
 
     /**
      * Get current connection state
-     * @returns {object} Complete connection state
      */
     getConnectionState() {
         return {
@@ -877,8 +843,6 @@ class ChatService {
 
     /**
      * Add listener for incoming messages
-     * @param {function} callback - Function to call when message received
-     * @returns {function} Unsubscribe function
      */
     onMessage(callback) {
         if (typeof callback !== 'function') {
@@ -896,8 +860,6 @@ class ChatService {
 
     /**
      * Add listener for chat list updates
-     * @param {function} callback - Function to call when chat list updated
-     * @returns {function} Unsubscribe function
      */
     onChatListUpdate(callback) {
         if (typeof callback !== 'function') {
@@ -915,8 +877,6 @@ class ChatService {
 
     /**
      * Add listener for connection state changes
-     * @param {function} callback - Function to call when connection changes
-     * @returns {function} Unsubscribe function
      */
     onConnectionChange(callback) {
         if (typeof callback !== 'function') {
@@ -934,11 +894,8 @@ class ChatService {
 
     /**
      * Notify connection handlers
-     * @private
-     * @param {object} data - Connection state data
      */
     notifyConnectionHandlers(data) {
-        // Notify all connection listeners
         this.eventListeners.connection.forEach(callback => {
             try {
                 callback(data);
@@ -960,11 +917,8 @@ class ChatService {
 
     /**
      * Notify error handlers
-     * @private
-     * @param {object} error - Error data
      */
     notifyErrorHandlers(error) {
-        // Notify all error listeners
         this.eventListeners.error.forEach(callback => {
             try {
                 callback(error);
@@ -976,17 +930,12 @@ class ChatService {
 
     /**
      * Handle incoming WebSocket messages
-     * @private
      */
     handleWebSocketMessage(event) {
         try {
             const data = JSON.parse(event.data);
-
             this.metrics.messagesReceived++;
-
-            // Handle different message types
             this.processIncomingMessage(data);
-
         } catch (error) {
             logger.error('❌ Failed to parse WebSocket message', {
                 error: error.message,
@@ -999,10 +948,6 @@ class ChatService {
     // KEEP-ALIVE SYSTEM
     // ===================================
 
-    /**
-     * Start the keep-alive ping interval
-     * @private
-     */
     startPingInterval() {
         this.stopPingInterval();
 
@@ -1013,10 +958,6 @@ class ChatService {
         }, CONFIG.PING_INTERVAL);
     }
 
-    /**
-     * Stop the keep-alive ping interval
-     * @private
-     */
     stopPingInterval() {
         if (this.pingInterval) {
             clearInterval(this.pingInterval);
@@ -1024,10 +965,6 @@ class ChatService {
         }
     }
 
-    /**
-     * Send keep-alive ping to server
-     * @private
-     */
     sendKeepAlivePing() {
         if (!this.username) return;
 
@@ -1045,3 +982,4 @@ class ChatService {
 
 // Export singleton instance
 export default new ChatService();
+
