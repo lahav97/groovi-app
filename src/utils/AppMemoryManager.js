@@ -335,9 +335,16 @@ class AppMemoryManager {
 
         logger.debug('🧭 Navigation change detected', { from, to });
 
+        // CRITICAL FIX: Don't trigger cleanup for Profile navigation
+        if (to === 'Profile' || to === 'ProfileScreen') {
+            logger.debug('🚫 Skipping cleanup for Profile navigation');
+            return;
+        }
+
         // Request routine cleanup through single gate
         this.requestCleanup(CLEANUP_TRIGGERS.NAVIGATION, CLEANUP_REASONS.ROUTINE);
     }
+
 
     /**
      * Memory monitoring with automatic emergency requests

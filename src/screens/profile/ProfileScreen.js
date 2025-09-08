@@ -1,8 +1,3 @@
-/**
- * FIXED ProfileScreen - Minimal stable video fix without breaking location
- * Keeps your original smart loading logic intact
- */
-
 import React, { useState, useEffect } from 'react';
 import {
     View,
@@ -31,24 +26,22 @@ const ProfileScreen = () => {
     const colorScheme = useColorScheme();
     const theme = colorScheme === 'dark' ? COLORS.dark : COLORS.light;
 
-    // MINIMAL FIX: Just stabilize videos, keep everything else the same
+    // Just stabilize videos, keep everything else the same
     const [stableVideos, setStableVideos] = useState([]);
 
-    // Profile data management (your original working version)
+    // Profile data management
     const {
         profile,
         loading,
         error,
         refreshing,
-        loggingOut,
         isBackgroundRefreshing,
-        handleLogout,
         onRefresh,
         loadProfileInstantly,
         formatInstruments,
     } = useProfileData();
 
-    // MINIMAL FIX: Only stabilize videos to prevent cache reinit
+    // Only stabilize videos to prevent cache reinit
     useEffect(() => {
         if (profile?.videos && Array.isArray(profile.videos) && profile.videos.length > 0) {
             const newVideos = profile.videos.filter(v => v && v !== '');
@@ -74,16 +67,9 @@ const ProfileScreen = () => {
         clearVideoCache,
     } = useVideoCache(stableVideos); // Only change: use stableVideos
 
-    // Clear video cache on logout
-    useEffect(() => {
-        if (loggingOut) {
-            clearVideoCache();
-        }
-    }, [loggingOut, clearVideoCache]);
-
     useEffect(() => {
         if (isFocused && stableVideos.length > 0) {
-            console.log('🔄 ProfileScreen focused - checking video state');
+            console.log('📄 ProfileScreen focused - checking video state');
             const timer = setTimeout(() => {
                 // Force videos to resume when screen becomes focused
                 if (videoObjects && videoObjects.length > 0) {
@@ -96,7 +82,7 @@ const ProfileScreen = () => {
     }, [isFocused, stableVideos.length, videoObjects]);
 
     // ============================================================================
-    // RENDER LOADING STATE (your original)
+    // RENDER LOADING STATE
     // ============================================================================
     if (loading && !profile) {
         return (
@@ -137,7 +123,7 @@ const ProfileScreen = () => {
     }
 
     // ============================================================================
-    // MAIN PROFILE UI (your original structure)
+    // MAIN PROFILE UI (updated to navigate to settings)
     // ============================================================================
     return (
         <SafeAreaView style={[styles.container, { backgroundColor: theme.background }]}>
@@ -150,7 +136,7 @@ const ProfileScreen = () => {
 
             {/* Top Icons */}
             <View style={styles.topIcons}>
-                <TouchableOpacity>
+                <TouchableOpacity onPress={() => navigation.navigate('Settings')}>
                     <Ionicons name="settings-outline" size={SIZES.icon} color={theme.text} />
                 </TouchableOpacity>
                 <TouchableOpacity onPress={() => navigation.navigate('EditProfile')}>
@@ -183,12 +169,10 @@ const ProfileScreen = () => {
                     videoStates={videoStates}
                 />
 
-                {/* Profile Information Component */}
+                {/* Profile Information Component - removed logout props */}
                 <ProfileInfo
                     profile={profile}
                     formatInstruments={formatInstruments}
-                    handleLogout={handleLogout}
-                    loggingOut={loggingOut}
                 />
             </ScrollView>
 

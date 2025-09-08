@@ -56,8 +56,10 @@ export const useVideoCache = (videos = []) => {
         // Wait for component to be fully initialized before handling focus changes
         if (!isInitialized.current) {
             if (isFocused) {
-                isInitialized.current = true;
-                logger.debug('📱 Video cache initialized with focus');
+                setTimeout(() => {
+                    isInitialized.current = true;
+                    logger.debug('📱 Video cache initialized with focus (delayed)');
+                }, 200);
             }
             return;
         }
@@ -67,7 +69,7 @@ export const useVideoCache = (videos = []) => {
                 logger.info('📱 Screen focused - resuming videos');
                 setTimeout(() => {
                     resumePausedByUnfocusVideos();
-                }, 300); // Small delay to ensure smooth navigation
+                }, 200);
                 wasUnfocused.current = false;
             }
         } else {

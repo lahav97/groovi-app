@@ -105,6 +105,8 @@ const MatchScreen = () => {
     const preloadTimeoutRef = useRef(null);
     const panGestureRef = useRef(null);
     const scrollViewRef = useRef(null);
+    const hasInitialLoad = useRef(false);
+    const initialFiltersRef = useRef(null);
 
     // Animation values
     const translateX = useSharedValue(0);
@@ -122,11 +124,8 @@ const MatchScreen = () => {
         return currentMusician.videos.length;
     }, [currentMusician?.videos]);
 
-    // Check if filters are active using the service
-    const hasActiveFilters = useMemo(() =>
-            UserMatchingService.detectActiveFilters(filters),
-        [filters]
-    );
+    // Check if filters are active - computed inline when needed
+    const hasActiveFilters = UserMatchingService.detectActiveFilters(filters);
 
     /**
      * Load initial musicians using appropriate service method based on filter state
@@ -138,6 +137,8 @@ const MatchScreen = () => {
         setError(null);
 
         try {
+            const hasActiveFilters = UserMatchingService.detectActiveFilters(filters);
+
             console.log('Loading musicians with filter state:', {
                 hasActiveFilters,
                 filterKeys: Object.keys(filters || {}),
@@ -196,7 +197,7 @@ const MatchScreen = () => {
                 setLoading(false);
             }
         }
-    }, [currentUserEmail, hasActiveFilters, filters, locationOptions]);
+    }, [currentUserEmail, locationOptions, filters]);
 
     /**
      * Load additional musicians for pagination
@@ -208,6 +209,7 @@ const MatchScreen = () => {
         console.log('Loading additional musicians with current filter state');
 
         try {
+            const hasActiveFilters = UserMatchingService.detectActiveFilters(filters);
             const additionalMusicians = await UserMatchingService.loadAdditionalMatches(
                 currentUserEmail,
                 LOAD_MORE_BATCH_SIZE,
@@ -238,7 +240,7 @@ const MatchScreen = () => {
                 setIsPreloading(false);
             }
         }
-    }, [currentUserEmail, isPreloading, musicians.length, locationOptions, hasActiveFilters, filters]);
+    }, [currentUserEmail, isPreloading, musicians.length, locationOptions, filters]);
 
     /**
      * Handle moving to next musician with loading logic
@@ -731,10 +733,19 @@ const MatchScreen = () => {
     // Initialize on mount
     useEffect(() => {
         mountedRef.current = true;
-        loadInitialMusicians();
+
+        const doInitialLoad = async () => {
+            await loadInitialMusicians();
+            hasInitialLoad.current = true;
+        };
+
+        doInitialLoad();
 
         return () => {
             mountedRef.current = false;
+            hasInitialLoad.current = false;
+            initialFiltersRef.current = null;
+
             if (preloadTimeoutRef.current) {
                 clearTimeout(preloadTimeoutRef.current);
             }
@@ -747,15 +758,28 @@ const MatchScreen = () => {
                 }
             }
         };
-    }, [loadInitialMusicians]);
+    }, []);
 
     // Reload when filters change
     useEffect(() => {
-        if (filters && mountedRef.current) {
-            console.log('Filters changed, reloading musicians:', {
-                hasActiveFilters,
-                filterKeys: Object.keys(filters)
-            });
+        // Store initial filters reference to detect real changes
+        if (!initialFiltersRef.current && filters) {
+            initialFiltersRef.current = JSON.stringify(filters);
+            return; // Skip on initial filter setup
+        }
+
+        // Skip if we haven't completed initial load
+        if (!hasInitialLoad.current) {
+            return;
+        }
+
+        // Only reload if filters actually changed (not just reference)
+        const currentFiltersString = JSON.stringify(filters);
+        if (currentFiltersString !== initialFiltersRef.current) {
+            console.log('Filters changed after initial load, reloading musicians');
+
+            // Update stored filters reference
+            initialFiltersRef.current = currentFiltersString;
 
             setMusicians([]);
             setCurrentIndex(0);
@@ -767,7 +791,7 @@ const MatchScreen = () => {
                 }
             }, 100);
         }
-    }, [filters, hasActiveFilters, loadInitialMusicians]);
+    }, [filters, loadInitialMusicians]);
 
     // Pause video when screen not focused
     useEffect(() => {
@@ -837,6 +861,7 @@ const MatchScreen = () => {
 
     // Render loading state
     if (loading) {
+        const hasActiveFilters = UserMatchingService.detectActiveFilters(filters);
         return (
             <View style={styles.loadingContainer}>
                 <View style={styles.loadingCard}>
@@ -859,13 +884,10 @@ const MatchScreen = () => {
     }
 
     // Render error state
-// Add this to your MatchScreen.js - Replace the error and empty state renders
-
-// Around line 600, replace the error state render with:
     if (error) {
+        const hasActiveFilters = UserMatchingService.detectActiveFilters(filters);
         return (
             <View style={styles.errorContainer}>
-                {/* Add back button */}
                 <TouchableOpacity
                     style={[styles.backButton, { top: insets.top + 10 }]}
                     onPress={() => navigation.navigate('Filter')}
@@ -898,9 +920,9 @@ const MatchScreen = () => {
 
     // Render empty state
     if (!musicians || musicians.length === 0) {
+        const hasActiveFilters = UserMatchingService.detectActiveFilters(filters);
         return (
             <View style={styles.errorContainer}>
-                {/* Add back button */}
                 <TouchableOpacity
                     style={[styles.backButton, { top: insets.top + 10 }]}
                     onPress={() => hasActiveFilters ? navigation.navigate('Filter') : navigation.goBack()}

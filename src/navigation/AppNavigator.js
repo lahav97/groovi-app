@@ -22,6 +22,7 @@ import MusicianProfileScreen from '../screens/profile/MusicianProfileScreen';
 import ChatListScreen from '../screens/chat/ChatListScreen';
 import ChatScreen from '../screens/chat/ChatScreen';
 import TopBar from '../components/navigationBar/TopNavigation';
+import SettingsScreen from '../screens/profile/SettingsScreen';
 
 // Memory management utilities
 import AppMemoryManager from '../utils/AppMemoryManager';
@@ -140,6 +141,7 @@ const MainStack = () => (
         <Stack.Screen name="Search" component={SearchScreen} />
         <Stack.Screen name="MusicianProfile" component={MusicianProfileScreen} />
         <Stack.Screen name="ChatScreen" component={ChatScreen} />
+        <Stack.Screen name="Settings" component={SettingsScreen} />
     </Stack.Navigator>
 );
 

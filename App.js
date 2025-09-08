@@ -12,6 +12,7 @@ import { SignupFlowProvider } from './src/context/SignupFlowContext';
 import { FiltersProvider } from './src/context/FiltersContext';
 import AppMemoryManager from './src/utils/AppMemoryManager';
 import NotificationService from './src/services/NotificationService';
+import * as FileSystem from 'expo-file-system';
 
 Amplify.configure(awsConfig);
 
@@ -42,6 +43,9 @@ export default function App() {
                 // Initialize memory manager (non-blocking)
                 AppMemoryManager.init();
                 console.log('✅ App initialized with memory management');
+
+                await createVideoCacheDirectory();
+                console.log('✅ Video cache directory ensured');
 
                 // Mark app as ready immediately to show loading screens
                 setIsAppReady(true);
@@ -96,3 +100,19 @@ const styles = StyleSheet.create({
         flex: 1,
     },
 });
+
+const createVideoCacheDirectory = async () => {
+    try {
+        const cacheDir = `${FileSystem.cacheDirectory}videos/`;
+        const dirInfo = await FileSystem.getInfoAsync(cacheDir);
+
+        if (!dirInfo.exists) {
+            await FileSystem.makeDirectoryAsync(cacheDir, { intermediates: true });
+            console.log('📁 Video cache directory created successfully');
+        } else {
+            console.log('📁 Video cache directory already exists');
+        }
+    } catch (error) {
+        console.error('❌ Failed to create video cache directory:', error);
+    }
+};

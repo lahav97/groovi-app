@@ -844,6 +844,12 @@ export const performRoutineCleanup = async (reason = 'routine') => {
  * EMERGENCY CLEANUP: Full cache clearing for memory pressure situations
  */
 export const clearAllCaches = async (reason = 'emergency') => {
+    if (reason.includes('Profile') || reason.includes('navigation_to_Profile')) {
+        logger.info('🚫 Skipping video cache clear during profile navigation', { reason });
+        // Only clear memory cache, not video files
+        emergencyMemoryCacheCleanup(reason);
+        return;
+    }
     logger.warn('🚨 Emergency cache clearing initiated', { reason });
 
     gracefulShutdownInProgress = true;

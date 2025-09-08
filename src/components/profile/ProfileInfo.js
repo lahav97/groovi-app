@@ -75,23 +75,6 @@ const ProfileInfo = ({
           {profile?.address || profile?.location || 'Tel Aviv'}
         </Text>
       </View>
-
-      {/* Logout Button */}
-      <TouchableOpacity 
-        style={styles.logoutButton} 
-        onPress={handleLogout}
-        disabled={loggingOut}
-        activeOpacity={0.7}
-      >
-        {loggingOut ? (
-          <ActivityIndicator size="small" color="#ff6ec4" style={{ marginRight: 8 }} />
-        ) : (
-          <Ionicons name="log-out-outline" size={20} color="#ff6ec4" style={{ marginRight: 8 }} />
-        )}
-        <Text style={styles.logoutText}>
-          {loggingOut ? 'Signing Out...' : 'Sign Out'}
-        </Text>
-      </TouchableOpacity>
     </>
   );
 };
