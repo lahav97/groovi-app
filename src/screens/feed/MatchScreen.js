@@ -859,9 +859,22 @@ const MatchScreen = () => {
     }
 
     // Render error state
+// Add this to your MatchScreen.js - Replace the error and empty state renders
+
+// Around line 600, replace the error state render with:
     if (error) {
         return (
             <View style={styles.errorContainer}>
+                {/* Add back button */}
+                <TouchableOpacity
+                    style={[styles.backButton, { top: insets.top + 10 }]}
+                    onPress={() => navigation.navigate('Filter')}
+                >
+                    <View style={styles.backIconContainer}>
+                        <Icon name="arrow-back" size={24} color="#333" />
+                    </View>
+                </TouchableOpacity>
+
                 <View style={styles.errorCard}>
                     <Icon name="musical-notes-outline" size={60} color="#ccc" />
                     <Text style={styles.errorText}>{error}</Text>
@@ -887,6 +900,16 @@ const MatchScreen = () => {
     if (!musicians || musicians.length === 0) {
         return (
             <View style={styles.errorContainer}>
+                {/* Add back button */}
+                <TouchableOpacity
+                    style={[styles.backButton, { top: insets.top + 10 }]}
+                    onPress={() => hasActiveFilters ? navigation.navigate('Filter') : navigation.goBack()}
+                >
+                    <View style={styles.backIconContainer}>
+                        <Icon name="arrow-back" size={24} color="#333" />
+                    </View>
+                </TouchableOpacity>
+
                 <View style={styles.errorCard}>
                     <Icon name="search" size={60} color="#ccc" />
                     <Text style={styles.errorText}>
@@ -1135,8 +1158,6 @@ const styles = StyleSheet.create({
         shadowOpacity: 0.4,
         shadowRadius: 12,
         elevation: 12,
-        borderWidth: 3,
-        borderColor: 'rgba(255,255,255,0.3)',
     },
     videoCounter: {
         position: 'absolute',
@@ -1437,6 +1458,26 @@ const styles = StyleSheet.create({
         color: '#fff',
         fontSize: 16,
         fontWeight: '600',
+    },
+    // Back button
+    backButton: {
+        position: 'absolute',
+        left: 20,
+        zIndex: 100,
+        elevation: 10,
+    },
+    backIconContainer: {
+        backgroundColor: 'rgba(255,255,255,0.9)',
+        borderRadius: 20,
+        width: 40,
+        height: 40,
+        justifyContent: 'center',
+        alignItems: 'center',
+        shadowColor: '#000',
+        shadowOffset: { width: 0, height: 2 },
+        shadowOpacity: 0.2,
+        shadowRadius: 4,
+        elevation: 5,
     },
 });
 
