@@ -62,6 +62,19 @@ const ChatScreen = () => {
     const messageListenerRef = useRef(null);
 
     // ===================================
+    // NAVIGATION TO USER PROFILE
+    // ===================================
+    const handleNavigateToProfile = () => {
+        if (userName) {
+            navigation.navigate('MusicianProfile', {
+                username: userName,
+                // Pass any additional data if needed
+                fromChat: true
+            });
+        }
+    };
+
+    // ===================================
     // KEYBOARD HANDLING
     // ===================================
 
@@ -106,7 +119,7 @@ const ChatScreen = () => {
     useEffect(() => {
         const fetchCurrentUsername = async () => {
             if (!isSignedIn || !currentUserEmail) {
-                logger.error('❌ User not signed in or no email', { isSignedIn, currentUserEmail });
+                logger.error('⚠ User not signed in or no email', { isSignedIn, currentUserEmail });
                 setIsLoadingProfile(false);
                 return;
             }
@@ -116,7 +129,7 @@ const ChatScreen = () => {
 
                 const userEmail = currentUserEmail || await getCurrentUserEmail();
                 if (!userEmail) {
-                    logger.error('❌ No user email found');
+                    logger.error('⚠ No user email found');
                     setIsLoadingProfile(false);
                     return;
                 }
@@ -127,10 +140,10 @@ const ChatScreen = () => {
                     setCurrentUsername(username);
                     logger.info('✅ Got username for message identification', { username });
                 } else {
-                    logger.error('❌ Failed to get username - result was null/undefined');
+                    logger.error('⚠ Failed to get username - result was null/undefined');
                 }
             } catch (error) {
-                logger.error('❌ Error getting username', {
+                logger.error('⚠ Error getting username', {
                     error: error.message,
                     stack: error.stack
                 });
@@ -209,7 +222,7 @@ const ChatScreen = () => {
                 setOtherUserInstruments(instruments);
             }
         } catch (error) {
-            logger.error('❌ Failed to fetch other user profile', {
+            logger.error('⚠ Failed to fetch other user profile', {
                 username,
                 error: error.message
             });
@@ -237,13 +250,13 @@ const ChatScreen = () => {
 
         // Validation: Check if we have required data
         if (!isSignedIn || !currentUserEmail) {
-            logger.error('❌ Cannot initialize chat: User not signed in');
+            logger.error('⚠ Cannot initialize chat: User not signed in');
             setConnectionError('Please sign in to access chat');
             return;
         }
 
         if (!userName) {
-            logger.error('❌ Cannot initialize chat: No userName provided');
+            logger.error('⚠ Cannot initialize chat: No userName provided');
             setConnectionError('Invalid conversation');
             return;
         }
@@ -292,10 +305,10 @@ const ChatScreen = () => {
                         logger.warn('⚠️ Failed to send mark as read request');
                     }
                 } catch (error) {
-                    logger.error('❌ Error calling markMessagesAsRead', { error: error.message });
+                    logger.error('⚠ Error calling markMessagesAsRead', { error: error.message });
                 }
             } catch (error) {
-                logger.error('❌ Failed to initialize chat', { error: error.message });
+                logger.error('⚠ Failed to initialize chat', { error: error.message });
                 setConnectionError(error.message || 'Failed to load chat');
                 setIsLoadingHistory(false);
             }
@@ -320,7 +333,7 @@ const ChatScreen = () => {
         if (!data.type) {
             if (data.statusCode && data.message) {
                 // Backend error response
-                logger.error('❌ Backend error response', {
+                logger.error('⚠ Backend error response', {
                     statusCode: data.statusCode,
                     message: data.message
                 });
@@ -511,7 +524,7 @@ const ChatScreen = () => {
             default:
                 // Try to handle as error response
                 if (data.statusCode && data.statusCode >= 400) {
-                    logger.error('❌ Treating as error response');
+                    logger.error('⚠ Treating as error response');
                     setConnectionError(`Error: ${data.message || 'Unknown error occurred'}`);
                     setIsLoadingHistory(false);
                 }
@@ -566,7 +579,7 @@ const ChatScreen = () => {
             }
 
         } catch (error) {
-            logger.error('❌ Error sending message', { error: error.message });
+            logger.error('⚠ Error sending message', { error: error.message });
 
             // Remove failed message from UI
             setMessages(prev => prev.filter(msg => msg.id !== optimisticMessage.id));
@@ -655,11 +668,15 @@ const ChatScreen = () => {
         />
     );
 
-    // Profile picture rendering function
+    // Profile picture rendering function - NOW TOUCHABLE
     const renderProfilePicture = () => {
         if (otherUserProfile) {
             return (
-                <View style={styles.profilePictureContainer}>
+                <TouchableOpacity
+                    style={styles.profilePictureContainer}
+                    onPress={handleNavigateToProfile}
+                    activeOpacity={0.8}
+                >
                     <Image
                         source={{ uri: otherUserProfile }}
                         style={styles.profilePictureImage}
@@ -668,19 +685,21 @@ const ChatScreen = () => {
                             setOtherUserProfile(null); // Fall back to initials
                         }}
                     />
-                </View>
+                </TouchableOpacity>
             );
         } else {
-            // Default gradient with initials
+            // Default gradient with initials - NOW TOUCHABLE
             return (
-                <LinearGradient
-                    colors={COLORS.static.primaryGradient}
-                    style={styles.profilePicture}
-                >
-                    <Text style={styles.profileInitials}>
-                        {userName ? userName.split(' ').map(part => part[0]).join('').toUpperCase() : 'U'}
-                    </Text>
-                </LinearGradient>
+                <TouchableOpacity onPress={handleNavigateToProfile} activeOpacity={0.8}>
+                    <LinearGradient
+                        colors={COLORS.static.primaryGradient}
+                        style={styles.profilePicture}
+                    >
+                        <Text style={styles.profileInitials}>
+                            {userName ? userName.split(' ').map(part => part[0]).join('').toUpperCase() : 'U'}
+                        </Text>
+                    </LinearGradient>
+                </TouchableOpacity>
             );
         }
     };
@@ -704,18 +723,22 @@ const ChatScreen = () => {
                         <Ionicons name="chevron-back" size={24} color="black" />
                     </TouchableOpacity>
 
-                    {/* Profile Picture */}
+                    {/* Profile Picture - NOW CLICKABLE */}
                     {renderProfilePicture()}
 
-                    {/* User Info */}
-                    <View style={styles.userInfoContainer}>
+                    {/* User Info - NOW CLICKABLE */}
+                    <TouchableOpacity
+                        style={styles.userInfoContainer}
+                        onPress={handleNavigateToProfile}
+                        activeOpacity={0.8}
+                    >
                         <Text style={styles.headerUserName}>{userName}</Text>
                         {otherUserInstruments.length > 0 && (
                             <Text style={styles.headerInstruments}>
                                 {otherUserInstruments.join(' • ')}
                             </Text>
                         )}
-                    </View>
+                    </TouchableOpacity>
                 </View>
             </View>
 
@@ -906,4 +929,3 @@ const styles = StyleSheet.create({
 });
 
 export default ChatScreen;
-

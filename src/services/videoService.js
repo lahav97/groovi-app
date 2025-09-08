@@ -38,7 +38,7 @@ let hasReachedActualEnd = false;
 /**
  * Format API response for Discover Screen
  * Transforms raw API data into standardized musician objects with limited profile data
- * @param {Array} apiData - Raw data from discover API
+ * @param {Array} apiData - Raw data from Discover API
  * @returns {Array} Transformed musician objects with basic information
  */
 const formatDiscoverResponse = (apiData) => {
@@ -398,15 +398,18 @@ export const fetchMusicians = async (type = 'initial', username = null, filterCr
  * @param {string} currentUser - Current user to exclude from results
  * @returns {Promise<Array>} - Array of unique video objects
  */
-export const fetchVideos = async (offset = 0, limit = 5, currentUser = 'default_user') => {
+export const fetchVideos = async (offset = 0, limit = 5, currentUser = null) => {
     try {
         if (offset === 0) {
             fetchedVideoIds.clear();
             logger.debug('Reset video state tracking');
         }
 
+        // Use currentUser if provided, otherwise use a safe default that won't match real users
+        const userToExclude = currentUser || 'anonymous_user';
+
         // Pass the actual currentUser to exclude them from results
-        const musicians = await fetchInitialMusicians(currentUser);
+        const musicians = await fetchInitialMusicians(userToExclude);
 
         const videos = musicians.map(musician => ({
             id: musician.id,

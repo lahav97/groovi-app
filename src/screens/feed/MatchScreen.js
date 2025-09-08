@@ -31,6 +31,8 @@ import LocationService from '../../services/LocationService';
 import BottomNavigation from '../../components/navigationBar/BottomNavigation';
 import { LAYOUT, COLORS } from '../../styles/theme';
 import { handleError, ERROR_MESSAGES } from '../../utils/errors';
+import { getUsernameForChat } from '../../services/profileService';
+import { getCurrentUserEmail } from '../../utils/userUtils';
 
 // Layout constants
 const { width, height } = Dimensions.get('window');
@@ -73,9 +75,10 @@ const MatchScreen = () => {
     const navigation = useNavigation();
     const insets = useSafeAreaInsets();
     const isFocused = useIsFocused();
-    const { user } = useAuth();
+    const { user, isSignedIn } = useAuth();
     const { filters } = useFilters();
 
+    // Get email for chat conversation ID creation
     const currentUserEmail = useMemo(() =>
             user?.email || user?.username || 'guest@groovi.app',
         [user?.email, user?.username]
@@ -91,6 +94,10 @@ const MatchScreen = () => {
     const [isPreloading, setIsPreloading] = useState(false);
     const [isSwipeInProgress, setIsSwipeInProgress] = useState(false);
     const [videoLoading, setVideoLoading] = useState(true);
+
+    // USERNAME STATE FOR API CALLS
+    const [currentUsername, setCurrentUsername] = useState(null);
+    const [isLoadingUsername, setIsLoadingUsername] = useState(true);
 
     // Match modal state
     const [showMatchModal, setShowMatchModal] = useState(false);
@@ -127,11 +134,57 @@ const MatchScreen = () => {
     // Check if filters are active - computed inline when needed
     const hasActiveFilters = UserMatchingService.detectActiveFilters(filters);
 
+    // ===================================
+    // GET CURRENT USERNAME FOR API CALLS
+    // ===================================
+    useEffect(() => {
+        const fetchCurrentUsername = async () => {
+            if (!isSignedIn || !currentUserEmail) {
+                console.error('⚠ User not signed in or no email', { isSignedIn, currentUserEmail });
+                setIsLoadingUsername(false);
+                setError('Please sign in to see matches');
+                return;
+            }
+
+            try {
+                setIsLoadingUsername(true);
+
+                const userEmail = currentUserEmail || await getCurrentUserEmail();
+                if (!userEmail) {
+                    console.error('⚠ No user email found');
+                    setIsLoadingUsername(false);
+                    setError('Unable to get user information');
+                    return;
+                }
+
+                const username = await getUsernameForChat(userEmail);
+
+                if (username) {
+                    setCurrentUsername(username);
+                    console.log('✅ Got username for matching API', { username });
+                } else {
+                    console.error('⚠ Failed to get username - result was null/undefined');
+                    setError('Unable to get user information');
+                }
+            } catch (error) {
+                console.error('⚠ Error getting username', {
+                    error: error.message,
+                    stack: error.stack
+                });
+                setError('Unable to get user information');
+            } finally {
+                setIsLoadingUsername(false);
+            }
+        };
+
+        fetchCurrentUsername();
+    }, [isSignedIn, currentUserEmail]);
+
     /**
      * Load initial musicians using appropriate service method based on filter state
      */
     const loadInitialMusicians = useCallback(async () => {
-        if (!mountedRef.current) return;
+        if (!mountedRef.current || !currentUsername) return;
 
         setLoading(true);
         setError(null);
@@ -142,21 +195,22 @@ const MatchScreen = () => {
             console.log('Loading musicians with filter state:', {
                 hasActiveFilters,
                 filterKeys: Object.keys(filters || {}),
-                locationEnabled: !!locationOptions
+                locationEnabled: !!locationOptions,
+                currentUsername // Use username instead of email
             });
 
             let musicians;
 
             if (hasActiveFilters) {
                 musicians = await UserMatchingService.fetchFilteredMatches(
-                    currentUserEmail,
+                    currentUsername, // CHANGED: Use username instead of email
                     filters,
                     INITIAL_BATCH_SIZE
                 );
                 console.log(`Loaded ${musicians.length} filtered musicians`);
             } else {
                 musicians = await UserMatchingService.fetchInitialMatches(
-                    currentUserEmail,
+                    currentUsername, // CHANGED: Use username instead of email
                     INITIAL_BATCH_SIZE
                 );
                 console.log(`Loaded ${musicians.length} initial musicians`);
@@ -197,13 +251,13 @@ const MatchScreen = () => {
                 setLoading(false);
             }
         }
-    }, [currentUserEmail, locationOptions, filters]);
+    }, [currentUsername, locationOptions, filters]); // CHANGED: depend on currentUsername
 
     /**
      * Load additional musicians for pagination
      */
     const loadAdditionalMusicians = useCallback(async () => {
-        if (!mountedRef.current || isPreloading) return;
+        if (!mountedRef.current || isPreloading || !currentUsername) return;
 
         setIsPreloading(true);
         console.log('Loading additional musicians with current filter state');
@@ -211,7 +265,7 @@ const MatchScreen = () => {
         try {
             const hasActiveFilters = UserMatchingService.detectActiveFilters(filters);
             const additionalMusicians = await UserMatchingService.loadAdditionalMatches(
-                currentUserEmail,
+                currentUsername, // CHANGED: Use username instead of email
                 LOAD_MORE_BATCH_SIZE,
                 locationOptions,
                 hasActiveFilters ? filters : null
@@ -240,7 +294,7 @@ const MatchScreen = () => {
                 setIsPreloading(false);
             }
         }
-    }, [currentUserEmail, isPreloading, musicians.length, locationOptions, filters]);
+    }, [currentUsername, isPreloading, musicians.length, locationOptions, filters]); // CHANGED: depend on currentUsername
 
     /**
      * Handle moving to next musician with loading logic
@@ -734,13 +788,6 @@ const MatchScreen = () => {
     useEffect(() => {
         mountedRef.current = true;
 
-        const doInitialLoad = async () => {
-            await loadInitialMusicians();
-            hasInitialLoad.current = true;
-        };
-
-        doInitialLoad();
-
         return () => {
             mountedRef.current = false;
             hasInitialLoad.current = false;
@@ -760,6 +807,18 @@ const MatchScreen = () => {
         };
     }, []);
 
+    // WAIT FOR USERNAME BEFORE LOADING MUSICIANS
+    useEffect(() => {
+        if (!isLoadingUsername && currentUsername) {
+            const doInitialLoad = async () => {
+                await loadInitialMusicians();
+                hasInitialLoad.current = true;
+            };
+
+            doInitialLoad();
+        }
+    }, [isLoadingUsername, currentUsername, loadInitialMusicians]);
+
     // Reload when filters change
     useEffect(() => {
         // Store initial filters reference to detect real changes
@@ -768,8 +827,8 @@ const MatchScreen = () => {
             return; // Skip on initial filter setup
         }
 
-        // Skip if we haven't completed initial load
-        if (!hasInitialLoad.current) {
+        // Skip if we haven't completed initial load or don't have username
+        if (!hasInitialLoad.current || !currentUsername) {
             return;
         }
 
@@ -791,7 +850,7 @@ const MatchScreen = () => {
                 }
             }, 100);
         }
-    }, [filters, loadInitialMusicians]);
+    }, [filters, loadInitialMusicians, currentUsername]);
 
     // Pause video when screen not focused
     useEffect(() => {
@@ -859,20 +918,27 @@ const MatchScreen = () => {
         initializeLocation();
     }, []);
 
-    // Render loading state
-    if (loading) {
+    // Render loading state - include username loading
+    if (loading || isLoadingUsername) {
         const hasActiveFilters = UserMatchingService.detectActiveFilters(filters);
         return (
             <View style={styles.loadingContainer}>
                 <View style={styles.loadingCard}>
                     <ActivityIndicator size="large" color="#ff6ec4" />
                     <Text style={styles.loadingText}>
-                        {hasActiveFilters ? 'Applying filters...' : 'Loading musicians...'}
+                        {isLoadingUsername
+                            ? 'Getting your profile...'
+                            : hasActiveFilters
+                                ? 'Applying filters...'
+                                : 'Loading musicians...'
+                        }
                     </Text>
                     <Text style={styles.loadingSubtext}>
-                        {hasActiveFilters
-                            ? 'Finding musicians that match your preferences'
-                            : `Preparing ${INITIAL_BATCH_SIZE} profiles for instant browsing`
+                        {isLoadingUsername
+                            ? 'Setting up your matching preferences'
+                            : hasActiveFilters
+                                ? 'Finding musicians that match your preferences'
+                                : `Preparing ${INITIAL_BATCH_SIZE} profiles for instant browsing`
                         }
                     </Text>
                 </View>
